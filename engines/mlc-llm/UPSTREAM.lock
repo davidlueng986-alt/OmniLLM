@@ -1,0 +1,107 @@
+# OmniLLM Engine Pack — MLC-LLM UPSTREAM.lock (template)
+# Authority: ENGINE-MLC §1, ENGINE-STANDARD §4
+#
+# Rules:
+# - Architecture docs never pin "latest". Empty digests ⇒ NOT_LOCKED.
+# - Registry must NOT publish QUALIFIED / SUPPORTED without a complete lock
+#   (repository, tag/commit, sourceDigest, tvmCommit, compilerConfigDigest,
+#   targetDigest, generated library/source digests, runtime artifact,
+#   toolchain, ABI, artifactDigest, observedAt, license records).
+# - Builds without a complete lock are exploratory evidence only.
+# - Updating any lock field ⇒ new EngineBuildId; old evidence does not auto-carry.
+# - Compiler/runtime/generated artifact and dependencies keep separate license digests.
+#
+# Status of this file in-tree: NOT_LOCKED (template placeholders).
+
+schemaVersion: 1
+engineId: MLC-LLM
+lockState: NOT_LOCKED
+
+upstream:
+  # Official repository (discovery / license source)
+  repository: "https://github.com/mlc-ai/mlc-llm"
+  # Exact tag and/or full commit SHA (both preferred when available)
+  tag: ""
+  commit: ""
+  # SHA-256 of the pinned MLC-LLM source tree (tarball or git archive)
+  sourceDigest: ""
+  # TVM / Apache TVM commit used by this MLC pin (ENGINE-MLC §1 required lock)
+  tvmCommit: ""
+  tvmSourceDigest: ""
+  # SHA-256 of OmniLLM patch set applied on top of upstream (empty if none)
+  patchDigest: ""
+  # When the lock fields above were observed (ISO-8601 UTC). Empty until locked.
+  observedAt: ""
+
+compiler:
+  # Opaque digest of compiler config (target, opt level, dtype policy, …)
+  compilerConfigDigest: ""
+  # Compiled target triple / device target identity (e.g. opencl-android, vulkan, llvm)
+  target: ""
+  targetDigest: ""
+  # Model compile config (architecture, shape, quantization) digest
+  modelConfigDigest: ""
+  # Generated C++/CUDA/OpenCL source tree digest (when emitted as source)
+  generatedSourceDigest: ""
+  # Generated shared library / module artifact digest
+  generatedLibraryDigest: ""
+
+license:
+  # SPDX or short name recorded at qualification time (runtime/compiler may differ)
+  spdx: "Apache-2.0"
+  licensePath: "LICENSE"
+  # Separate digests for compiler / runtime / generated / dependencies (ENGINE-MLC §1)
+  licenseDigest: ""
+  noticeDigest: ""
+  dependencyReportDigest: ""
+  generatedArtifactLicenseDigest: ""
+
+toolchain:
+  # Must match product ANDROID-NATIVE / platform-policy locks when building for Android
+  ndkVersion: "28.2.13676358"
+  cmakeVersion: "3.22.1"
+  # Opaque digest of the full toolchain fingerprint (NDK+CMake+host+flags template)
+  toolchainDigest: ""
+  hostOs: ""
+  hostArch: ""
+
+build:
+  buildFlags: ""
+  # ABIs included in this build (Android: arm64-v8a, x86_64, …)
+  abis: []
+  # Page-size / 16 KB packaging evidence pointer (digest or evidence id)
+  pageSizeEvidence: ""
+  features:
+    cpu: true
+    opencl: false
+    vulkan: false
+    # Multimodal / vision / structured are unsupported-by-default until cell qualification
+    multimodal: false
+    embedding: false
+    structured: false
+
+artifact:
+  # EngineBuildId string published with this lock (opaque; not a native pointer)
+  engineBuildId: ""
+  # SHA-256 of packaged runtime + generated module artifacts
+  artifactDigest: ""
+  # Runtime-only artifact (MLCEngine runtime library) when split from generated model lib
+  runtimeArtifactDigest: ""
+  symbolIndexDigest: ""
+
+testedProfile:
+  # Labels only — evidence lives in EngineRegistry cells, not this lock alone
+  platform: "android"
+  # Design candidates only; runtime remains UNKNOWN until per-device cells PASS
+  backends: ["cpu", "opencl", "vulkan"]
+  # Compiled model package (not a plain weight-only format)
+  formats: ["mlc-model-lib"]
+  profileId: ""
+
+notes:
+  integrationShape: "compiler + generated model library + runtime adapter (ENGINE-MLC §2)"
+  lockEligibility: "NOT_QUALIFIED_UNTIL_UPSTREAM_LOCK"
+  placementHint: "Untrusted generated code ⇒ different package/UID companion (ADR-007); isolated data-only worker is insufficient"
+  failClosed: "Incomplete lock ⇒ Registry exposure UNKNOWN; dry-load never elevates trust (INV-008)"
+  knownLimitations: "Unpinned backends UNKNOWN; GPU mem/cancel OEM-specific; prefix/embed/multimodal per-cell only"
+  humanPinChecklist: "Fill upstream tag/commit+sourceDigest+tvmCommit, compiler digests, generatedLibraryDigest, runtimeArtifactDigest, toolchainDigest, abis, engineBuildId, observedAt, licenseDigest — see README"

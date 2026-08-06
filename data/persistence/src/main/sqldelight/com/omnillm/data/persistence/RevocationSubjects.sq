@@ -1,0 +1,42 @@
+-- Durable revocation epoch subjects (SEC-006 / INV-017).
+-- Fences principal / token epochs across process restart.
+
+CREATE TABLE revocation_subjects (
+  scope_key TEXT NOT NULL PRIMARY KEY,
+  subject_kind TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  epoch INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  reason TEXT,
+  actor_principal_id TEXT,
+  updated_at_epoch_ms INTEGER NOT NULL
+);
+
+selectByScopeKey:
+SELECT scope_key, subject_kind, subject_id, epoch, state, reason, actor_principal_id,
+       updated_at_epoch_ms
+FROM revocation_subjects
+WHERE scope_key = ?;
+
+listAll:
+SELECT scope_key, subject_kind, subject_id, epoch, state, reason, actor_principal_id,
+       updated_at_epoch_ms
+FROM revocation_subjects
+ORDER BY updated_at_epoch_ms ASC;
+
+upsertSubject:
+INSERT INTO revocation_subjects(
+  scope_key, subject_kind, subject_id, epoch, state, reason, actor_principal_id,
+  updated_at_epoch_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(scope_key) DO UPDATE SET
+  subject_kind = excluded.subject_kind,
+  subject_id = excluded.subject_id,
+  epoch = excluded.epoch,
+  state = excluded.state,
+  reason = excluded.reason,
+  actor_principal_id = excluded.actor_principal_id,
+  updated_at_epoch_ms = excluded.updated_at_epoch_ms;
+
+deleteByScopeKey:
+DELETE FROM revocation_subjects WHERE scope_key = ?;

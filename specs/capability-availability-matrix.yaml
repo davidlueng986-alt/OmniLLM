@@ -1,0 +1,358 @@
+schemaVersion: 1
+statusModel:
+  design:
+  - DESIGN_BASELINE
+  - CONTRACT_REQUIRED
+  buildEligibility:
+  - BUILD_ELIGIBLE
+  - CONTRACT_REQUIRED
+  runtime:
+  - SUPPORTED
+  - UNSUPPORTED
+  - CONDITIONAL
+  - UNKNOWN
+  - TEMPORARILY_UNAVAILABLE
+capabilities:
+- id: DEVICE_DISCOVERY
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: MODEL_ACQUISITION
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: MODEL_IDENTITY
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: COMPATIBILITY_EVALUATION
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - MODEL_IDENTITY
+- id: RECOMMENDATION
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - DEVICE_DISCOVERY
+  - COMPATIBILITY_EVALUATION
+- id: AUTOMATED_CONFIGURATION
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - RECOMMENDATION
+- id: SAFE_INSTALLATION
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - MODEL_ACQUISITION
+  - MODEL_IDENTITY
+- id: TEXT_GENERATION
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: EMBEDDING
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: VISION_INPUT
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: AUDIO_INPUT
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: STRUCTURED_OUTPUT
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - TEXT_GENERATION
+- id: TOOL_CALLING
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - STRUCTURED_OUTPUT
+- id: ENGINE_LIFECYCLE
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: MODEL_LIFECYCLE
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - ENGINE_LIFECYCLE
+- id: SESSION_LIFECYCLE
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - MODEL_LIFECYCLE
+- id: REQUEST_LIFECYCLE
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - SESSION_LIFECYCLE
+- id: JOB_LIFECYCLE
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: CAPABILITY_NEGOTIATION
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: STREAMING
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - REQUEST_LIFECYCLE
+- id: CANCELLATION
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - REQUEST_LIFECYCLE
+- id: DEADLINE
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - REQUEST_LIFECYCLE
+- id: IDEMPOTENCY
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - REQUEST_LIFECYCLE
+- id: RECONNECT
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - IDEMPOTENCY
+- id: HTTP_INTERFACE
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: AIDL_INTERFACE
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: ADMIN_INTERFACE
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: LOCAL_UI_INTERFACE
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: LAN_INTERFACE
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - HTTP_INTERFACE
+- id: MULTI_MODEL_ROUTING
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - CAPABILITY_NEGOTIATION
+- id: FALLBACK_POLICY
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - MULTI_MODEL_ROUTING
+- id: SERVICE_HEALTH
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: ENGINE_HEALTH
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - ENGINE_LIFECYCLE
+- id: MODEL_HEALTH
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - MODEL_LIFECYCLE
+- id: REQUEST_TRACE
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - REQUEST_LIFECYCLE
+- id: JOB_PROGRESS
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - JOB_LIFECYCLE
+- id: RESOURCE_ACCOUNTING
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: PERFORMANCE_MEASUREMENT
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: DIAGNOSTIC_REASONING
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - SERVICE_HEALTH
+- id: EVIDENCE_LABELING
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: ASSET_LIFECYCLE
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn: []
+- id: JOB_RECOVERY
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - JOB_LIFECYCLE
+- id: CONTENT_REPORTING
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - REQUEST_LIFECYCLE
+- id: USABILITY_VALIDATION
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - LOCAL_UI_INTERFACE
+- id: ACCESSIBILITY_VALIDATION
+  designStatus: DESIGN_BASELINE
+  buildEligibility: BUILD_ELIGIBLE
+  runtimeDefault: UNKNOWN
+  qualification: QUALIFICATION_REQUIRED
+  failClosedBehavior: reject execution or expose UNKNOWN until a matching non-expired evidence cell exists
+  dependsOn:
+  - LOCAL_UI_INTERFACE

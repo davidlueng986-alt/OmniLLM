@@ -1,0 +1,21 @@
+-- Authority: specs/database/omnillm-schema.sql + migration-policy.yaml
+-- Control plane is the sole writer (ADR-010).
+
+CREATE TABLE schema_metadata (
+  singleton_id INTEGER NOT NULL PRIMARY KEY,
+  current_version INTEGER NOT NULL,
+  min_readable_version INTEGER NOT NULL,
+  min_writable_version INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+selectMetadata:
+SELECT singleton_id, current_version, min_readable_version, min_writable_version, state, updated_at
+FROM schema_metadata
+WHERE singleton_id = 1;
+
+upsertMetadata:
+INSERT OR REPLACE INTO schema_metadata(
+  singleton_id, current_version, min_readable_version, min_writable_version, state, updated_at
+) VALUES (?, ?, ?, ?, ?, ?);

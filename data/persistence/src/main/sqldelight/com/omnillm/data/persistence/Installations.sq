@@ -1,0 +1,115 @@
+-- Control-plane MODEL_INSTALLATION projection (CORE-MODEL / DATA-OWNERSHIP).
+-- Authority base: specs/database/omnillm-schema.sql#installations
+-- Extension: artifact_package_id, quarantine keys, evaluation dimensions, pin,
+-- reject reason, resource_version for ModelHub catalog projections.
+--
+-- storage_root_key is always unique: pre-READY uses pending/<installation_id>
+-- until atomic promote rewrites to installations/<id> (DATA-STORAGE layout).
+
+CREATE TABLE installations (
+  installation_id TEXT NOT NULL PRIMARY KEY,
+  revision_id TEXT NOT NULL,
+  artifact_package_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  storage_root_key TEXT NOT NULL,
+  trust_epoch INTEGER NOT NULL DEFAULT 0,
+  template_epoch INTEGER NOT NULL DEFAULT 0,
+  tokenizer_epoch INTEGER NOT NULL DEFAULT 0,
+  quarantine_job_id TEXT,
+  quarantine_attempt_id TEXT,
+  authenticity_ok INTEGER,
+  license_ok INTEGER,
+  compatibility_ok INTEGER,
+  performance_recorded INTEGER,
+  placement_class TEXT,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  reject_reason TEXT,
+  resource_version INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+selectByInstallationId:
+SELECT installation_id, revision_id, artifact_package_id, state, storage_root_key,
+       trust_epoch, template_epoch, tokenizer_epoch,
+       quarantine_job_id, quarantine_attempt_id,
+       authenticity_ok, license_ok, compatibility_ok, performance_recorded,
+       placement_class, pinned, reject_reason, resource_version,
+       created_at, updated_at
+FROM installations
+WHERE installation_id = ?;
+
+listByRevisionId:
+SELECT installation_id, revision_id, artifact_package_id, state, storage_root_key,
+       trust_epoch, template_epoch, tokenizer_epoch,
+       quarantine_job_id, quarantine_attempt_id,
+       authenticity_ok, license_ok, compatibility_ok, performance_recorded,
+       placement_class, pinned, reject_reason, resource_version,
+       created_at, updated_at
+FROM installations
+WHERE revision_id = ?
+ORDER BY updated_at ASC;
+
+listAll:
+SELECT installation_id, revision_id, artifact_package_id, state, storage_root_key,
+       trust_epoch, template_epoch, tokenizer_epoch,
+       quarantine_job_id, quarantine_attempt_id,
+       authenticity_ok, license_ok, compatibility_ok, performance_recorded,
+       placement_class, pinned, reject_reason, resource_version,
+       created_at, updated_at
+FROM installations
+ORDER BY updated_at ASC;
+
+listByState:
+SELECT installation_id, revision_id, artifact_package_id, state, storage_root_key,
+       trust_epoch, template_epoch, tokenizer_epoch,
+       quarantine_job_id, quarantine_attempt_id,
+       authenticity_ok, license_ok, compatibility_ok, performance_recorded,
+       placement_class, pinned, reject_reason, resource_version,
+       created_at, updated_at
+FROM installations
+WHERE state = ?
+ORDER BY updated_at ASC;
+
+listCatalog:
+SELECT installation_id, revision_id, artifact_package_id, state, storage_root_key,
+       trust_epoch, template_epoch, tokenizer_epoch,
+       quarantine_job_id, quarantine_attempt_id,
+       authenticity_ok, license_ok, compatibility_ok, performance_recorded,
+       placement_class, pinned, reject_reason, resource_version,
+       created_at, updated_at
+FROM installations
+WHERE state != 'DELETED'
+ORDER BY updated_at DESC;
+
+upsertInstallation:
+INSERT INTO installations(
+  installation_id, revision_id, artifact_package_id, state, storage_root_key,
+  trust_epoch, template_epoch, tokenizer_epoch,
+  quarantine_job_id, quarantine_attempt_id,
+  authenticity_ok, license_ok, compatibility_ok, performance_recorded,
+  placement_class, pinned, reject_reason, resource_version,
+  created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(installation_id) DO UPDATE SET
+  revision_id = excluded.revision_id,
+  artifact_package_id = excluded.artifact_package_id,
+  state = excluded.state,
+  storage_root_key = excluded.storage_root_key,
+  trust_epoch = excluded.trust_epoch,
+  template_epoch = excluded.template_epoch,
+  tokenizer_epoch = excluded.tokenizer_epoch,
+  quarantine_job_id = excluded.quarantine_job_id,
+  quarantine_attempt_id = excluded.quarantine_attempt_id,
+  authenticity_ok = excluded.authenticity_ok,
+  license_ok = excluded.license_ok,
+  compatibility_ok = excluded.compatibility_ok,
+  performance_recorded = excluded.performance_recorded,
+  placement_class = excluded.placement_class,
+  pinned = excluded.pinned,
+  reject_reason = excluded.reject_reason,
+  resource_version = excluded.resource_version,
+  updated_at = excluded.updated_at;
+
+deleteByInstallationId:
+DELETE FROM installations WHERE installation_id = ?;

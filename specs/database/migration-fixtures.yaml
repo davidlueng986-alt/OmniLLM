@@ -1,0 +1,37 @@
+schemaVersion: 1
+authority: specs/database/migration-policy.yaml
+forwardMigrations:
+- id: MIG-001-TO-002
+  fromVersion: 1
+  toVersion: 2
+  sql: specs/database/migrations/0001_to_0002.sql
+  expectedTerminal: COMMITTED
+  expectedMetadata:
+    currentVersion: 2
+    minReadableVersion: 2
+    minWritableVersion: 2
+killMatrix:
+- afterStep: bootstrap-ledger
+  allowedRecovery:
+  - version 1 remains authoritative
+  - resume identical plan digest
+- afterStep: record-started
+  allowedRecovery:
+  - roll back to verified version 1
+  - resume identical plan digest
+  - quarantine on fingerprint mismatch
+- afterStep: apply-schema
+  allowedRecovery:
+  - atomically commit metadata/history/attempt
+  - roll back to verified version 1
+  - quarantine on ambiguous fingerprint
+- afterStep: commit-ledgers
+  allowedRecovery:
+  - version 2 is authoritative and the matching history row exists
+negativeFixtures:
+- mutation: change plan digest after STARTED
+  expectedState: QUARANTINED
+- mutation: insert history while attempt is not COMMITTED
+  expectedError: STATE_CONFLICT
+- mutation: expose writer when metadata state is QUARANTINED
+  expectedError: STATE_CONFLICT

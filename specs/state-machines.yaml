@@ -1,0 +1,2413 @@
+schemaVersion: 2
+transitionEncoding: explicit-object
+machines:
+- id: REQUEST
+  initial: RECEIVED
+  terminal:
+  - COMPLETED
+  - FAILED
+  - CANCELLED
+  - ABORTED_UNCERTAIN
+  states:
+  - RECEIVED
+  - CLAIMED
+  - PLANNING
+  - QUEUED
+  - RESERVED
+  - COMMITTING
+  - PREPARED
+  - STARTING
+  - STREAMING
+  - TERMINATING
+  - RECONCILING
+  - COMPLETED
+  - FAILED
+  - CANCELLED
+  - ABORTED_UNCERTAIN
+  guards:
+    claimMatchesCanonicalHash: same owner+operation+idempotency key either has same canonical hash or conflicts
+    leaseValid: reservation issuer/runtime epoch, owner, resource vector and deadline are valid
+    commitKnown: commit ledger has durable unique result
+    streamMayStart: prepared handle is unconsumed and revocation epoch is current
+    cancelPending: durable request ledger records cancellation intent for this request/operation epoch
+  actions:
+    persistState: append durable request transition with causation id
+    releaseTemporary: release only non-transferred reservation
+    poisonOrRollback: rollback when engine proves capability; otherwise poison/destroy target session
+    reconcileCommit: query commit ledger/worker journal; never blindly replay non-idempotent mutation
+    recordCancelIntent: durably record cancellation intent before reconciliation or additional start work
+    abortPreparedForCancellation: idempotently abort prepared operation; rollback if proved, otherwise poison/destroy target
+      session
+  invariants:
+  - requestId is caller generated and owner bound
+  - exactly one terminal state is durable
+  - pre-commit rejection has no session/KV mutation
+  - post-commit failure is rollback-or-poison, not byte-for-byte guarantee
+  - resident allocations remain charged after request terminal
+  - SSE socket write is not application delivery
+  - cancellation intent survives reply loss/reconciliation and cannot return to a startable state
+  transitions:
+  - id: REQ-001
+    from: RECEIVED
+    event: CLAIM_SUCCEEDED
+    to: CLAIMED
+    guard: claimMatchesCanonicalHash
+    actions:
+    - persistState
+  - id: REQ-002
+    from: RECEIVED
+    event: VALIDATION_FAILED
+    to: FAILED
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-003
+    from: RECEIVED
+    event: CLIENT_CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-004
+    from: CLAIMED
+    event: BEGIN_PLANNING
+    to: PLANNING
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-005
+    from: CLAIMED
+    event: CLAIM_CONFLICT
+    to: FAILED
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-006
+    from: CLAIMED
+    event: CLIENT_CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-007
+    from: PLANNING
+    event: PLAN_READY
+    to: QUEUED
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-008
+    from: PLANNING
+    event: PLAN_FAILED
+    to: FAILED
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-009
+    from: PLANNING
+    event: CLIENT_CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-010
+    from: QUEUED
+    event: ADMISSION_GRANTED
+    to: RESERVED
+    guard: leaseValid
+    actions:
+    - persistState
+  - id: REQ-011
+    from: QUEUED
+    event: ADMISSION_REJECTED
+    to: FAILED
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-012
+    from: QUEUED
+    event: CLIENT_CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-013
+    from: RESERVED
+    event: BEGIN_COMMIT
+    to: COMMITTING
+    guard: leaseValid
+    actions:
+    - persistState
+  - id: REQ-014
+    from: RESERVED
+    event: LEASE_EXPIRED
+    to: FAILED
+    guard: 'true'
+    actions:
+    - releaseTemporary
+    - persistState
+  - id: REQ-015
+    from: RESERVED
+    event: CLIENT_CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - releaseTemporary
+    - persistState
+  - id: REQ-016
+    from: COMMITTING
+    event: COMMIT_CONFIRMED
+    to: PREPARED
+    guard: commitKnown
+    actions:
+    - persistState
+  - id: REQ-017
+    from: COMMITTING
+    event: COMMIT_REJECTED
+    to: FAILED
+    guard: 'true'
+    actions:
+    - releaseTemporary
+    - persistState
+  - id: REQ-018
+    from: COMMITTING
+    event: COMMIT_RESULT_UNKNOWN
+    to: RECONCILING
+    guard: 'true'
+    actions:
+    - reconcileCommit
+    - persistState
+  - id: REQ-019
+    from: COMMITTING
+    event: CLIENT_CANCEL
+    to: RECONCILING
+    guard: 'true'
+    actions:
+    - recordCancelIntent
+    - reconcileCommit
+    - persistState
+  - id: REQ-020
+    from: RECONCILING
+    event: COMMIT_FOUND_PREPARED
+    to: PREPARED
+    guard: commitKnown && !cancelPending
+    actions:
+    - persistState
+  - id: REQ-020C
+    from: RECONCILING
+    event: COMMIT_FOUND_PREPARED_WITH_CANCEL
+    to: TERMINATING
+    guard: commitKnown && cancelPending
+    actions:
+    - abortPreparedForCancellation
+    - releaseTemporary
+    - persistState
+  - id: REQ-021
+    from: RECONCILING
+    event: COMMIT_FOUND_ABORTED
+    to: FAILED
+    guard: commitKnown && !cancelPending
+    actions:
+    - releaseTemporary
+    - persistState
+  - id: REQ-021C
+    from: RECONCILING
+    event: COMMIT_FOUND_ABORTED_WITH_CANCEL
+    to: CANCELLED
+    guard: commitKnown && cancelPending
+    actions:
+    - releaseTemporary
+    - persistState
+  - id: REQ-022
+    from: RECONCILING
+    event: RECONCILIATION_EXHAUSTED
+    to: ABORTED_UNCERTAIN
+    guard: 'true'
+    actions:
+    - poisonOrRollback
+    - persistState
+  - id: REQ-023
+    from: PREPARED
+    event: START_ACCEPTED
+    to: STARTING
+    guard: streamMayStart
+    actions:
+    - persistState
+  - id: REQ-024
+    from: PREPARED
+    event: START_REJECTED
+    to: FAILED
+    guard: 'true'
+    actions:
+    - poisonOrRollback
+    - releaseTemporary
+    - persistState
+  - id: REQ-025
+    from: PREPARED
+    event: CLIENT_CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - poisonOrRollback
+    - releaseTemporary
+    - persistState
+  - id: REQ-026
+    from: STARTING
+    event: FIRST_EVENT_COMMITTED
+    to: STREAMING
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-027
+    from: STARTING
+    event: START_FAILED
+    to: FAILED
+    guard: 'true'
+    actions:
+    - poisonOrRollback
+    - releaseTemporary
+    - persistState
+  - id: REQ-028
+    from: STARTING
+    event: CLIENT_CANCEL
+    to: TERMINATING
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-029
+    from: STREAMING
+    event: ENGINE_TERMINAL
+    to: TERMINATING
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-030
+    from: STREAMING
+    event: CLIENT_CANCEL
+    to: TERMINATING
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-031
+    from: STREAMING
+    event: DELIVERY_LOST
+    to: TERMINATING
+    guard: 'true'
+    actions:
+    - persistState
+  - id: REQ-032
+    from: TERMINATING
+    event: TERMINAL_SUCCESS
+    to: COMPLETED
+    guard: 'true'
+    actions:
+    - releaseTemporary
+    - persistState
+  - id: REQ-033
+    from: TERMINATING
+    event: TERMINAL_FAILURE
+    to: FAILED
+    guard: 'true'
+    actions:
+    - poisonOrRollback
+    - releaseTemporary
+    - persistState
+  - id: REQ-034
+    from: TERMINATING
+    event: TERMINAL_CANCELLED
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - poisonOrRollback
+    - releaseTemporary
+    - persistState
+- id: SESSION
+  initial: NEW
+  terminal:
+  - CLOSED
+  states:
+  - NEW
+  - ACTIVE
+  - DRAINING
+  - POISONED
+  - ORPHANED
+  - CLOSING
+  - CLOSED
+  guards:
+    ownerAndEpochMatch: session owner, revision, load key and epoch match request
+    noActiveOperations: active operation reference count is zero
+  actions:
+    chargeAllocation: attach AllocationHandle before publishing session
+    blockNewUse: remove session from pool
+    destroyNativeState: close native session or kill owning worker
+    releaseAllocation: release only after resource barrier
+  invariants:
+  - session is partitioned by owner, revision, load key, tokenizer/template epoch and engine build
+  - poisoned or orphaned sessions never return to pool
+  - KV remains charged while session exists
+  - close is idempotent
+  transitions:
+  - id: SES-001
+    from: NEW
+    event: PUBLISH
+    to: ACTIVE
+    guard: ownerAndEpochMatch
+    actions:
+    - chargeAllocation
+  - id: SES-002
+    from: NEW
+    event: CREATE_FAILED
+    to: CLOSING
+    guard: 'true'
+    actions:
+    - blockNewUse
+  - id: SES-003
+    from: ACTIVE
+    event: DRAIN_REQUESTED
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - blockNewUse
+  - id: SES-004
+    from: ACTIVE
+    event: MUTATION_UNCERTAIN
+    to: POISONED
+    guard: 'true'
+    actions:
+    - blockNewUse
+  - id: SES-005
+    from: ACTIVE
+    event: SUPERVISOR_LOST
+    to: ORPHANED
+    guard: 'true'
+    actions:
+    - blockNewUse
+  - id: SES-006
+    from: DRAINING
+    event: QUIESCENT
+    to: CLOSING
+    guard: noActiveOperations
+    actions:
+    - destroyNativeState
+  - id: SES-007
+    from: POISONED
+    event: CLOSE
+    to: CLOSING
+    guard: 'true'
+    actions:
+    - destroyNativeState
+  - id: SES-008
+    from: ORPHANED
+    event: CLOSE_OR_KILL
+    to: CLOSING
+    guard: 'true'
+    actions:
+    - destroyNativeState
+  - id: SES-009
+    from: CLOSING
+    event: RESOURCE_BARRIER_CONFIRMED
+    to: CLOSED
+    guard: 'true'
+    actions:
+    - releaseAllocation
+  - id: SES-010
+    from: NEW
+    event: CLOSE
+    to: CLOSING
+    guard: 'true'
+    actions:
+    - destroyNativeState
+- id: RESERVATION
+  initial: HELD
+  terminal:
+  - COMMITTED
+  - RELEASED
+  - EXPIRED
+  states:
+  - HELD
+  - CONVERTING
+  - COMMITTED
+  - RELEASING
+  - RELEASED
+  - EXPIRED
+  guards:
+    issuerEpochValid: issuer boot/runtime epoch and nonce match
+    vectorWithinReservation: converted allocation plus released remainder equals original vector
+    beforeDeadline: monotonic deadline not passed
+  actions:
+    atomicConvert: atomically create AllocationHandle and reduce reservation
+    releaseRemainder: release only unconverted dimensions
+    auditConservation: record checked-arithmetic conservation proof
+  invariants:
+  - all vector fields are non-negative and unit-normalized
+  - reserved+allocated+free equals policy capacity per dimension
+  - planned eviction is not credited before release barrier
+  - conversion is idempotent by reservation id
+  transitions:
+  - id: RES-001
+    from: HELD
+    event: COMMIT
+    to: CONVERTING
+    guard: issuerEpochValid && beforeDeadline && vectorWithinReservation
+    actions:
+    - atomicConvert
+  - id: RES-002
+    from: CONVERTING
+    event: CONVERSION_DURABLE
+    to: COMMITTED
+    guard: vectorWithinReservation
+    actions:
+    - releaseRemainder
+    - auditConservation
+  - id: RES-003
+    from: HELD
+    event: RELEASE
+    to: RELEASING
+    guard: issuerEpochValid
+    actions:
+    - releaseRemainder
+  - id: RES-004
+    from: RELEASING
+    event: RELEASE_BARRIER
+    to: RELEASED
+    guard: 'true'
+    actions:
+    - auditConservation
+  - id: RES-005
+    from: HELD
+    event: DEADLINE_PASSED
+    to: EXPIRED
+    guard: 'true'
+    actions:
+    - releaseRemainder
+    - auditConservation
+- id: JOB
+  initial: QUEUED
+  terminal:
+  - SUCCEEDED
+  - FAILED
+  - CANCELLED
+  states:
+  - QUEUED
+  - RUNNING
+  - PAUSED_WAITING_INPUT
+  - PAUSED_WAITING_NETWORK
+  - PAUSED_WAITING_FOREGROUND
+  - RECOVERING
+  - SUCCEEDED
+  - FAILED
+  - CANCELLED
+  guards:
+    attemptClaimed: unique owner+operation+idempotency key and attempt number
+    checkpointValid: checkpoint belongs to job, attempt and canonical payload hash
+  actions:
+    persistTransition: update job, attempt, event and checkpoint in one transaction
+    releaseEphemeralHandles: release non-durable FD/lease
+    resumeFromCheckpoint: reopen only durable URI/materialized artifact
+  invariants:
+  - one active attempt per job
+  - events and current state are transactionally aligned
+  - reply loss returns the existing command/job result
+  - non-persistable input cannot be promised across process death
+  transitions:
+  - id: JOB-001
+    from: QUEUED
+    event: START
+    to: RUNNING
+    guard: attemptClaimed
+    actions:
+    - persistTransition
+  - id: JOB-002
+    from: QUEUED
+    event: CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - persistTransition
+  - id: JOB-003
+    from: RUNNING
+    event: WAIT_INPUT
+    to: PAUSED_WAITING_INPUT
+    guard: 'true'
+    actions:
+    - persistTransition
+    - releaseEphemeralHandles
+  - id: JOB-004
+    from: RUNNING
+    event: WAIT_NETWORK
+    to: PAUSED_WAITING_NETWORK
+    guard: 'true'
+    actions:
+    - persistTransition
+  - id: JOB-005
+    from: RUNNING
+    event: WAIT_FOREGROUND
+    to: PAUSED_WAITING_FOREGROUND
+    guard: 'true'
+    actions:
+    - persistTransition
+  - id: JOB-006
+    from: RUNNING
+    event: PROCESS_LOST
+    to: RECOVERING
+    guard: 'true'
+    actions:
+    - persistTransition
+  - id: JOB-007
+    from: RECOVERING
+    event: CHECKPOINT_READY
+    to: RUNNING
+    guard: checkpointValid
+    actions:
+    - resumeFromCheckpoint
+    - persistTransition
+  - id: JOB-008
+    from: RECOVERING
+    event: CHECKPOINT_INVALID
+    to: FAILED
+    guard: 'true'
+    actions:
+    - persistTransition
+  - id: JOB-009
+    from: PAUSED_WAITING_INPUT
+    event: INPUT_AVAILABLE
+    to: RUNNING
+    guard: checkpointValid
+    actions:
+    - resumeFromCheckpoint
+    - persistTransition
+  - id: JOB-010
+    from: PAUSED_WAITING_NETWORK
+    event: NETWORK_AVAILABLE
+    to: RUNNING
+    guard: checkpointValid
+    actions:
+    - resumeFromCheckpoint
+    - persistTransition
+  - id: JOB-011
+    from: PAUSED_WAITING_FOREGROUND
+    event: FOREGROUND_ALLOWED
+    to: RUNNING
+    guard: checkpointValid
+    actions:
+    - resumeFromCheckpoint
+    - persistTransition
+  - id: JOB-012
+    from: RUNNING
+    event: SUCCESS
+    to: SUCCEEDED
+    guard: 'true'
+    actions:
+    - persistTransition
+  - id: JOB-013
+    from: RUNNING
+    event: FAILURE
+    to: FAILED
+    guard: 'true'
+    actions:
+    - persistTransition
+  - id: JOB-014
+    from: RUNNING
+    event: CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - persistTransition
+  - id: JOB-015
+    from: PAUSED_WAITING_INPUT
+    event: CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - persistTransition
+    - releaseEphemeralHandles
+  - id: JOB-016
+    from: PAUSED_WAITING_INPUT
+    event: INPUT_PERMANENTLY_UNAVAILABLE
+    to: FAILED
+    guard: 'true'
+    actions:
+    - persistTransition
+    - releaseEphemeralHandles
+  - id: JOB-017
+    from: PAUSED_WAITING_NETWORK
+    event: CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - persistTransition
+  - id: JOB-018
+    from: PAUSED_WAITING_NETWORK
+    event: POLICY_OR_DEADLINE_FAILED
+    to: FAILED
+    guard: 'true'
+    actions:
+    - persistTransition
+  - id: JOB-019
+    from: PAUSED_WAITING_FOREGROUND
+    event: CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - persistTransition
+  - id: JOB-020
+    from: PAUSED_WAITING_FOREGROUND
+    event: POLICY_OR_DEADLINE_FAILED
+    to: FAILED
+    guard: 'true'
+    actions:
+    - persistTransition
+  - id: JOB-021
+    from: RECOVERING
+    event: CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - persistTransition
+    - releaseEphemeralHandles
+- id: MODEL_INSTALLATION
+  initial: DISCOVERED
+  terminal:
+  - DELETED
+  states:
+  - DISCOVERED
+  - ACQUIRING
+  - QUARANTINED
+  - VERIFYING
+  - COMPATIBILITY_CHECK
+  - READY
+  - DRAINING
+  - REVOKED
+  - CORRUPT
+  - REJECTED
+  - DELETING
+  - DELETED
+  guards:
+    bytesMaterialized: all declared files exist in runtime-owned quarantine
+    identityVerified: size and digest match canonical artifact manifest
+    trustEvaluated: effective trust and runtime placement are computed without compatibility promotion
+    noLiveReferences: request/model/session reference count is zero
+  actions:
+    atomicPromote: fsync files and parent then atomic move before READY transaction
+    recomputeTrust: re-evaluate active typed assertions and revocations
+    drainReferences: block new loads and wait/cancel by policy
+    secureDeleteMetadata: delete DB/file references with reconciliation marker
+    cleanupPartialAcquisition: cancel producer, close handles and retain/delete quarantine by retention policy
+    markRejected: persist bounded reason and make installation ineligible for load
+  invariants:
+  - READY bytes are immutable or freshly verified before privileged load
+  - compatibility evidence never upgrades source trust
+  - installation assertion must belong to the same revision
+  - delete cannot remove a pinned revision
+  - every non-ready partial installation has cancel/delete/retention convergence
+  transitions:
+  - id: MOD-001
+    from: DISCOVERED
+    event: BEGIN_ACQUIRE
+    to: ACQUIRING
+    guard: 'true'
+    actions: []
+  - id: MOD-002
+    from: ACQUIRING
+    event: MATERIALIZED
+    to: QUARANTINED
+    guard: bytesMaterialized
+    actions: []
+  - id: MOD-003
+    from: ACQUIRING
+    event: ACQUIRE_FAILED
+    to: REJECTED
+    guard: 'true'
+    actions: []
+  - id: MOD-004
+    from: QUARANTINED
+    event: BEGIN_VERIFY
+    to: VERIFYING
+    guard: 'true'
+    actions: []
+  - id: MOD-005
+    from: VERIFYING
+    event: IDENTITY_OK
+    to: COMPATIBILITY_CHECK
+    guard: identityVerified
+    actions:
+    - recomputeTrust
+  - id: MOD-006
+    from: VERIFYING
+    event: IDENTITY_FAILED
+    to: REJECTED
+    guard: 'true'
+    actions: []
+  - id: MOD-007
+    from: COMPATIBILITY_CHECK
+    event: PROMOTE
+    to: READY
+    guard: trustEvaluated
+    actions:
+    - atomicPromote
+  - id: MOD-008
+    from: COMPATIBILITY_CHECK
+    event: UNSUPPORTED
+    to: REJECTED
+    guard: 'true'
+    actions: []
+  - id: MOD-009
+    from: READY
+    event: REVOCATION_EFFECTIVE
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - recomputeTrust
+    - drainReferences
+  - id: MOD-010
+    from: READY
+    event: INTEGRITY_FAILED
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - drainReferences
+  - id: MOD-011
+    from: DRAINING
+    event: DRAINED_REVOKED
+    to: REVOKED
+    guard: noLiveReferences
+    actions: []
+  - id: MOD-012
+    from: DRAINING
+    event: DRAINED_CORRUPT
+    to: CORRUPT
+    guard: noLiveReferences
+    actions: []
+  - id: MOD-013
+    from: READY
+    event: DELETE_REQUESTED
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - drainReferences
+  - id: MOD-014
+    from: REVOKED
+    event: DELETE_REQUESTED
+    to: DELETING
+    guard: 'true'
+    actions: []
+  - id: MOD-015
+    from: CORRUPT
+    event: DELETE_REQUESTED
+    to: DELETING
+    guard: 'true'
+    actions: []
+  - id: MOD-016
+    from: REJECTED
+    event: DELETE_REQUESTED
+    to: DELETING
+    guard: 'true'
+    actions: []
+  - id: MOD-017
+    from: DRAINING
+    event: DRAINED_DELETE
+    to: DELETING
+    guard: noLiveReferences
+    actions: []
+  - id: MOD-018
+    from: DELETING
+    event: DELETE_COMMITTED
+    to: DELETED
+    guard: 'true'
+    actions:
+    - secureDeleteMetadata
+  - id: MOD-019
+    from: DISCOVERED
+    event: DELETE_REQUESTED
+    to: DELETING
+    guard: 'true'
+    actions:
+    - secureDeleteMetadata
+  - id: MOD-020
+    from: ACQUIRING
+    event: CANCEL_REQUESTED
+    to: REJECTED
+    guard: 'true'
+    actions:
+    - cleanupPartialAcquisition
+    - markRejected
+  - id: MOD-021
+    from: QUARANTINED
+    event: DELETE_REQUESTED
+    to: DELETING
+    guard: 'true'
+    actions:
+    - cleanupPartialAcquisition
+  - id: MOD-022
+    from: QUARANTINED
+    event: RETENTION_CLEANUP
+    to: DELETING
+    guard: 'true'
+    actions:
+    - cleanupPartialAcquisition
+  - id: MOD-023
+    from: VERIFYING
+    event: CANCEL_REQUESTED
+    to: REJECTED
+    guard: 'true'
+    actions:
+    - cleanupPartialAcquisition
+    - markRejected
+  - id: MOD-024
+    from: COMPATIBILITY_CHECK
+    event: CANCEL_REQUESTED
+    to: REJECTED
+    guard: 'true'
+    actions:
+    - cleanupPartialAcquisition
+    - markRejected
+- id: LOADED_MODEL
+  initial: PLANNED
+  terminal:
+  - UNLOADED
+  - FAILED
+  states:
+  - PLANNED
+  - RESERVED
+  - LOADING
+  - LOADED
+  - DRAINING
+  - UNLOADING
+  - UNLOADED
+  - FAILED_DRAINING
+  - FAILED
+  guards:
+    loadEnvelopeMatched: reservation dominates the signed/qualified load envelope
+    placementQualified: all required phases are qualified for chosen process and workload envelope
+    noLiveReferences: model and session reference counts are zero
+  actions:
+    attachAllocation: convert reservation to resident model allocation
+    blockNewSessions: remove model from routing candidates
+    releaseAfterBarrier: release allocation only after native/process resource barrier
+    beginFailedLoadCleanup: fence unpublished handle, release partial native resources and preserve charge until barrier
+    releaseFailedLoadAfterBarrier: release reservation/partial AllocationHandle only after cleanup barrier and audit conservation
+  invariants:
+  - placement is selected before load for the full required phase set
+  - model weights remain charged while loaded
+  - unload is idempotent and drain-aware
+  - load failure cannot publish a usable handle
+  - failed load remains charged until partial-resource release barrier
+  transitions:
+  - id: LOAD-001
+    from: PLANNED
+    event: ADMISSION_GRANTED
+    to: RESERVED
+    guard: loadEnvelopeMatched
+    actions: []
+  - id: LOAD-002
+    from: PLANNED
+    event: ADMISSION_REJECTED
+    to: FAILED
+    guard: 'true'
+    actions: []
+  - id: LOAD-003
+    from: RESERVED
+    event: BEGIN_LOAD
+    to: LOADING
+    guard: placementQualified
+    actions: []
+  - id: LOAD-004
+    from: LOADING
+    event: LOAD_SUCCEEDED
+    to: LOADED
+    guard: loadEnvelopeMatched
+    actions:
+    - attachAllocation
+  - id: LOAD-005
+    from: LOADING
+    event: LOAD_FAILED
+    to: FAILED_DRAINING
+    guard: 'true'
+    actions:
+    - beginFailedLoadCleanup
+  - id: LOAD-005B
+    from: FAILED_DRAINING
+    event: FAILURE_RELEASE_BARRIER
+    to: FAILED
+    guard: 'true'
+    actions:
+    - releaseFailedLoadAfterBarrier
+  - id: LOAD-006
+    from: LOADED
+    event: DRAIN_REQUESTED
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - blockNewSessions
+  - id: LOAD-007
+    from: DRAINING
+    event: QUIESCENT
+    to: UNLOADING
+    guard: noLiveReferences
+    actions: []
+  - id: LOAD-008
+    from: UNLOADING
+    event: RESOURCE_BARRIER
+    to: UNLOADED
+    guard: 'true'
+    actions:
+    - releaseAfterBarrier
+- id: COMMIT
+  initial: INTENT_RECORDED
+  terminal:
+  - COMMITTED
+  - ABORTED
+  - UNCERTAIN_QUARANTINED
+  states:
+  - INTENT_RECORDED
+  - EXECUTING
+  - RESULT_RECORDED
+  - RECONCILING
+  - COMMITTED
+  - ABORTED
+  - UNCERTAIN_QUARANTINED
+  guards:
+    bindingValid: commit id is bound to owner, request, plan, source session epoch, target policy, engine build and lease
+    oneShot: commit nonce has not been consumed
+    resultAuthoritative: durable runtime ledger or attested worker journal has one canonical result
+  actions:
+    recordIntent: create INTENT_RECORDED with canonical input, reservation/lease, boot/runtime/revocation epochs and one-shot
+      nonce before any worker side effect
+    executeIdempotently: worker claims commit id before mutation
+    recordResult: persist result/session handle and commit_resource_bindings allocation transfer in one recoverable boundary
+    reconcileExisting: query the existing CommitId in the runtime ledger and epoch-bound worker journal without replay
+    quarantineAffectedSessions: poison source/target and reconcile allocation
+  invariants:
+  - same commit id and same input returns same result
+  - same commit id with different input conflicts
+  - unknown outcome is never blindly retried
+  - reply loss is resolved by queryCommit
+  - INTENT_RECORDED exists before EXECUTE is delivered to a worker
+  - stale runtime/revocation epoch and late worker reply fail closed
+  transitions:
+  - id: COM-001
+    from: INTENT_RECORDED
+    event: EXECUTE
+    to: EXECUTING
+    guard: bindingValid && oneShot
+    actions:
+    - executeIdempotently
+  - id: COM-002
+    from: EXECUTING
+    event: RESULT_AVAILABLE
+    to: RESULT_RECORDED
+    guard: resultAuthoritative
+    actions:
+    - recordResult
+  - id: COM-003
+    from: RESULT_RECORDED
+    event: PUBLISH_SUCCESS
+    to: COMMITTED
+    guard: resultAuthoritative
+    actions: []
+  - id: COM-004
+    from: RESULT_RECORDED
+    event: PUBLISH_ABORT
+    to: ABORTED
+    guard: resultAuthoritative
+    actions: []
+  - id: COM-005
+    from: EXECUTING
+    event: REPLY_OR_WORKER_LOST
+    to: RECONCILING
+    guard: 'true'
+    actions:
+    - reconcileExisting
+  - id: COM-006
+    from: RECONCILING
+    event: RESULT_FOUND_SUCCESS
+    to: COMMITTED
+    guard: resultAuthoritative
+    actions:
+    - recordResult
+  - id: COM-007
+    from: RECONCILING
+    event: RESULT_FOUND_ABORT
+    to: ABORTED
+    guard: resultAuthoritative
+    actions:
+    - recordResult
+  - id: COM-008
+    from: RECONCILING
+    event: RESULT_UNPROVABLE
+    to: UNCERTAIN_QUARANTINED
+    guard: 'true'
+    actions:
+    - quarantineAffectedSessions
+- id: RUNTIME
+  initial: STOPPED
+  terminal: []
+  states:
+  - STOPPED
+  - STARTING
+  - RECOVERING
+  - READY
+  - DEGRADED
+  - DRAINING
+  - WAITING_FOR_USER_FOREGROUND
+  - FAULTED
+  guards:
+    epochAdvanced: new runtime epoch is durably greater than previous
+    foregroundLegal: platform and user-visible start conditions permit service
+    recoveryComplete: DB/journal/worker reconciliation and trust refresh complete
+  actions:
+    fenceOldWorkers: publish new epoch and require supervisor-binder exit
+    reconcileDurableState: rebuild jobs, requests, allocations and commands
+    publishHealth: expose reasoned health without secrets
+    drain: stop acceptance and settle active work by policy
+  invariants:
+  - only READY/DEGRADED accept requests permitted by health policy
+  - old epoch commands always fail closed
+  - platform restriction is not bypassed by automatic restart
+  - recovery SLO is measured, not unconditional
+  transitions:
+  - id: RUN-001
+    from: STOPPED
+    event: LEGAL_START
+    to: STARTING
+    guard: foregroundLegal && epochAdvanced
+    actions:
+    - fenceOldWorkers
+  - id: RUN-002
+    from: STARTING
+    event: BEGIN_RECOVERY
+    to: RECOVERING
+    guard: 'true'
+    actions:
+    - reconcileDurableState
+  - id: RUN-003
+    from: RECOVERING
+    event: RECOVERY_OK
+    to: READY
+    guard: recoveryComplete
+    actions:
+    - publishHealth
+  - id: RUN-004
+    from: RECOVERING
+    event: RECOVERY_PARTIAL
+    to: DEGRADED
+    guard: 'true'
+    actions:
+    - publishHealth
+  - id: RUN-005
+    from: RECOVERING
+    event: RECOVERY_FAILED
+    to: FAULTED
+    guard: 'true'
+    actions:
+    - publishHealth
+  - id: RUN-006
+    from: READY
+    event: HEALTH_DEGRADED
+    to: DEGRADED
+    guard: 'true'
+    actions:
+    - publishHealth
+  - id: RUN-007
+    from: DEGRADED
+    event: HEALTH_RECOVERED
+    to: READY
+    guard: 'true'
+    actions:
+    - publishHealth
+  - id: RUN-008
+    from: READY
+    event: STOP_REQUESTED
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - drain
+  - id: RUN-009
+    from: DEGRADED
+    event: STOP_REQUESTED
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - drain
+  - id: RUN-010
+    from: DRAINING
+    event: DRAIN_COMPLETE
+    to: STOPPED
+    guard: 'true'
+    actions: []
+  - id: RUN-011
+    from: STARTING
+    event: FOREGROUND_NOT_ALLOWED
+    to: WAITING_FOR_USER_FOREGROUND
+    guard: 'true'
+    actions:
+    - publishHealth
+  - id: RUN-012
+    from: WAITING_FOR_USER_FOREGROUND
+    event: USER_START
+    to: STARTING
+    guard: foregroundLegal
+    actions: []
+  - id: RUN-013
+    from: FAULTED
+    event: RESET_OR_STOP
+    to: STOPPED
+    guard: 'true'
+    actions: []
+- id: REVOCATION
+  initial: ACTIVE
+  terminal:
+  - ENFORCED
+  states:
+  - ACTIVE
+  - REVOCATION_REQUESTED
+  - FENCING
+  - DRAINING
+  - ROTATING_SECRETS
+  - ENFORCED
+  guards:
+    requestAuthorised: revocation command is owner/admin authorised and durable
+    epochAdvanced: principal/trust revocation epoch increased durably
+    noOldCapability: no active stream, queue item, session or token at old epoch remains usable
+  actions:
+    rejectNewUse: fail new operations at old epoch
+    cancelAndDrain: remove queued work, cancel active work, poison/close owned sessions
+    rotateSecrets: rotate token/cert/broker capability where applicable
+    audit: append actor, target, reason and completion evidence
+  invariants:
+  - revocation affects both new and already-authorised capability according to explicit deadline
+  - closing risky mode cannot restore past confidentiality
+  - trust downgrade may require worker kill and fresh verification
+  - completion is not declared while old epoch capability remains
+  transitions:
+  - id: REV-001
+    from: ACTIVE
+    event: REVOKE
+    to: REVOCATION_REQUESTED
+    guard: requestAuthorised
+    actions:
+    - audit
+  - id: REV-002
+    from: REVOCATION_REQUESTED
+    event: EPOCH_COMMITTED
+    to: FENCING
+    guard: epochAdvanced
+    actions:
+    - rejectNewUse
+  - id: REV-003
+    from: FENCING
+    event: BEGIN_DRAIN
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - cancelAndDrain
+  - id: REV-004
+    from: DRAINING
+    event: DRAIN_COMPLETE
+    to: ROTATING_SECRETS
+    guard: noOldCapability
+    actions:
+    - rotateSecrets
+  - id: REV-005
+    from: ROTATING_SECRETS
+    event: ROTATION_COMPLETE
+    to: ENFORCED
+    guard: noOldCapability
+    actions:
+    - audit
+- id: ASSET
+  initial: CREATED
+  terminal:
+  - CONSUMED
+  - EXPIRED
+  - DELETED
+  states:
+  - CREATED
+  - UPLOADING
+  - VERIFYING
+  - READY
+  - PINNED
+  - CONSUMED
+  - REJECTED
+  - EXPIRED
+  - DELETED
+  guards:
+    ownerMatch: principal owns handle and registration/revocation epoch is current
+    withinLimits: actual bytes/time/count are within declared and policy limits
+    verified: materialized bytes satisfy digest, size and type policy
+    notExpired: TTL has not elapsed
+    expired: TTL elapsed and no active request pin exists
+  actions:
+    materializeQuarantine: copy from bounded stream/PFD into runtime-owned quarantine
+    pinToRequest: reference-count READY asset to one accepted request
+    deleteBytes: delete/quarantine bytes and durable handle record by policy
+    retentionCleanup: delete rejected/abandoned bytes and retain only bounded tombstone metadata
+  invariants:
+  - no filesystem path is exposed
+  - READY only follows full verification
+  - TTL cannot expire a pinned request reference
+  - single-use handle cannot be consumed twice
+  transitions:
+  - id: AST-001
+    from: CREATED
+    event: BEGIN_UPLOAD
+    to: UPLOADING
+    guard: ownerMatch && notExpired
+    actions: []
+  - id: AST-002
+    from: UPLOADING
+    event: UPLOAD_COMPLETE
+    to: VERIFYING
+    guard: withinLimits
+    actions:
+    - materializeQuarantine
+  - id: AST-003
+    from: UPLOADING
+    event: UPLOAD_FAILED
+    to: REJECTED
+    guard: 'true'
+    actions: []
+  - id: AST-004
+    from: VERIFYING
+    event: VERIFIED
+    to: READY
+    guard: verified
+    actions: []
+  - id: AST-005
+    from: VERIFYING
+    event: VERIFY_FAILED
+    to: REJECTED
+    guard: 'true'
+    actions: []
+  - id: AST-006
+    from: READY
+    event: PIN_REQUEST
+    to: PINNED
+    guard: ownerMatch && notExpired
+    actions:
+    - pinToRequest
+  - id: AST-007
+    from: PINNED
+    event: REQUEST_FINISHED_SINGLE_USE
+    to: CONSUMED
+    guard: 'true'
+    actions:
+    - deleteBytes
+  - id: AST-008
+    from: PINNED
+    event: REQUEST_FINISHED_REUSABLE
+    to: READY
+    guard: notExpired
+    actions: []
+  - id: AST-008E
+    from: PINNED
+    event: REQUEST_FINISHED_REUSABLE_EXPIRED
+    to: EXPIRED
+    guard: expired
+    actions:
+    - deleteBytes
+  - id: AST-009
+    from: CREATED
+    event: TTL_EXPIRED
+    to: EXPIRED
+    guard: 'true'
+    actions:
+    - deleteBytes
+  - id: AST-010
+    from: UPLOADING
+    event: TTL_EXPIRED
+    to: EXPIRED
+    guard: 'true'
+    actions:
+    - deleteBytes
+  - id: AST-011
+    from: READY
+    event: TTL_EXPIRED
+    to: EXPIRED
+    guard: 'true'
+    actions:
+    - deleteBytes
+  - id: AST-012
+    from: READY
+    event: DELETE
+    to: DELETED
+    guard: ownerMatch
+    actions:
+    - deleteBytes
+  - id: AST-013
+    from: REJECTED
+    event: DELETE
+    to: DELETED
+    guard: ownerMatch
+    actions:
+    - deleteBytes
+  - id: AST-014
+    from: REJECTED
+    event: RETENTION_CLEANUP
+    to: DELETED
+    guard: 'true'
+    actions:
+    - retentionCleanup
+  - id: AST-015
+    from: CREATED
+    event: DELETE
+    to: DELETED
+    guard: ownerMatch
+    actions:
+    - deleteBytes
+  - id: AST-016
+    from: VERIFYING
+    event: VERIFY_TIMEOUT_OR_CANCEL
+    to: REJECTED
+    guard: 'true'
+    actions:
+    - retentionCleanup
+- id: CLIENT_REGISTRATION
+  initial: PENDING
+  terminal:
+  - REVOKED
+  - EXPIRED
+  states:
+  - PENDING
+  - ACTIVE
+  - SUSPENDED
+  - REVOCATION_REQUESTED
+  - DRAINING
+  - REVOKED
+  - EXPIRED
+  guards:
+    challengeValid: challenge nonce, observed UID, Android user, requested scopes and TTL match
+    userApproved: approval is performed in trusted local UI and scopes are within policy
+    epochCurrent: registration revocation epoch matches durable principal epoch
+    noOldCapability: no queued, active or pooled capability remains usable at the old epoch
+  actions:
+    persistRegistration: store observed identity evidence, scopes, expiry and epoch
+    rejectNewUse: reject calls at old or missing registration epoch
+    cancelAndDrainOwnedState: remove queue entries, cancel requests and close owned sessions
+    appendAudit: append actor, reason, scope delta and completion evidence
+  invariants:
+  - binding reachability is not authorization
+  - caller self-reported package is display evidence only
+  - shared UID is one principal unless a stronger managed identity exists
+  - scope reduction and revocation take effect by epoch fencing before completion is reported
+  transitions:
+  - id: REG-001
+    from: PENDING
+    event: APPROVE
+    to: ACTIVE
+    guard: challengeValid && userApproved
+    actions:
+    - persistRegistration
+    - appendAudit
+  - id: REG-002
+    from: PENDING
+    event: REJECT
+    to: REVOKED
+    guard: challengeValid
+    actions:
+    - appendAudit
+  - id: REG-003
+    from: PENDING
+    event: CHALLENGE_EXPIRED
+    to: EXPIRED
+    guard: 'true'
+    actions:
+    - appendAudit
+  - id: REG-004
+    from: ACTIVE
+    event: SUSPEND
+    to: SUSPENDED
+    guard: epochCurrent
+    actions:
+    - rejectNewUse
+    - appendAudit
+  - id: REG-005
+    from: SUSPENDED
+    event: RESUME_APPROVED
+    to: ACTIVE
+    guard: userApproved
+    actions:
+    - persistRegistration
+    - appendAudit
+  - id: REG-006
+    from: ACTIVE
+    event: REVOKE
+    to: REVOCATION_REQUESTED
+    guard: epochCurrent
+    actions:
+    - persistRegistration
+    - rejectNewUse
+    - appendAudit
+  - id: REG-007
+    from: SUSPENDED
+    event: REVOKE
+    to: REVOCATION_REQUESTED
+    guard: 'true'
+    actions:
+    - persistRegistration
+    - rejectNewUse
+    - appendAudit
+  - id: REG-008
+    from: REVOCATION_REQUESTED
+    event: BEGIN_DRAIN
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - cancelAndDrainOwnedState
+  - id: REG-009
+    from: DRAINING
+    event: DRAIN_COMPLETE
+    to: REVOKED
+    guard: noOldCapability
+    actions:
+    - appendAudit
+  - id: REG-010
+    from: ACTIVE
+    event: EXPIRY_REACHED
+    to: REVOCATION_REQUESTED
+    guard: 'true'
+    actions:
+    - rejectNewUse
+    - appendAudit
+  - id: REG-011
+    from: SUSPENDED
+    event: EXPIRY_REACHED
+    to: REVOCATION_REQUESTED
+    guard: 'true'
+    actions:
+    - rejectNewUse
+    - appendAudit
+- id: OPERATION
+  initial: PREPARED
+  terminal:
+  - COMPLETED
+  - FAILED
+  - CANCELLED
+  - ABORTED_UNCERTAIN
+  states:
+  - PREPARED
+  - STARTING
+  - RUNNING
+  - CANCELLING
+  - RECONCILING
+  - COMPLETED
+  - FAILED
+  - CANCELLED
+  - ABORTED_UNCERTAIN
+  guards:
+    claimCurrent: preparedId/operationId/requestId, owner, runtime epoch and revocation epoch are current
+    resultKnown: operation ledger contains a unique durable result
+    cancelPending: durable cancellation intent exists for this operation
+  actions:
+    claimStart: idempotently claim prepared operation exactly once
+    recordCancel: durably record cancellation intent and signal native/worker cancellation
+    queryOutcome: query engine/worker/runtime ledger without blind replay
+    publishTerminal: persist one terminal result and reconcile session/allocation disposition
+  invariants:
+  - start is idempotent by operationId
+  - one terminal outcome is durable
+  - cancel may race with completion but never launches new work after durable cancel intent
+  - reply loss is resolved by query/reconciliation
+  transitions:
+  - id: OPR-001
+    from: PREPARED
+    event: START_ACCEPTED
+    to: STARTING
+    guard: claimCurrent
+    actions:
+    - claimStart
+  - id: OPR-002
+    from: PREPARED
+    event: START_REJECTED
+    to: FAILED
+    guard: 'true'
+    actions:
+    - publishTerminal
+  - id: OPR-003
+    from: PREPARED
+    event: CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - recordCancel
+    - publishTerminal
+  - id: OPR-004
+    from: STARTING
+    event: NATIVE_STARTED
+    to: RUNNING
+    guard: claimCurrent
+    actions: []
+  - id: OPR-005
+    from: STARTING
+    event: START_FAILED
+    to: FAILED
+    guard: 'true'
+    actions:
+    - publishTerminal
+  - id: OPR-006
+    from: STARTING
+    event: CANCEL
+    to: CANCELLING
+    guard: 'true'
+    actions:
+    - recordCancel
+  - id: OPR-007
+    from: STARTING
+    event: REPLY_OR_WORKER_LOST
+    to: RECONCILING
+    guard: 'true'
+    actions:
+    - queryOutcome
+  - id: OPR-008
+    from: RUNNING
+    event: SUCCESS
+    to: COMPLETED
+    guard: 'true'
+    actions:
+    - publishTerminal
+  - id: OPR-009
+    from: RUNNING
+    event: FAILURE
+    to: FAILED
+    guard: 'true'
+    actions:
+    - publishTerminal
+  - id: OPR-010
+    from: RUNNING
+    event: CANCEL
+    to: CANCELLING
+    guard: 'true'
+    actions:
+    - recordCancel
+  - id: OPR-011
+    from: RUNNING
+    event: REPLY_OR_WORKER_LOST
+    to: RECONCILING
+    guard: 'true'
+    actions:
+    - queryOutcome
+  - id: OPR-012
+    from: CANCELLING
+    event: STOP_CONFIRMED
+    to: CANCELLED
+    guard: cancelPending
+    actions:
+    - publishTerminal
+  - id: OPR-013
+    from: CANCELLING
+    event: COMPLETION_WON_RACE
+    to: COMPLETED
+    guard: resultKnown
+    actions:
+    - publishTerminal
+  - id: OPR-014
+    from: CANCELLING
+    event: FAILURE_WON_RACE
+    to: FAILED
+    guard: resultKnown
+    actions:
+    - publishTerminal
+  - id: OPR-015
+    from: CANCELLING
+    event: OUTCOME_UNKNOWN
+    to: RECONCILING
+    guard: 'true'
+    actions:
+    - queryOutcome
+  - id: OPR-016
+    from: RECONCILING
+    event: FOUND_COMPLETED
+    to: COMPLETED
+    guard: resultKnown
+    actions:
+    - publishTerminal
+  - id: OPR-017
+    from: RECONCILING
+    event: FOUND_FAILED
+    to: FAILED
+    guard: resultKnown
+    actions:
+    - publishTerminal
+  - id: OPR-018
+    from: RECONCILING
+    event: FOUND_CANCELLED
+    to: CANCELLED
+    guard: resultKnown
+    actions:
+    - publishTerminal
+  - id: OPR-019
+    from: RECONCILING
+    event: UNPROVABLE
+    to: ABORTED_UNCERTAIN
+    guard: 'true'
+    actions:
+    - publishTerminal
+- id: ENGINE_MODULE
+  initial: ABSENT
+  terminal: []
+  states:
+  - ABSENT
+  - INSTALLING
+  - INSTALLED
+  - VALIDATING
+  - AVAILABLE
+  - DRAINING
+  - RESTART_REQUIRED
+  - ROLLING_BACK
+  - FAILED
+  guards:
+    artifactLockValid: module digest, engineBuildId, protocol version and signer match
+    noLiveModels: all loaded models/sessions using module are drained
+    rollbackArtifactValid: previous signed/locked artifact is available
+  actions:
+    installArtifact: materialize and verify module artifact
+    validateHandshake: probe every target process and compare protocol/artifact digest
+    blockNewLoads: remove module from routing candidates
+    restartProcesses: restart affected process set and clear stale loader cache
+    rollbackArtifact: atomically restore previous module and record reason
+  invariants:
+  - AVAILABLE requires artifact/protocol handshake in every target process
+  - module update never unloads code under a live model
+  - failed validation does not publish capabilities
+  - EngineBuildId changes when executable artifact or patch changes
+  transitions:
+  - id: MODU-001
+    from: ABSENT
+    event: INSTALL
+    to: INSTALLING
+    guard: artifactLockValid
+    actions:
+    - installArtifact
+  - id: MODU-002
+    from: INSTALLING
+    event: INSTALL_SUCCEEDED
+    to: INSTALLED
+    guard: artifactLockValid
+    actions: []
+  - id: MODU-003
+    from: INSTALLING
+    event: INSTALL_FAILED
+    to: FAILED
+    guard: 'true'
+    actions: []
+  - id: MODU-004
+    from: INSTALLED
+    event: BEGIN_VALIDATION
+    to: VALIDATING
+    guard: artifactLockValid
+    actions:
+    - validateHandshake
+  - id: MODU-005
+    from: VALIDATING
+    event: VALIDATED
+    to: AVAILABLE
+    guard: artifactLockValid
+    actions: []
+  - id: MODU-006
+    from: VALIDATING
+    event: VALIDATION_FAILED
+    to: FAILED
+    guard: 'true'
+    actions: []
+  - id: MODU-007
+    from: AVAILABLE
+    event: UPDATE_OR_REMOVE
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - blockNewLoads
+  - id: MODU-008
+    from: DRAINING
+    event: DRAIN_COMPLETE_RESTART
+    to: RESTART_REQUIRED
+    guard: noLiveModels
+    actions: []
+  - id: MODU-009
+    from: RESTART_REQUIRED
+    event: PROCESSES_RESTARTED
+    to: INSTALLED
+    guard: 'true'
+    actions:
+    - restartProcesses
+  - id: MODU-010
+    from: FAILED
+    event: ROLLBACK
+    to: ROLLING_BACK
+    guard: rollbackArtifactValid
+    actions:
+    - rollbackArtifact
+  - id: MODU-011
+    from: ROLLING_BACK
+    event: ROLLBACK_INSTALLED
+    to: INSTALLED
+    guard: rollbackArtifactValid
+    actions: []
+  - id: MODU-012
+    from: FAILED
+    event: REMOVE_FAILED_ARTIFACT
+    to: ABSENT
+    guard: 'true'
+    actions: []
+- id: ALLOCATION
+  initial: ACTIVE
+  terminal:
+  - RELEASED
+  states:
+  - ACTIVE
+  - DRAINING
+  - RELEASING
+  - RELEASED
+  guards:
+    ownerFenced: owner no longer accepts new work
+    nativeBarrierObserved: native/process/device resources are proven released or owning process is dead and fenced
+  actions:
+    blockNewUse: fence allocation owner
+    beginRelease: initiate close/unmap/free/worker termination
+    creditCapacity: credit capacity only after release barrier and checked conservation audit
+  invariants:
+  - resident resources remain charged through DRAINING and RELEASING
+  - release is idempotent
+  - capacity is never credited from planned eviction
+  transitions:
+  - id: ALL-001
+    from: ACTIVE
+    event: DRAIN_REQUESTED
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - blockNewUse
+  - id: ALL-002
+    from: DRAINING
+    event: OWNER_QUIESCENT
+    to: RELEASING
+    guard: ownerFenced
+    actions:
+    - beginRelease
+  - id: ALL-003
+    from: RELEASING
+    event: RELEASE_BARRIER
+    to: RELEASED
+    guard: nativeBarrierObserved
+    actions:
+    - creditCapacity
+- id: REVISION_LEASE
+  initial: ACTIVE
+  terminal:
+  - RELEASED
+  states:
+  - ACTIVE
+  - DRAINING
+  - RELEASED
+  guards:
+    noReferences: request/model/session/job references covered by lease are zero
+  actions:
+    blockDelete: keep installation/blob deletion fenced
+    beginDrain: stop new reference acquisition for this lease
+    releasePin: atomically decrement revision/installation references
+  invariants:
+  - alias changes do not alter pinned revision
+  - delete cannot pass while ACTIVE or DRAINING
+  - expiry requests drain; it does not erase a live reference
+  transitions:
+  - id: RLS-001
+    from: ACTIVE
+    event: RELEASE_OR_EXPIRY
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - beginDrain
+  - id: RLS-002
+    from: DRAINING
+    event: REFERENCES_ZERO
+    to: RELEASED
+    guard: noReferences
+    actions:
+    - releasePin
+- id: COMMAND
+  initial: RECEIVED
+  terminal:
+  - SUCCEEDED
+  - FAILED
+  - CANCELLED
+  - UNCERTAIN
+  states:
+  - RECEIVED
+  - CLAIMED
+  - RUNNING
+  - RECONCILING
+  - SUCCEEDED
+  - FAILED
+  - CANCELLED
+  - UNCERTAIN
+  guards:
+    claimMatches: owner+method+idempotency key has same canonical request hash
+    resultKnown: command ledger has one durable result
+  actions:
+    claimCommand: atomically claim or return existing command
+    executeMutation: perform state-checked mutation in the same transaction/intent protocol
+    queryResult: query command ledger and affected resource version
+    publishResult: persist result/error/resourceVersion before reply
+  invariants:
+  - same key with different payload conflicts
+  - reply loss never repeats a non-idempotent mutation
+  - void mutation is forbidden
+  transitions:
+  - id: CMD-001
+    from: RECEIVED
+    event: CLAIM
+    to: CLAIMED
+    guard: claimMatches
+    actions:
+    - claimCommand
+  - id: CMD-002
+    from: RECEIVED
+    event: VALIDATION_FAILED
+    to: FAILED
+    guard: 'true'
+    actions:
+    - publishResult
+  - id: CMD-003
+    from: CLAIMED
+    event: EXECUTE
+    to: RUNNING
+    guard: 'true'
+    actions:
+    - executeMutation
+  - id: CMD-004
+    from: CLAIMED
+    event: CANCEL
+    to: CANCELLED
+    guard: 'true'
+    actions:
+    - publishResult
+  - id: CMD-005
+    from: RUNNING
+    event: SUCCEEDED
+    to: SUCCEEDED
+    guard: resultKnown
+    actions:
+    - publishResult
+  - id: CMD-006
+    from: RUNNING
+    event: FAILED
+    to: FAILED
+    guard: resultKnown
+    actions:
+    - publishResult
+  - id: CMD-007
+    from: RUNNING
+    event: REPLY_OR_PROCESS_LOST
+    to: RECONCILING
+    guard: 'true'
+    actions:
+    - queryResult
+  - id: CMD-008
+    from: RECONCILING
+    event: FOUND_SUCCESS
+    to: SUCCEEDED
+    guard: resultKnown
+    actions:
+    - publishResult
+  - id: CMD-009
+    from: RECONCILING
+    event: FOUND_FAILURE
+    to: FAILED
+    guard: resultKnown
+    actions:
+    - publishResult
+  - id: CMD-010
+    from: RECONCILING
+    event: UNPROVABLE
+    to: UNCERTAIN
+    guard: 'true'
+    actions:
+    - publishResult
+- id: PAIRING_CHALLENGE
+  initial: PENDING
+  terminal:
+  - REJECTED
+  - EXPIRED
+  - CONSUMED
+  states:
+  - PENDING
+  - APPROVED
+  - REJECTED
+  - EXPIRED
+  - CONSUMED
+  guards:
+    identityBound: challenge is bound to observed principal, requested scopes and channel/TLS binding
+    withinAttemptAndTimeLimit: TTL and attempt budget remain
+    approvalLocal: approval occurs in trusted local UI
+  actions:
+    recordAttempt: durably decrement attempt budget
+    recordApproval: persist approved scope/channel binding without issuing long-term secret yet
+    consumeChallenge: atomically create registration/token and make challenge non-replayable
+  invariants:
+  - challenge is high entropy, one-time and bounded
+  - approval does not bypass scope policy
+  - consumption is atomic with registration/token issuance
+  transitions:
+  - id: PAIR-001
+    from: PENDING
+    event: APPROVE
+    to: APPROVED
+    guard: identityBound && withinAttemptAndTimeLimit && approvalLocal
+    actions:
+    - recordApproval
+  - id: PAIR-002
+    from: PENDING
+    event: REJECT
+    to: REJECTED
+    guard: identityBound
+    actions:
+    - recordAttempt
+  - id: PAIR-003
+    from: PENDING
+    event: EXPIRE
+    to: EXPIRED
+    guard: 'true'
+    actions: []
+  - id: PAIR-004
+    from: APPROVED
+    event: CONSUME
+    to: CONSUMED
+    guard: identityBound && withinAttemptAndTimeLimit
+    actions:
+    - consumeChallenge
+  - id: PAIR-005
+    from: APPROVED
+    event: EXPIRE
+    to: EXPIRED
+    guard: 'true'
+    actions: []
+- id: LAN_SERVICE
+  initial: DISABLED
+  terminal: []
+  states:
+  - DISABLED
+  - STARTING
+  - ADVERTISING
+  - ACTIVE
+  - ROTATING
+  - DRAINING
+  - ERROR
+  guards:
+  - configurationValid
+  - tlsIdentityReady
+  - pairingEndpointReady
+  - epochAdvanced
+  - allStreamsAndClientsDrained
+  - retryAllowed
+  actions:
+  - persistState
+  - bindApprovedInterfaces
+  - publishPairingLocator
+  - stopAccepting
+  - bumpConnectionEpoch
+  - closeStreams
+  - revokeOrMigrateRegistrations
+  - releaseNetworkResources
+  - recordFailure
+  invariants:
+  - LAN never accepts inference before TLS identity and pairing endpoint are ready
+  - every network identity or binding change advances the connection epoch before accepting new work
+  - DISABLED has no bound LAN listener
+  - DRAINING accepts no new client or request
+  transitions:
+  - id: LAN-001
+    from: DISABLED
+    event: ENABLE
+    to: STARTING
+    guard: configurationValid
+    actions:
+    - persistState
+  - id: LAN-002
+    from: STARTING
+    event: LISTENER_READY
+    to: ADVERTISING
+    guard: tlsIdentityReady && pairingEndpointReady
+    actions:
+    - bindApprovedInterfaces
+    - publishPairingLocator
+    - persistState
+  - id: LAN-003
+    from: ADVERTISING
+    event: SERVICE_ACTIVE
+    to: ACTIVE
+    guard: 'true'
+    actions:
+    - persistState
+  - id: LAN-004
+    from: ACTIVE
+    event: IDENTITY_OR_BINDING_CHANGED
+    to: ROTATING
+    guard: 'true'
+    actions:
+    - stopAccepting
+    - bumpConnectionEpoch
+    - persistState
+  - id: LAN-005
+    from: ROTATING
+    event: NEW_IDENTITY_READY
+    to: ADVERTISING
+    guard: epochAdvanced && tlsIdentityReady
+    actions:
+    - revokeOrMigrateRegistrations
+    - publishPairingLocator
+    - persistState
+  - id: LAN-006
+    from:
+    - STARTING
+    - ADVERTISING
+    - ACTIVE
+    - ROTATING
+    - ERROR
+    event: DISABLE
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - stopAccepting
+    - bumpConnectionEpoch
+    - closeStreams
+    - persistState
+  - id: LAN-007
+    from: DRAINING
+    event: DRAIN_COMPLETE
+    to: DISABLED
+    guard: allStreamsAndClientsDrained
+    actions:
+    - releaseNetworkResources
+    - persistState
+  - id: LAN-008
+    from:
+    - STARTING
+    - ADVERTISING
+    - ACTIVE
+    - ROTATING
+    event: FAIL
+    to: ERROR
+    guard: 'true'
+    actions:
+    - stopAccepting
+    - recordFailure
+    - persistState
+  - id: LAN-009
+    from: ERROR
+    event: RETRY
+    to: STARTING
+    guard: retryAllowed
+    actions:
+    - persistState
+- id: CONTENT_REPORT
+  initial: DRAFT
+  terminal:
+  - SUBMITTED
+  - FAILED_FINAL
+  - DISCARDED
+  - EXPIRED
+  states:
+  - DRAFT
+  - REVIEWING
+  - CONSENT_GRANTED
+  - QUEUED_OFFLINE
+  - SUBMITTING
+  - CANCELLING
+  - RECONCILING
+  - FAILED_RETRYABLE
+  - FAILED_FINAL
+  - SUBMITTED
+  - DISCARDED
+  - EXPIRED
+  guards:
+  - localTrustedReview
+  - payloadMinimized
+  - consentGrantValidAndUnconsumed
+  - networkAndEndpointAvailable
+  - withinTtl
+  - retryAllowed
+  - remoteOutcomeKnown
+  - cancelPending
+  actions:
+  - showPayloadPreview
+  - persistProposal
+  - issueConsentGrant
+  - consumeGrantAndFreezePayload
+  - enqueueReport
+  - submitReport
+  - recordCancelIntent
+  - requestRemoteCancel
+  - queryRemoteOutcome
+  - recordReceipt
+  - recordFailure
+  - deleteSensitivePayload
+  - appendAudit
+  invariants:
+  - external callers create proposals only and cannot assert consent or invoke submission
+  - no prompt or output leaves the device before a trusted local UI reviews the exact minimized payload
+  - ConsentGrant is one-time and bound to principal, report, payload digest, warning policy, local user/profile, nonce and expiry
+  - report payload is owner-bound, encrypted at rest and TTL-bounded
+  - grant consumption and transition to QUEUED_OFFLINE or SUBMITTING are atomic
+  - cancellation, discard or expiry removes sensitive payload unless remote acceptance is still being reconciled
+  - submission receipt never implies moderation outcome
+  - reply loss is reconciled by reportId and remote receipt query; submission is never blindly replayed with a new identity
+  transitions:
+  - id: RPT-001
+    from: DRAFT
+    event: BEGIN_LOCAL_REVIEW
+    to: REVIEWING
+    guard: localTrustedReview
+    actions:
+    - showPayloadPreview
+  - id: RPT-002
+    from: REVIEWING
+    event: GRANT_CONSENT
+    to: CONSENT_GRANTED
+    guard: localTrustedReview && payloadMinimized
+    actions:
+    - issueConsentGrant
+    - appendAudit
+  - id: RPT-003
+    from: CONSENT_GRANTED
+    event: QUEUE_OFFLINE
+    to: QUEUED_OFFLINE
+    guard: consentGrantValidAndUnconsumed && withinTtl
+    actions:
+    - consumeGrantAndFreezePayload
+    - enqueueReport
+  - id: RPT-004
+    from: CONSENT_GRANTED
+    event: SUBMIT_ONLINE
+    to: SUBMITTING
+    guard: consentGrantValidAndUnconsumed && networkAndEndpointAvailable && withinTtl
+    actions:
+    - consumeGrantAndFreezePayload
+    - submitReport
+  - id: RPT-005
+    from: QUEUED_OFFLINE
+    event: NETWORK_AVAILABLE
+    to: SUBMITTING
+    guard: networkAndEndpointAvailable && withinTtl
+    actions:
+    - submitReport
+  - id: RPT-006
+    from: SUBMITTING
+    event: ACCEPTED
+    to: SUBMITTED
+    guard: remoteOutcomeKnown
+    actions:
+    - recordReceipt
+    - deleteSensitivePayload
+    - appendAudit
+  - id: RPT-007
+    from: SUBMITTING
+    event: RETRYABLE_FAILURE
+    to: FAILED_RETRYABLE
+    guard: withinTtl
+    actions:
+    - recordFailure
+  - id: RPT-008
+    from: SUBMITTING
+    event: FINAL_FAILURE
+    to: FAILED_FINAL
+    guard: remoteOutcomeKnown
+    actions:
+    - recordFailure
+    - deleteSensitivePayload
+    - appendAudit
+  - id: RPT-009
+    from: SUBMITTING
+    event: CANCEL
+    to: CANCELLING
+    guard: 'true'
+    actions:
+    - recordCancelIntent
+    - requestRemoteCancel
+  - id: RPT-010
+    from: SUBMITTING
+    event: REPLY_LOST
+    to: RECONCILING
+    guard: 'true'
+    actions:
+    - queryRemoteOutcome
+  - id: RPT-011
+    from: FAILED_RETRYABLE
+    event: RETRY
+    to: SUBMITTING
+    guard: retryAllowed && networkAndEndpointAvailable && withinTtl
+    actions:
+    - submitReport
+  - id: RPT-012
+    from:
+    - DRAFT
+    - REVIEWING
+    - CONSENT_GRANTED
+    - QUEUED_OFFLINE
+    - FAILED_RETRYABLE
+    event: DISCARD
+    to: DISCARDED
+    guard: 'true'
+    actions:
+    - deleteSensitivePayload
+    - appendAudit
+  - id: RPT-013
+    from: CANCELLING
+    event: REMOTE_NOT_ACCEPTED
+    to: DISCARDED
+    guard: cancelPending && remoteOutcomeKnown
+    actions:
+    - deleteSensitivePayload
+    - appendAudit
+  - id: RPT-014
+    from: CANCELLING
+    event: REMOTE_ALREADY_ACCEPTED
+    to: SUBMITTED
+    guard: remoteOutcomeKnown
+    actions:
+    - recordReceipt
+    - deleteSensitivePayload
+    - appendAudit
+  - id: RPT-015
+    from: CANCELLING
+    event: OUTCOME_UNKNOWN
+    to: RECONCILING
+    guard: 'true'
+    actions:
+    - queryRemoteOutcome
+  - id: RPT-016
+    from: RECONCILING
+    event: RECEIPT_FOUND
+    to: SUBMITTED
+    guard: remoteOutcomeKnown
+    actions:
+    - recordReceipt
+    - deleteSensitivePayload
+    - appendAudit
+  - id: RPT-017
+    from: RECONCILING
+    event: NOT_ACCEPTED_CANCEL_PENDING
+    to: DISCARDED
+    guard: remoteOutcomeKnown && cancelPending
+    actions:
+    - deleteSensitivePayload
+    - appendAudit
+  - id: RPT-018
+    from: RECONCILING
+    event: NOT_ACCEPTED_RETRYABLE
+    to: FAILED_RETRYABLE
+    guard: remoteOutcomeKnown && withinTtl
+    actions:
+    - recordFailure
+  - id: RPT-019
+    from: RECONCILING
+    event: FINAL_REJECTION
+    to: FAILED_FINAL
+    guard: remoteOutcomeKnown
+    actions:
+    - recordFailure
+    - deleteSensitivePayload
+    - appendAudit
+  - id: RPT-020
+    from:
+    - DRAFT
+    - REVIEWING
+    - CONSENT_GRANTED
+    - QUEUED_OFFLINE
+    - FAILED_RETRYABLE
+    event: TTL_EXPIRED
+    to: EXPIRED
+    guard: 'true'
+    actions:
+    - deleteSensitivePayload
+    - appendAudit
+- id: TOKEN
+  initial: ISSUING
+  terminal:
+  - REVOKED
+  - EXPIRED
+  - FAILED
+  states:
+  - ISSUING
+  - ACTIVE
+  - REVOCATION_REQUESTED
+  - DRAINING
+  - REVOKED
+  - EXPIRED
+  - FAILED
+  guards:
+    issuanceValid: registration ACTIVE, requested scopes allowed, transport constraint valid and verifier persisted atomically
+    epochCurrent: token revocation epoch equals durable token epoch
+    noOldUse: no request, stream, queue or session remains usable under the old token epoch
+    terminalTargetRevoked: drain cause is explicit revocation
+    terminalTargetExpired: drain cause is expiry
+  actions:
+    persistToken: persist verifier, scopes, transport constraint, expiry, epoch and state
+    bumpEpochAndReject: atomically bump token epoch and reject new authentication
+    drainOwnedState: close streams, remove queue entries, cancel active operations and close token-owned sessions according
+      to policy
+    erasePlaintextReceipt: delete encrypted issuance receipt at acknowledgement or receipt expiry
+    appendAudit: append actor, cause, scope, epoch and completion evidence
+  invariants:
+  - token plaintext is available only in the bounded issuance receipt window
+  - loopback-only tokens are never accepted by the LAN listener
+  - revocation or expiry is not reported complete until old-epoch capability use is fenced
+  - the database stores an HMAC verifier, never bearer plaintext
+  transitions:
+  - id: TOKEN-001
+    from: ISSUING
+    event: ISSUE_COMMITTED
+    to: ACTIVE
+    guard: issuanceValid
+    actions:
+    - persistToken
+    - appendAudit
+  - id: TOKEN-002
+    from: ISSUING
+    event: ISSUE_FAILED
+    to: FAILED
+    guard: 'true'
+    actions:
+    - erasePlaintextReceipt
+    - appendAudit
+  - id: TOKEN-003
+    from: ACTIVE
+    event: REVOKE
+    to: REVOCATION_REQUESTED
+    guard: epochCurrent
+    actions:
+    - bumpEpochAndReject
+    - persistToken
+    - appendAudit
+  - id: TOKEN-004
+    from: ACTIVE
+    event: EXPIRE
+    to: REVOCATION_REQUESTED
+    guard: epochCurrent
+    actions:
+    - bumpEpochAndReject
+    - persistToken
+    - appendAudit
+  - id: TOKEN-005
+    from: REVOCATION_REQUESTED
+    event: BEGIN_DRAIN
+    to: DRAINING
+    guard: 'true'
+    actions:
+    - drainOwnedState
+  - id: TOKEN-006
+    from: DRAINING
+    event: DRAIN_COMPLETE
+    to: REVOKED
+    guard: noOldUse && terminalTargetRevoked
+    actions:
+    - erasePlaintextReceipt
+    - persistToken
+    - appendAudit
+  - id: TOKEN-007
+    from: DRAINING
+    event: DRAIN_COMPLETE
+    to: EXPIRED
+    guard: noOldUse && terminalTargetExpired
+    actions:
+    - erasePlaintextReceipt
+    - persistToken
+    - appendAudit

@@ -1,0 +1,105 @@
+# OmniLLM Engine Pack — llama.cpp UPSTREAM.lock
+# Authority: ENGINE-LLAMACPP §1, ENGINE-STANDARD §4
+#
+# Rules:
+# - Architecture docs never pin "latest". Empty digests ⇒ NOT_LOCKED.
+# - Registry must NOT publish QUALIFIED / SUPPORTED without a complete lock
+#   (repository, tag/commit, sourceDigest, patchDigest, toolchain, ABI,
+#   buildFlags, artifactDigest, observedAt, license).
+# - Builds without a complete lock are exploratory evidence only.
+# - Updating any lock field ⇒ new EngineBuildId; old evidence does not auto-carry.
+#
+# Pin note (2026-08-06):
+# - Official upstream: ggml-org/llama.cpp tag b9999 /
+#   commit 47c786924ad1ab7e91da2cdc72fcdb563780c2bd
+# - Vendored (library-pruned) tree under
+#   android/native/src/main/cpp/third_party/llama.cpp when present.
+# - sourceDigest / artifactDigest remain empty until full archive hash + NDK
+#   .so digests are captured in a release lock — lockState stays NOT_LOCKED.
+# - Native always ships EXPERIMENTAL_FIXTURE C++ path; real GGUF path/FD load
+#   requires OMNILLM_HAS_LLAMA_CPP (vendored tree linked). Neither elevates
+#   qualification cells.
+
+schemaVersion: 1
+engineId: llama.cpp
+lockState: NOT_LOCKED
+
+upstream:
+  # Official repository (ENGINE-LLAMACPP §1)
+  repository: "https://github.com/ggml-org/llama.cpp"
+  # Concrete release tag + full commit SHA (observed 2026-08-06)
+  tag: "b9999"
+  commit: "47c786924ad1ab7e91da2cdc72fcdb563780c2bd"
+  # SHA-256 of the pinned source tree (git archive of tag) — pending full capture
+  sourceDigest: ""
+  # SHA-256 of OmniLLM patch set; empty string = no patches (field present)
+  patchDigest: ""
+  # When the lock pin fields above were observed (ISO-8601 UTC)
+  observedAt: "2026-08-06T00:00:00Z"
+
+license:
+  # SPDX recorded for upstream
+  spdx: "MIT"
+  # Path relative to pinned source for LICENSE / NOTICE capture
+  licensePath: "LICENSE"
+  # SHA-256 of LICENSE bytes at pin (tag b9999 tree)
+  licenseDigest: "bcd8ec749126d45cb06737d0690295d73df4b6e7e194205bcf91190368f27285"
+  # Optional notice / third-party report digests
+  noticeDigest: ""
+  dependencyReportDigest: ""
+
+toolchain:
+  # Must match product ANDROID-NATIVE / platform-policy locks when building for Android
+  ndkVersion: "28.2.13676358"
+  cmakeVersion: "3.22.1"
+  # Opaque digest of the full toolchain fingerprint — pending release lock
+  toolchainDigest: ""
+  # Additional compiler/host identifiers recorded at build time
+  hostOs: ""
+  hostArch: ""
+
+build:
+  # Canonical build flag set for this EngineBuildId
+  buildFlags: "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON -DANDROID_STL=c++_shared -std=c++17 -DOMNILLM_LLAMA_WITH_UPSTREAM=ON -DLLAMA_BUILD_COMMON=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF"
+  # ABIs included when :android:native externalNativeBuild runs
+  abis: ["arm64-v8a", "x86_64"]
+  # Page-size / 16 KB packaging evidence pointer — pending post-assemble digest
+  pageSizeEvidence: ""
+  # Optional CMake presets / feature toggles (must not silently enable untrusted backends)
+  features:
+    cpu: true
+    vulkan: false
+    opencl: false
+    # Multimodal projectors are unsupported-by-default until cell qualification
+    multimodal: false
+    # Real llama.cpp vendor integration (when third_party tree present)
+    shimImplementation: false
+    experimentalFixture: true
+    pathFdLoad: true
+
+artifact:
+  # EngineBuildId string published with this lock (opaque; not a native pointer)
+  # Exploratory — not a complete lock; do not treat as QUALIFIED.
+  engineBuildId: "llama-cpp-b9999-android-exploratory"
+  # SHA-256 of packaged native artifact(s) (.so / AAR jni contents) — pending
+  artifactDigest: ""
+  # Optional secondary digests (split APKs, debug symbols index)
+  symbolIndexDigest: ""
+
+testedProfile:
+  # Labels only — evidence lives in EngineRegistry cells, not this lock alone
+  platform: "android"
+  backends: ["cpu"]
+  formats: ["GGUF"]
+  # Qualification profile id once defined; empty until first evidence pack
+  profileId: ""
+
+notes:
+  integrationShape: "C/C++ library adapter via JNI; upstream HTTP server is not the core interface"
+  nativeArtifact: "libomnillm_llama.so packaged by :android:native (links llama.cpp when vendored; always has EXPERIMENTAL_FIXTURE C++ loop)"
+  vendorPath: "android/native/src/main/cpp/third_party/llama.cpp"
+  vendorFetch: "See android/native/src/main/cpp/third_party/README.md (git clone --depth 1 --branch b9999)"
+  placementHint: "Trusted signed code + verified catalog model may use privileged/crash-contained; untrusted GGUF → isolated CPU or companion UID acceleration"
+  failClosed: "Incomplete lock ⇒ Registry exposure UNKNOWN; dry-load never elevates trust; missing .so ⇒ no production adapter; unknown capability fail closed"
+  qualificationStatus: "UNQUALIFIED — do not mark QUALIFIED_WITH_ENVELOPE / SUPPORTED without device evidence"
+  experimentalFixture: "EXPERIMENTAL_FIXTURE path is packaging/exploratory only — NOT_SUPPORTED / UNQUALIFIED"

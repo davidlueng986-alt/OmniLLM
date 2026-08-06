@@ -1,0 +1,275 @@
+# MLC-LLM capability matrix rows (ENGINE-MLC / ENGINE-STANDARD §5)
+# Runtime exposure is projected by EngineRegistry from qualification cells.
+# Design baseline ≠ SUPPORTED. Default runtime capability: UNKNOWN.
+#
+# Dimensions: backend × format × phase × placement × operation profile.
+# Cancellation modes: COOPERATIVE | INTERRUPTIBLE | WORKER_KILL_ONLY | NOT_SUPPORTED | UNKNOWN
+# Cell status: UNQUALIFIED | STATIC_REVIEWED | SPIKE_REQUIRED | QUALIFIED_WITH_ENVELOPE | SUSPENDED
+
+schemaVersion: 1
+engineId: MLC-LLM
+designStatus: BASELINE
+upstreamLockStatus: NOT_LOCKED
+qualificationStatus: UNQUALIFIED
+registryExposure: UNKNOWN
+runtimeCapabilityDefault: UNKNOWN
+
+# Compiled model package (executable code + metadata + tokenizer + weights).
+formats:
+  - id: mlc-model-lib
+    design: candidate
+    runtimeDefault: UNKNOWN
+    notes: "Generated library + weights; not ordinary data; digest + runtime ABI in identity"
+
+backends:
+  - id: cpu
+    design: portable_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Pinned target/runtime only; never inherit from design prose"
+  - id: opencl
+    design: accelerator_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Per device/driver/model/workload cell (ENGINE-MLC §3)"
+  - id: vulkan
+    design: accelerator_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Per device/driver/model/workload cell; no silent CPU inheritance"
+
+operations:
+  - id: PROBE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+    notes: "Package/target/runtime compatibility; no blind untrusted load in privileged process"
+  - id: LOAD
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+    notes: "Runtime + generated module; digest re-verify on trusted load"
+  - id: PLAN_INFERENCE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: COMMIT_INFERENCE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: START
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: GENERATE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: EMBED
+    design: unknown_until_api_qualified
+    runtimeDefault: UNKNOWN
+    notes: "ENGINE-MLC §10 — per model/API cell"
+  - id: CLOSE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: UNLOAD
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+
+# Phase cancellation — design expectation vs measured mode (ENGINE-MLC §5).
+# UNKNOWN phase cancellation ⇒ full LoadedModel lifecycle on killable worker only.
+phaseCancellation:
+  - phase: PROBE
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Bounded package/target/runtime check"
+  - phase: LOAD
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Module load + kernel compile/cache may be non-preemptible; measure peaks"
+  - phase: CREATE_SESSION
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: PLAN
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Plan has no KV mutation (ADR-002)"
+  - phase: COMMIT
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Chat/session mutation bound to CommitId"
+  - phase: START
+    expectedMode: INTERRUPTIBLE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: GENERATE
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Prefill/decode; GPU command may need worker kill when cancel unbounded"
+  - phase: CLOSE
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: UNLOAD
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+
+prefixCapabilities:
+  - id: EXACT_SAME_SESSION
+    runtimeDefault: UNKNOWN
+  - id: EXACT_CROSS_SESSION
+    runtimeDefault: UNKNOWN
+  - id: TRUNCATE
+    runtimeDefault: UNKNOWN
+  - id: FORK
+    runtimeDefault: UNKNOWN
+    notes: "Only when runtime proves snapshot/fork/truncate semantics (ENGINE-MLC §4)"
+
+placement:
+  - class: PRIVILEGED_TRUSTED
+    design: conditional
+    runtimeDefault: UNKNOWN
+    requires: "signed engine + verified catalog model/code + all phases qualified"
+  - class: CRASH_CONTAINED_TRUSTED
+    design: conditional
+    runtimeDefault: UNKNOWN
+  - class: ISOLATED_CPU_UNTRUSTED
+    design: insufficient_for_generated_code
+    runtimeDefault: UNKNOWN
+    notes: "Data-only isolated worker is NOT enough for untrusted generated libraries"
+  - class: EXTERNAL_UID_ACCELERATED
+    design: required_for_untrusted_generated
+    runtimeDefault: UNKNOWN
+    notes: "ADR-007 different package/UID companion for untrusted accelerated inference"
+
+# Initial matrix rows for Registry seeding (all UNQUALIFIED / NOT_EXECUTED).
+# Control plane may load these; adapters never write domain DB.
+cells:
+  - backend: cpu
+    phase: PROBE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: LOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: CREATE_SESSION
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: PLAN
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: COMMIT
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: START
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: CLOSE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: UNLOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  # Accelerator backends — explicit UNKNOWN rows (no silent inheritance from CPU)
+  - backend: opencl
+    phase: PROBE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: opencl
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: vulkan
+    phase: PROBE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: vulkan
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+
+unsupportedByDefault:
+  - "Any backend without pinned compiler/runtime/target (ENGINE-MLC §10)"
+  - "Untrusted generated library in trusted process"
+  - "Same-UID fallback when companion lacks GPU capability"
+  - "Global GPU memory / cancel / driver recovery guarantees"
+  - "Prefix FORK / TRUNCATE / EXACT_CROSS_SESSION without proven runtime semantics"
+  - "Embedding / multimodal / tool / structured without per-cell validation"
+  - "Cross-process durable KV restore after worker/driver death"
+  - "Assuming old compiled artifact works with new runtime (ENGINE-MLC §9)"
+  - "Silent ignore of unsupported chat/session/stream parameters"
+  - "Offline compile inside ordinary inference request (must be Job)"
+
+resourceEnvelopeDimensions:
+  - cpuFileBytes           # weights / packaged files
+  - cpuAnonBytes           # runtime workspace + KV + CPU scratch
+  - sharedMemoryChargeBytes
+  - gpuDedicatedBytes      # GPU dedicated (never fold into CPU RSS)
+  - gpuSharedBytes
+  - npuBytes
+  - nativeThreads
+  - fileDescriptors
+  - temporaryDiskBytes     # kernel compile cache / temp
+  # generated code/module charge rolls into cpuFileBytes + gpu* as applicable
+  # kernel compile peak must appear on peak ResourceVector, not steady only

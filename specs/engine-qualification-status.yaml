@@ -1,0 +1,61 @@
+schemaVersion: 2
+rule: A design may be BASELINE while every runtime cell remains UNQUALIFIED; only a non-expired PASS record can project SUPPORTED
+engines:
+- engineId: llama.cpp
+  designStatus: BASELINE
+  upstreamLockStatus: NOT_LOCKED
+  qualificationStatus: UNQUALIFIED
+  registryExposure: UNKNOWN
+  runtimeCapabilityDefault: UNKNOWN
+- engineId: LiteRT-LM
+  designStatus: BASELINE
+  upstreamLockStatus: NOT_LOCKED
+  qualificationStatus: UNQUALIFIED
+  registryExposure: UNKNOWN
+  runtimeCapabilityDefault: UNKNOWN
+- engineId: MLC-LLM
+  designStatus: BASELINE
+  upstreamLockStatus: NOT_LOCKED
+  qualificationStatus: UNQUALIFIED
+  registryExposure: UNKNOWN
+  runtimeCapabilityDefault: UNKNOWN
+- engineId: mllm
+  designStatus: BASELINE
+  upstreamLockStatus: NOT_LOCKED
+  qualificationStatus: UNQUALIFIED
+  registryExposure: UNKNOWN
+  runtimeCapabilityDefault: UNKNOWN
+- engineId: ONNX-Runtime-GenAI
+  designStatus: BASELINE
+  upstreamLockStatus: NOT_LOCKED
+  qualificationStatus: UNQUALIFIED
+  registryExposure: UNKNOWN
+  runtimeCapabilityDefault: UNKNOWN
+requiredCellDimensions:
+- engineBuildId
+- deviceExecutionFingerprint
+- backend
+- modelRevisionId-or-modelEnvelope
+- operationProfile
+- resourceEnvelope
+- phaseCancellationProfile
+- methodVersion
+- evidenceExpiry
+qualificationStatusValues:
+- UNQUALIFIED
+- QUALIFYING
+- QUALIFIED
+- FAILED
+- EXPIRED
+- INVALIDATED
+runtimeExposureValues:
+- SUPPORTED
+- UNSUPPORTED
+- CONDITIONAL
+- UNKNOWN
+- TEMPORARILY_UNAVAILABLE
+invariants:
+- UNQUALIFIED never projects as SUPPORTED
+- evidence from one cell cannot be generalized outside its declared envelope
+- upstream URL is not a build lock
+- designStatus and qualificationStatus are independent dimensions

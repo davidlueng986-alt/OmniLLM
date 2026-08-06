@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext disabled globally (SEC-PRIVACY / FEAT-AI-CONTENT-REPORT transport TLS).
+  Developer report endpoint and model catalog hosts must use HTTPS.
+  Loopback HTTP for local developer server is feature-gated separately and must
+  not rely on cleartext for Play-distributed network paths.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <!--
+      Local developer server (loopback only). Not used for AI content reports or
+      general telemetry. Keep host-scoped; do not open cleartext to LAN by default.
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

@@ -1,0 +1,121 @@
+-- Control-plane Session records (CORE-SESSION / DATA-OWNERSHIP).
+-- Authority base: specs/database/omnillm-schema.sql#sessions
+-- Extension: owner + LoadKey dimensions + epochs + recovery disposition
+-- (required to fence POISONED/ORPHANED across runtime restart; INV-007).
+--
+-- Durable: descriptor, owner, state/disposition, epochs, allocation id.
+-- NOT durable: native KV bytes, native pointers, free-pool membership,
+-- active operation counts (process-local; reset on reload).
+
+CREATE TABLE sessions (
+  session_id TEXT NOT NULL PRIMARY KEY,
+  session_epoch INTEGER NOT NULL,
+  owner_key TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  loaded_model_id TEXT NOT NULL,
+  model_revision_id TEXT NOT NULL,
+  engine_build_id TEXT NOT NULL,
+  backend TEXT NOT NULL,
+  device_execution_fingerprint TEXT NOT NULL,
+  template_epoch INTEGER NOT NULL,
+  tokenizer_epoch INTEGER NOT NULL,
+  load_configuration_digest TEXT NOT NULL,
+  tokenizer_digest TEXT NOT NULL,
+  context_config TEXT NOT NULL,
+  committed_token_fingerprint TEXT,
+  state TEXT NOT NULL,
+  allocation_id TEXT NOT NULL,
+  revocation_epoch INTEGER NOT NULL,
+  runtime_epoch INTEGER NOT NULL,
+  recovery_disposition TEXT NOT NULL,
+  healthy INTEGER NOT NULL DEFAULT 1,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  delivered_seq INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+selectBySessionId:
+SELECT session_id, session_epoch, owner_key, principal_id, loaded_model_id,
+       model_revision_id, engine_build_id, backend, device_execution_fingerprint,
+       template_epoch, tokenizer_epoch, load_configuration_digest, tokenizer_digest,
+       context_config, committed_token_fingerprint, state, allocation_id,
+       revocation_epoch, runtime_epoch, recovery_disposition, healthy, pinned,
+       delivered_seq, created_at, updated_at
+FROM sessions
+WHERE session_id = ?;
+
+listAll:
+SELECT session_id, session_epoch, owner_key, principal_id, loaded_model_id,
+       model_revision_id, engine_build_id, backend, device_execution_fingerprint,
+       template_epoch, tokenizer_epoch, load_configuration_digest, tokenizer_digest,
+       context_config, committed_token_fingerprint, state, allocation_id,
+       revocation_epoch, runtime_epoch, recovery_disposition, healthy, pinned,
+       delivered_seq, created_at, updated_at
+FROM sessions
+ORDER BY updated_at ASC;
+
+listByState:
+SELECT session_id, session_epoch, owner_key, principal_id, loaded_model_id,
+       model_revision_id, engine_build_id, backend, device_execution_fingerprint,
+       template_epoch, tokenizer_epoch, load_configuration_digest, tokenizer_digest,
+       context_config, committed_token_fingerprint, state, allocation_id,
+       revocation_epoch, runtime_epoch, recovery_disposition, healthy, pinned,
+       delivered_seq, created_at, updated_at
+FROM sessions
+WHERE state = ?
+ORDER BY updated_at ASC;
+
+listNonTerminal:
+SELECT session_id, session_epoch, owner_key, principal_id, loaded_model_id,
+       model_revision_id, engine_build_id, backend, device_execution_fingerprint,
+       template_epoch, tokenizer_epoch, load_configuration_digest, tokenizer_digest,
+       context_config, committed_token_fingerprint, state, allocation_id,
+       revocation_epoch, runtime_epoch, recovery_disposition, healthy, pinned,
+       delivered_seq, created_at, updated_at
+FROM sessions
+WHERE state != 'CLOSED'
+ORDER BY updated_at ASC;
+
+upsertSession:
+INSERT INTO sessions(
+  session_id, session_epoch, owner_key, principal_id, loaded_model_id,
+  model_revision_id, engine_build_id, backend, device_execution_fingerprint,
+  template_epoch, tokenizer_epoch, load_configuration_digest, tokenizer_digest,
+  context_config, committed_token_fingerprint, state, allocation_id,
+  revocation_epoch, runtime_epoch, recovery_disposition, healthy, pinned,
+  delivered_seq, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(session_id) DO UPDATE SET
+  session_epoch = excluded.session_epoch,
+  owner_key = excluded.owner_key,
+  principal_id = excluded.principal_id,
+  loaded_model_id = excluded.loaded_model_id,
+  model_revision_id = excluded.model_revision_id,
+  engine_build_id = excluded.engine_build_id,
+  backend = excluded.backend,
+  device_execution_fingerprint = excluded.device_execution_fingerprint,
+  template_epoch = excluded.template_epoch,
+  tokenizer_epoch = excluded.tokenizer_epoch,
+  load_configuration_digest = excluded.load_configuration_digest,
+  tokenizer_digest = excluded.tokenizer_digest,
+  context_config = excluded.context_config,
+  committed_token_fingerprint = excluded.committed_token_fingerprint,
+  state = excluded.state,
+  allocation_id = excluded.allocation_id,
+  revocation_epoch = excluded.revocation_epoch,
+  runtime_epoch = excluded.runtime_epoch,
+  recovery_disposition = excluded.recovery_disposition,
+  healthy = excluded.healthy,
+  pinned = excluded.pinned,
+  delivered_seq = excluded.delivered_seq,
+  updated_at = excluded.updated_at;
+
+updateStateAndDisposition:
+UPDATE sessions
+SET state = ?, recovery_disposition = ?, healthy = ?, pinned = ?,
+    committed_token_fingerprint = ?, delivered_seq = ?, updated_at = ?
+WHERE session_id = ?;
+
+deleteBySessionId:
+DELETE FROM sessions WHERE session_id = ?;

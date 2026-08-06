@@ -1,0 +1,440 @@
+schemaVersion: 2
+language: Android Interface Definition Language
+package: ai.omnillm.api
+projectionRule: generated .aidl files are projections; canonical state, scope, error and request semantics remain in the shared
+  catalogs
+transportConstraints:
+  binderTransactionBudgetBytes: 524288
+  largePayloadStrategy: AssetHandle/PFD or bounded page; never unbounded parcel payload
+  streamDelivery: application ACK with streamEpoch and half-open sequence ranges
+declarations:
+- name: CommandResult
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniError;\n@JavaDerive(toString=true)\nparcelable CommandResult\
+    \ {\n  String commandId;\n  String state;\n  long resourceVersion;\n  @nullable String affectedResourceId;\n  @nullable\
+    \ String resultSchemaId;\n  @nullable String resultCanonicalJson;\n  @nullable OmniError error;\n}"
+- name: OmniCommandRequest
+  kind: parcelable
+  package: ai.omnillm.api
+  source: |
+    package ai.omnillm.api;
+
+    @JavaDerive(toString=true)
+    parcelable OmniCommandRequest {
+      String commandId;
+      String idempotencyKey;
+      boolean hasExpectedVersion;
+      long expectedVersion;
+      String canonicalInputDigest;
+    }
+- name: IJobObserver
+  kind: interface
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniJobEventBatch;\nimport ai.omnillm.api.OmniError;\noneway interface\
+    \ IJobObserver {\n  void onEvents(in OmniJobEventBatch batch);\n  void onRejected(in OmniError error);\n}"
+- name: IOmniAdmin
+  kind: interface
+  package: ai.omnillm.api
+  source: |
+    package ai.omnillm.api;
+
+    import ai.omnillm.api.OmniJobSpec;
+    import ai.omnillm.api.OmniJobInfo;
+    import ai.omnillm.api.IJobObserver;
+    import ai.omnillm.api.CommandResult;
+    import ai.omnillm.api.OmniCommandRequest;
+    import ai.omnillm.api.OmniSettingsPatch;
+    import ai.omnillm.api.OmniSettingsSnapshot;
+    import ai.omnillm.api.OmniAdminSnapshot;
+    import ai.omnillm.api.OmniConsentGrant;
+    import ai.omnillm.api.OmniContentReportReceipt;
+    interface IOmniAdmin {
+      OmniJobInfo startJob(in OmniJobSpec spec);
+      OmniJobInfo getJob(String jobId);
+      CommandResult cancelJob(String jobId, in OmniCommandRequest command);
+      CommandResult queryCommand(String commandId);
+      String observeJobs(@nullable String cursor, int credit, in IJobObserver observer);
+      void ackJobEvents(String subscriptionId, long streamEpoch, long eventToExclusive);
+      void closeSubscription(String subscriptionId);
+      CommandResult applySettings(in OmniSettingsPatch patch);
+      OmniSettingsSnapshot getSettings();
+      OmniAdminSnapshot getSnapshot();
+      OmniConsentGrant reviewContentReport(String reportId, String canonicalPayloadDigest,
+          String warningPolicyVersion, String localUserProfileId, in OmniCommandRequest command);
+      CommandResult submitContentReport(String reportId, String consentGrantId,
+          in OmniCommandRequest command);
+      OmniContentReportReceipt getContentReportReceipt(String reportId);
+      CommandResult executePlaygroundChat(String modelRevisionId, String userMessage,
+          String requestId, String idempotencyKey, in OmniCommandRequest command);
+      CommandResult queryPlaygroundRequest(String requestId);
+      CommandResult cancelPlaygroundRequest(String requestId, in OmniCommandRequest command);
+      CommandResult executeServerSmoke(String modelRevisionId, String requestId,
+          String idempotencyKey, in OmniCommandRequest command);
+      String getInferenceCapabilityState(String capabilityId, String modelRevisionId);
+    }
+- name: IOmniBinding
+  kind: interface
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniPairingRequest;\nimport ai.omnillm.api.OmniPairingChallenge;\n\
+    import ai.omnillm.api.OmniPairingStatus;\nimport ai.omnillm.api.IOmniRuntime;\ninterface IOmniBinding {\n  OmniPairingChallenge\
+    \ beginPairing(in OmniPairingRequest request);\n  OmniPairingStatus queryPairing(String challengeId);\n  @nullable IOmniRuntime\
+    \ openRuntime(String registrationHandle);\n  int getProtocolMajor();\n  int getProtocolMinor();\n}"
+- name: IOmniRuntime
+  kind: interface
+  package: ai.omnillm.api
+  source: |
+    package ai.omnillm.api;
+
+    import android.os.ParcelFileDescriptor;
+    import ai.omnillm.api.OmniChatRequest;
+    import ai.omnillm.api.OmniEmbeddingRequest;
+    import ai.omnillm.api.IOmniStreamCallback;
+    import ai.omnillm.api.IStreamSession;
+    import ai.omnillm.api.OmniRequestState;
+    import ai.omnillm.api.OmniModelPage;
+    import ai.omnillm.api.CommandResult;
+    import ai.omnillm.api.OmniCommandRequest;
+    import ai.omnillm.api.OmniAssetCreateRequest;
+    import ai.omnillm.api.OmniAssetInfo;
+    import ai.omnillm.api.OmniAssetUploadRequest;
+    import ai.omnillm.api.OmniContentReportProposalRequest;
+    import ai.omnillm.api.OmniContentReportInfo;
+    import ai.omnillm.api.OmniContentReportReceipt;
+    interface IOmniRuntime {
+      IStreamSession chat(in OmniChatRequest request, in IOmniStreamCallback callback);
+      IStreamSession embed(in OmniEmbeddingRequest request, in IOmniStreamCallback callback);
+      OmniRequestState queryRequest(String requestId);
+      CommandResult cancelRequest(String requestId, in OmniCommandRequest command);
+      CommandResult queryCommand(String commandId);
+      OmniModelPage listModels(@nullable String pageToken, int pageSize);
+      OmniAssetInfo createAsset(in OmniAssetCreateRequest request);
+      CommandResult uploadAssetContent(in OmniAssetUploadRequest request,
+          in ParcelFileDescriptor content);
+      OmniAssetInfo commitAsset(String assetId, in OmniCommandRequest command);
+      OmniAssetInfo getAsset(String assetId);
+      CommandResult deleteAsset(String assetId, in OmniCommandRequest command);
+      OmniContentReportInfo createContentReportProposal(in OmniContentReportProposalRequest request);
+      OmniContentReportInfo getContentReport(String reportId);
+      OmniContentReportReceipt getContentReportReceipt(String reportId);
+      CommandResult cancelContentReport(String reportId, in OmniCommandRequest command);
+      CommandResult discardContentReport(String reportId, in OmniCommandRequest command);
+      int getProtocolMajor();
+      int getProtocolMinor();
+    }
+- name: IOmniStreamCallback
+  kind: interface
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniEventBatch;\nimport ai.omnillm.api.OmniError;\noneway interface\
+    \ IOmniStreamCallback {\n  void onEvents(in OmniEventBatch batch);\n  void onRejected(in OmniError error);\n}"
+- name: IStreamSession
+  kind: interface
+  package: ai.omnillm.api
+  source: |
+    package ai.omnillm.api;
+
+    import ai.omnillm.api.CommandResult;
+    import ai.omnillm.api.OmniCommandRequest;
+    import ai.omnillm.api.OmniRequestState;
+    interface IStreamSession {
+      void ackEvents(long streamEpoch, long seqToExclusive);
+      CommandResult cancel(in OmniCommandRequest command);
+      OmniRequestState query();
+      void close();
+    }
+- name: OmniAdminSnapshot
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniJobInfo;\nimport ai.omnillm.api.OmniModelInfo;\nimport ai.omnillm.api.OmniSettingsSnapshot;\n\
+    @JavaDerive(toString=true)\nparcelable OmniAdminSnapshot {\n  long snapshotVersion;\n  String runtimeState;\n  String\
+    \ lanState;\n  OmniJobInfo[] activeJobs;\n  OmniModelInfo[] models;\n  OmniSettingsSnapshot settings;\n}"
+- name: OmniAssetCreateRequest
+  kind: parcelable
+  package: ai.omnillm.api
+  source: |
+    package ai.omnillm.api;
+
+    import ai.omnillm.api.OmniCommandRequest;
+    @JavaDerive(toString=true)
+    parcelable OmniAssetCreateRequest {
+      String assetId;
+      OmniCommandRequest command;
+      String purpose;
+      long maxBytes;
+      @nullable String contentTypeHint;
+      @nullable String expectedSha256;
+      long ttlSeconds;
+    }
+- name: OmniAssetInfo
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniError;\n@JavaDerive(toString=true)\nparcelable OmniAssetInfo\
+    \ {\n  String assetId;\n  String state;\n  long bytes;\n  @nullable String sha256;\n  long expiresAtEpochMillis;\n  long\
+    \ resourceVersion;\n  @nullable OmniError error;\n}"
+- name: OmniAssetUploadRequest
+  kind: parcelable
+  package: ai.omnillm.api
+  source: |
+    package ai.omnillm.api;
+
+    import ai.omnillm.api.OmniCommandRequest;
+    @JavaDerive(toString=true)
+    parcelable OmniAssetUploadRequest {
+      String assetId;
+      OmniCommandRequest command;
+      boolean hasExpectedBytes;
+      long expectedBytes;
+      @nullable String expectedSha256;
+    }
+- name: OmniBenchmarkJobParameters
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniBenchmarkJobParameters {\n  String modelRevisionId;\n\
+    \  String engineBuildId;\n  String backend;\n  String measurementProfileId;\n  int iterations;\n}"
+- name: OmniCapabilityEntry
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniCapabilityEntry {\n  String capabilityId;\n\
+    \  String state;\n  String evidenceLabel;\n  @nullable String reasonCode;\n}"
+- name: OmniChatMessage
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniChatMessage {\n  String role;\n  String content;\n\
+    \  String[] assetIds;\n}"
+- name: OmniChatRequest
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniChatMessage;\nimport ai.omnillm.api.OmniFallback;\n@JavaDerive(toString=true)\n\
+    parcelable OmniChatRequest {\n  String requestId;\n  String idempotencyKey;\n  String model;\n  OmniChatMessage[] messages;\n\
+    \  boolean stream;\n  boolean hasMaxOutputTokens;\n  int maxOutputTokens;\n  long deadlineElapsedRealtimeNanos;\n  OmniFallback\
+    \ fallback;\n  @nullable String responseFormatSchemaId;\n  @nullable String responseFormatCanonicalJson;\n  @nullable\
+    \ String toolsSchemaId;\n  @nullable String toolsCanonicalJson;\n}"
+- name: OmniContentReportInfo
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniError;\n@JavaDerive(toString=true)\nparcelable OmniContentReportInfo\
+    \ {\n  String reportId;\n  String state;\n  long expiresAtEpochMillis;\n  @nullable String receiptId;\n  long resourceVersion;\n\
+    \  @nullable OmniError error;\n}"
+- name: OmniContentReportJobParameters
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniContentReportJobParameters {\n  String reportId;\n\
+    }"
+- name: OmniContentReportProposalRequest
+  kind: parcelable
+  package: ai.omnillm.api
+  source: |
+    package ai.omnillm.api;
+
+    import ai.omnillm.api.OmniCommandRequest;
+    @JavaDerive(toString=true)
+    parcelable OmniContentReportProposalRequest {
+      OmniCommandRequest command;
+      String reportId;
+      String category;
+      long createdAtEpochMillis;
+      String appBuild;
+      String modelRevisionId;
+      String engineBuildId;
+      String backend;
+      String localPolicyVersion;
+      String outputDigest;
+      String userLocale;
+      @nullable String description;
+      @nullable String promptExcerpt;
+      @nullable String outputExcerpt;
+      @nullable String diagnosticSummary;
+    }
+- name: OmniConsentGrant
+  kind: parcelable
+  package: ai.omnillm.api
+  source: |
+    package ai.omnillm.api;
+
+    @JavaDerive(toString=true)
+    parcelable OmniConsentGrant {
+      String grantId;
+      String principalId;
+      String reportId;
+      String canonicalPayloadDigest;
+      String warningPolicyVersion;
+      String localUserProfileId;
+      long issuedAtEpochMillis;
+      long expiresAtEpochMillis;
+      String nonce;
+    }
+- name: OmniContentReportReceipt
+  kind: parcelable
+  package: ai.omnillm.api
+  source: |
+    package ai.omnillm.api;
+
+    @JavaDerive(toString=true)
+    parcelable OmniContentReportReceipt {
+      String receiptId;
+      String reportId;
+      long acceptedAtEpochMillis;
+      String statusUrl;
+    }
+- name: OmniDeleteJobParameters
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniDeleteJobParameters {\n  String resourceKind;\n\
+    \  String resourceId;\n  long expectedResourceVersion;\n  boolean forceAfterDrain;\n}"
+- name: OmniDiagnosticExportJobParameters
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniDiagnosticExportJobParameters {\n  boolean\
+    \ includeDetail;\n  String[] categories;\n  long ttlSeconds;\n}"
+- name: OmniDownloadJobParameters
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniDownloadJobParameters {\n  String sourceUrl;\n\
+    \  @nullable String expectedSha256;\n  boolean hasExpectedBytes;\n  long expectedBytes;\n  @nullable String targetName;\n\
+    }"
+- name: OmniEmbeddingRequest
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniEmbeddingRequest {\n  String requestId;\n\
+    \  String idempotencyKey;\n  String model;\n  String[] inputs;\n  @nullable String encodingFormat;\n  boolean hasDimensions;\n\
+    \  int dimensions;\n  long deadlineElapsedRealtimeNanos;\n}"
+- name: OmniError
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniErrorDetail;\n@JavaDerive(toString=true)\nparcelable OmniError\
+    \ {\n  String code;\n  String message;\n  boolean retryable;\n  OmniErrorDetail[] details;\n}"
+- name: OmniErrorDetail
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniErrorDetail {\n  String key;\n  String valueType;\n\
+    \  @nullable String stringValue;\n  long longValue;\n  double doubleValue;\n  boolean boolValue;\n}"
+- name: OmniEvent
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniError;\n@JavaDerive(toString=true)\nparcelable OmniEvent {\n\
+    \  String kind;\n  @nullable String textDelta;\n  boolean hasTokenCount;\n  long tokenCount;\n  boolean hasProgress;\n\
+    \  double progress;\n  @nullable String actualModelRevisionId;\n  @nullable String engineBuildId;\n  @nullable String\
+    \ backend;\n  @nullable String terminalState;\n  @nullable OmniError error;\n  @nullable String extensionSchemaId;\n \
+    \ @nullable String extensionCanonicalJson;\n  boolean terminal;\n}"
+- name: OmniEventBatch
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniEvent;\n@JavaDerive(toString=true)\nparcelable OmniEventBatch\
+    \ {\n  long streamEpoch;\n  long seqFrom;\n  long seqTo;\n  OmniEvent[] events;\n}"
+- name: OmniFallback
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniFallback {\n  String policy;\n  String[]\
+    \ allowedRevisionIds;\n}"
+- name: OmniImportJobParameters
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniImportJobParameters {\n  String assetId;\n\
+    \  @nullable String expectedFormat;\n  @nullable String expectedSha256;\n}"
+- name: OmniJobEvent
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniError;\n@JavaDerive(toString=true)\nparcelable OmniJobEvent\
+    \ {\n  String eventId;\n  String jobId;\n  int attemptNo;\n  String kind;\n  String state;\n  double progress;\n  long\
+    \ occurredAtEpochMillis;\n  @nullable OmniError error;\n}"
+- name: OmniJobEventBatch
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniJobEvent;\n@JavaDerive(toString=true)\nparcelable OmniJobEventBatch\
+    \ {\n  String subscriptionId;\n  long streamEpoch;\n  long eventFrom;\n  long eventTo;\n  OmniJobEvent[] events;\n}"
+- name: OmniJobInfo
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniError;\n@JavaDerive(toString=true)\nparcelable OmniJobInfo\
+    \ {\n  String jobId;\n  String state;\n  long resourceVersion;\n  double progress;\n  @nullable OmniError error;\n}"
+- name: OmniJobSpec
+  kind: parcelable
+  package: ai.omnillm.api
+  source: |
+    package ai.omnillm.api;
+
+    import ai.omnillm.api.OmniCommandRequest;
+    import ai.omnillm.api.OmniDownloadJobParameters;
+    import ai.omnillm.api.OmniImportJobParameters;
+    import ai.omnillm.api.OmniBenchmarkJobParameters;
+    import ai.omnillm.api.OmniDeleteJobParameters;
+    import ai.omnillm.api.OmniDiagnosticExportJobParameters;
+    import ai.omnillm.api.OmniContentReportJobParameters;
+    @JavaDerive(toString=true)
+    parcelable OmniJobSpec {
+      OmniCommandRequest command;
+      String jobId;
+      String kind;
+      @nullable OmniDownloadJobParameters download;
+      @nullable OmniImportJobParameters importSpec;
+      @nullable OmniBenchmarkJobParameters benchmark;
+      @nullable OmniDeleteJobParameters deleteSpec;
+      @nullable OmniDiagnosticExportJobParameters diagnosticExport;
+      @nullable OmniContentReportJobParameters contentReport;
+    }
+- name: OmniModelInfo
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniCapabilityEntry;\n@JavaDerive(toString=true)\nparcelable OmniModelInfo\
+    \ {\n  String modelRevisionId;\n  String displayName;\n  String installationState;\n  OmniCapabilityEntry[] capabilities;\n\
+    }"
+- name: OmniModelPage
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniModelInfo;\n@JavaDerive(toString=true)\nparcelable OmniModelPage\
+    \ {\n  OmniModelInfo[] items;\n  @nullable String nextPageToken;\n  long snapshotVersion;\n}"
+- name: OmniPairingChallenge
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniPairingChallenge {\n  String challengeId;\n\
+    \  String observedPrincipalSummary;\n  String[] requestedScopes;\n  String state;\n  long expiresAtEpochMillis;\n}"
+- name: OmniPairingRequest
+  kind: parcelable
+  package: ai.omnillm.api
+  source: |
+    package ai.omnillm.api;
+
+    import ai.omnillm.api.OmniCommandRequest;
+    @JavaDerive(toString=true)
+    parcelable OmniPairingRequest {
+      OmniCommandRequest command;
+      String clientDisplayName;
+      String clientPublicKey;
+      String[] requestedScopes;
+    }
+- name: OmniPairingStatus
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniError;\n@JavaDerive(toString=true)\nparcelable OmniPairingStatus\
+    \ {\n  String challengeId;\n  String state;\n  @nullable String registrationHandle;\n  String[] grantedScopes;\n  long\
+    \ expiresAtEpochMillis;\n  @nullable OmniError error;\n}"
+- name: OmniRequestState
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniError;\n@JavaDerive(toString=true)\nparcelable OmniRequestState\
+    \ {\n  String requestId;\n  String state;\n  long resourceVersion;\n  @nullable String actualModelRevisionId;\n  @nullable\
+    \ String engineBuildId;\n  @nullable String backend;\n  @nullable OmniError terminalError;\n}"
+- name: OmniSettingEntry
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniSettingEntry {\n  String key;\n  String valueType;\n\
+    \  @nullable String stringValue;\n  long longValue;\n  double doubleValue;\n  boolean boolValue;\n  String[] stringListValue;\n\
+    }"
+- name: OmniSettingsPatch
+  kind: parcelable
+  package: ai.omnillm.api
+  source: |
+    package ai.omnillm.api;
+
+    import ai.omnillm.api.OmniCommandRequest;
+    import ai.omnillm.api.OmniSettingEntry;
+    @JavaDerive(toString=true)
+    parcelable OmniSettingsPatch {
+      OmniCommandRequest command;
+      OmniSettingEntry[] changes;
+    }
+- name: OmniSettingsSnapshot
+  kind: parcelable
+  package: ai.omnillm.api
+  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniSettingEntry;\n@JavaDerive(toString=true)\nparcelable OmniSettingsSnapshot\
+    \ {\n  long resourceVersion;\n  OmniSettingEntry[] values;\n}"

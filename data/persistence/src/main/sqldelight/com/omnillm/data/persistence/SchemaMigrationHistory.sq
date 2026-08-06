@@ -1,0 +1,20 @@
+-- Authority: specs/database/omnillm-schema.sql#schema_migration_history
+-- History rows only for COMMITTED attempts, same transaction as schema_metadata advance.
+
+CREATE TABLE schema_migration_history (
+  migration_id TEXT NOT NULL PRIMARY KEY,
+  from_version INTEGER NOT NULL,
+  to_version INTEGER NOT NULL,
+  plan_digest TEXT NOT NULL,
+  committed_at TEXT NOT NULL
+);
+
+selectHistory:
+SELECT migration_id, from_version, to_version, plan_digest, committed_at
+FROM schema_migration_history
+WHERE migration_id = ?;
+
+insertHistory:
+INSERT INTO schema_migration_history(
+  migration_id, from_version, to_version, plan_digest, committed_at
+) VALUES (?, ?, ?, ?, ?);

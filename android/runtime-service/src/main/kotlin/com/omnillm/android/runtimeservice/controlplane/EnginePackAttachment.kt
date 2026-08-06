@@ -1,0 +1,271 @@
+package com.omnillm.android.runtimeservice.controlplane
+
+import android.os.Build
+import android.util.Log
+import com.omnillm.core.contracts.DeviceExecutionFingerprint
+import com.omnillm.core.contracts.EngineBuildId
+import com.omnillm.engines.api.EngineRegistration
+import com.omnillm.engines.api.EngineRegistry
+import com.omnillm.engines.litertlm.LitertLmModule
+import com.omnillm.engines.llamacpp.LlamaCppEngine
+import com.omnillm.engines.llamacpp.LlamaCppModule
+import com.omnillm.engines.llamacpp.lock.UpstreamLockLoader
+import com.omnillm.engines.llamacpp.native.JniNativeBackend
+import com.omnillm.engines.mlcllm.MlcLlmModule
+import com.omnillm.engines.mlcllm.QualificationCells as MlcQualificationCells
+import com.omnillm.engines.mllm.MllmModule
+import com.omnillm.engines.ortgenai.OrtGenaiModule
+
+/**
+ * Engine Pack attach for the `:runtime` control plane (ENGINE-STANDARD, INV-001).
+ *
+ * Attaches **all catalog engines** to a single [EngineRegistry]:
+ * - `llama.cpp` — real [JniNativeBackend] when packaged; else fail-closed (no Stub).
+ * - LiteRT-LM, MLC-LLM, mllm, ONNX-Runtime-GenAI — metadata + UNQUALIFIED cells only
+ *   (stub/UNKNOWN; no real native/SDK load).
+ *
+ * Rules:
+ * - Runs only after lifecycle READY/DEGRADED (caller enforces).
+ * - Registers build metadata + UNQUALIFIED cells only (no QUALIFIED/SUPPORTED without evidence).
+ * - Selection / exposure governed by [EngineSelectionPolicy].
+ * - Does not write OmniLLM domain DB (ENGINE-STANDARD §3 / ADR-010).
+ */
+class EnginePackAttachment private constructor(
+    val registry: EngineRegistry,
+    val llamaCppEngine: LlamaCppEngine?,
+    val registrationsByEngineId: Map<String, EngineRegistration>,
+    val nativeLibraryPresent: Boolean,
+    val notes: Map<String, String>,
+) {
+    val llamaCppAttached: Boolean get() = llamaCppEngine != null
+
+    val llamaCppRegistration: EngineRegistration?
+        get() = registrationsByEngineId[LlamaCppModule.ENGINE_ID]
+
+    /** All registered engineIds (stable catalog order when present). */
+    val registeredEngineIds: List<String>
+        get() = EngineSelectionPolicy.CATALOG_ENGINE_IDS.filter { it in registrationsByEngineId }
+
+    companion object {
+        private const val TAG = "OmniEnginePack"
+        private const val DRIVER_PLACEHOLDER: String = "unknown-driver"
+
+        /**
+         * Attempt production attach. Safe to call once after READY/DEGRADED.
+         * Does not write OmniLLM domain DB (ENGINE-STANDARD §3).
+         *
+         * Only llama-cpp may load a real native backend; peers stay stub/UNKNOWN.
+         */
+        fun attachAfterReady(
+            deviceFingerprint: DeviceExecutionFingerprint = defaultDeviceFingerprint(),
+        ): EnginePackAttachment {
+            val registry = EngineRegistry()
+            val registrations = linkedMapOf<String, EngineRegistration>()
+
+            // ---- llama.cpp (native-eligible) ----
+            val llamaLock = UpstreamLockLoader.loadFromClasspathOrTemplate()
+            val llamaBuildId = llamaLock.resolvedEngineBuildId()
+                ?: LlamaCppModule.defaultEngineBuildId()
+            val llamaReg = LlamaCppModule.registerWith(
+                registry = registry,
+                lock = llamaLock,
+                engineBuildId = llamaBuildId,
+            )
+            LlamaCppModule.seedUnqualifiedPlaceholders(
+                registry = registry,
+                deviceFingerprint = deviceFingerprint,
+                engineBuildId = llamaBuildId,
+                driverFingerprint = DRIVER_PLACEHOLDER,
+            )
+            registrations[LlamaCppModule.ENGINE_ID] = llamaReg
+
+            // Production: JniNativeBackend only — never silent StubNativeBackend.
+            val llamaEngine = LlamaCppModule.createEngineWithNativeOrNull(
+                lock = llamaLock,
+                engineBuildId = llamaBuildId,
+            )
+            val nativePresent = llamaEngine != null || JniNativeBackend.isNativePresent()
+
+            // ---- Peer engines: registry stub / UNKNOWN only (no real native) ----
+            registerPeerEngines(registry, deviceFingerprint, registrations)
+
+            check(!EngineSelectionPolicy.anySupportedCell(registry)) {
+                "Engine attach must not project SUPPORTED without qualification evidence"
+            }
+
+            val notes = buildMap {
+                putAll(EngineSelectionPolicy.summaryNotes())
+                put("mode", "production")
+                put("llama.engineBuildId", llamaBuildId.value)
+                put("llama.lockState", if (llamaLock.isComplete()) "LOCKED" else "NOT_LOCKED")
+                put("llama.nativeLibrary", llamaEngine?.native?.libraryLabel() ?: "missing")
+                put("llama.nativePresent", nativePresent.toString())
+                put("llama.adapterAttached", (llamaEngine != null).toString())
+                put("llama.qualificationStatus", LlamaCppModule.QUALIFICATION_STATUS)
+                put("registry.registrations", registry.listRegistrations().size.toString())
+                put("registry.cells", registry.listCells().size.toString())
+                put("registryExposure", "UNKNOWN")
+                put("anySupported", "false")
+                if (llamaEngine == null) {
+                    put(
+                        "llama.failClosed",
+                        "libomnillm_llama missing or ABI mismatch — execute path remains fail-closed",
+                    )
+                }
+            }
+
+            if (llamaEngine != null) {
+                Log.i(
+                    TAG,
+                    "llama-cpp adapter attached library=${llamaEngine.native.libraryLabel()} " +
+                        "buildId=${llamaBuildId.value} cells=UNQUALIFIED peers=stub",
+                )
+            } else {
+                Log.w(
+                    TAG,
+                    "llama-cpp native lib missing — adapter not attached (fail closed). " +
+                        "All catalog engines registered; no SUPPORTED cells.",
+                )
+            }
+            Log.i(
+                TAG,
+                "engine registry attached engines=${registrations.keys.joinToString()} " +
+                    "cells=${registry.listCells().size} anySupported=false",
+            )
+
+            return EnginePackAttachment(
+                registry = registry,
+                llamaCppEngine = llamaEngine,
+                registrationsByEngineId = registrations.toMap(),
+                nativeLibraryPresent = nativePresent,
+                notes = notes,
+            )
+        }
+
+        /**
+         * Host / unit-test attach without JNI (registry for all engines + optional
+         * llama-cpp stub engine). Production must use [attachAfterReady].
+         */
+        fun attachForTest(
+            includeStubEngine: Boolean = false,
+            deviceFingerprint: DeviceExecutionFingerprint =
+                DeviceExecutionFingerprint.parse("device-fp-engine-test"),
+            engineBuildId: EngineBuildId = LlamaCppModule.defaultEngineBuildId(),
+        ): EnginePackAttachment {
+            val registry = EngineRegistry()
+            val registrations = linkedMapOf<String, EngineRegistration>()
+
+            val llamaLock = UpstreamLockLoader.loadFromClasspathOrTemplate()
+            val llamaReg = LlamaCppModule.registerWith(
+                registry = registry,
+                lock = llamaLock,
+                engineBuildId = engineBuildId,
+            )
+            LlamaCppModule.seedUnqualifiedPlaceholders(
+                registry = registry,
+                deviceFingerprint = deviceFingerprint,
+                engineBuildId = engineBuildId,
+                driverFingerprint = DRIVER_PLACEHOLDER,
+            )
+            registrations[LlamaCppModule.ENGINE_ID] = llamaReg
+
+            registerPeerEngines(registry, deviceFingerprint, registrations)
+
+            check(!EngineSelectionPolicy.anySupportedCell(registry)) {
+                "Engine attach must not project SUPPORTED without qualification evidence"
+            }
+
+            val engine = if (includeStubEngine) {
+                // Stub is test-only; EngineSelectionPolicy still forbids SUPPORTED.
+                LlamaCppModule.createEngine(lock = llamaLock, engineBuildId = engineBuildId)
+            } else {
+                null
+            }
+
+            return EnginePackAttachment(
+                registry = registry,
+                llamaCppEngine = engine,
+                registrationsByEngineId = registrations.toMap(),
+                nativeLibraryPresent = false,
+                notes = buildMap {
+                    putAll(EngineSelectionPolicy.summaryNotes())
+                    put("mode", "test")
+                    put("includeStubEngine", includeStubEngine.toString())
+                    put("registryExposure", "UNKNOWN")
+                    put("registry.registrations", registry.listRegistrations().size.toString())
+                    put("registry.cells", registry.listCells().size.toString())
+                    put("anySupported", "false")
+                },
+            )
+        }
+
+        /**
+         * Register peer Engine Packs as metadata + UNQUALIFIED cells only.
+         * Never loads real native/SDK backends (see [EngineSelectionPolicy]).
+         */
+        private fun registerPeerEngines(
+            registry: EngineRegistry,
+            deviceFingerprint: DeviceExecutionFingerprint,
+            out: MutableMap<String, EngineRegistration>,
+        ) {
+            // LiteRT-LM
+            val litertReg = LitertLmModule.registerWith(registry = registry)
+            LitertLmModule.seedUnqualifiedPlaceholders(
+                registry = registry,
+                deviceFingerprint = deviceFingerprint,
+                driverFingerprint = DRIVER_PLACEHOLDER,
+            )
+            out[LitertLmModule.ENGINE_ID] = litertReg
+            require(!EngineSelectionPolicy.mayUseRealNativeBackend(LitertLmModule.ENGINE_ID))
+
+            // MLC-LLM (register without default seed so we can pass device fingerprint)
+            val mlcReg = MlcLlmModule.registerWith(
+                registry = registry,
+                seedPlaceholderCells = false,
+            )
+            MlcQualificationCells.seedUnqualified(
+                registry = registry,
+                engineBuildId = mlcReg.engineBuildId,
+                deviceFingerprint = deviceFingerprint,
+                driverFingerprint = DRIVER_PLACEHOLDER,
+            )
+            out[MlcLlmModule.ENGINE_ID] = mlcReg
+            require(!EngineSelectionPolicy.mayUseRealNativeBackend(MlcLlmModule.ENGINE_ID))
+
+            // mllm — metadata + UNQUALIFIED cells only (private-server stub; no AAR load)
+            val mllmReg = MllmModule.registerWith(
+                registry = registry,
+                seedCells = false,
+            )
+            MllmModule.seedUnqualifiedPlaceholders(
+                registry = registry,
+                engineBuildId = mllmReg.engineBuildId,
+                deviceFingerprint = deviceFingerprint,
+                driverFingerprint = DRIVER_PLACEHOLDER,
+            )
+            out[MllmModule.ENGINE_ID] = mllmReg
+            require(!EngineSelectionPolicy.mayUseRealNativeBackend(MllmModule.ENGINE_ID))
+
+            // ONNX Runtime GenAI
+            val ortReg = OrtGenaiModule.registerDesignCompleteUnqualified(
+                registry = registry,
+                deviceFingerprint = deviceFingerprint,
+                driverFingerprint = DRIVER_PLACEHOLDER,
+            )
+            out[OrtGenaiModule.ENGINE_ID] = ortReg
+            require(!EngineSelectionPolicy.mayUseRealNativeBackend(OrtGenaiModule.ENGINE_ID))
+        }
+
+        private fun defaultDeviceFingerprint(): DeviceExecutionFingerprint {
+            val raw = listOf(
+                Build.FINGERPRINT.takeIf { it.isNotBlank() },
+                Build.MODEL,
+                Build.DEVICE,
+                Build.HARDWARE,
+            ).filterNotNull().joinToString("|")
+            val safe = raw.replace(Regex("[^A-Za-z0-9._:-]"), "_")
+                .ifBlank { "android-device-unknown" }
+            return DeviceExecutionFingerprint.parse(safe.take(200))
+        }
+    }
+}

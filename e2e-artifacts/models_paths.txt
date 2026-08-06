@@ -1,0 +1,32 @@
+﻿# Model storage probe — emulator-5554 — 2026-08-06T15:35:08.9183718+08:00
+# Package under test: com.omnillm.debug (NOT com.omnillm)
+# Access method: run-as com.omnillm.debug (debug build; no root required)
+
+## dataDir
+/data/user/0/com.omnillm.debug
+
+## App-private model-related paths (run-as succeeded)
+files/
+  model-store/
+    blobs/      (EMPTY)
+    packages/   (EMPTY)
+  installations/ (EMPTY)
+  diagnostics/   (EMPTY)
+  quarantine/    (EMPTY)
+  license-text/  (EMPTY)
+  profileInstalled (24 bytes)
+
+## Other app private
+databases/omnillm.db (~228 KB) + journal
+cache/omnillm.db.lck
+cache/omnillm-asset-quarantine/
+no_backup/omnillm_secret_broker_master.bin
+no_backup/journal/ no_backup/trust/
+
+## External storage
+/sdcard/Android/data/com.omnillm.debug/ — NOT PRESENT
+No *.gguf under /sdcard (find returned nothing)
+
+## Conclusion
+Model store scaffolding exists but no GGUF/blob packages installed on device at capture time.
+gemma-3-270m Q8_0 not present under app-private model-store.

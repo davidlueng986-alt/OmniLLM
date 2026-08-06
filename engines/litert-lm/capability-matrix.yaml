@@ -1,0 +1,285 @@
+# LiteRT-LM capability matrix rows (ENGINE-LITERT / ENGINE-STANDARD §5)
+# Runtime exposure is projected by EngineRegistry from qualification cells.
+# Design baseline ≠ SUPPORTED. Default runtime capability: UNKNOWN.
+#
+# Dimensions: backend × format × phase × placement × operation profile.
+# Cancellation modes: COOPERATIVE | INTERRUPTIBLE | WORKER_KILL_ONLY | NOT_SUPPORTED | UNKNOWN
+# Cell status: UNQUALIFIED | STATIC_REVIEWED | SPIKE_REQUIRED | QUALIFIED_WITH_ENVELOPE | SUSPENDED
+
+schemaVersion: 1
+engineId: LiteRT-LM
+designStatus: BASELINE
+upstreamLockStatus: NOT_LOCKED
+qualificationStatus: UNQUALIFIED
+registryExposure: UNKNOWN
+runtimeCapabilityDefault: UNKNOWN
+productDocId: ENGINE-LITERT
+
+# Format support follows pinned SDK schema — never by extension alone (ENGINE-LITERT §3).
+formats:
+  - id: litertlm
+    design: candidate
+    runtimeDefault: UNKNOWN
+    notes: ".litertlm or official artifact; typedModelRevision / model envelope required"
+  - id: official_sdk_package
+    design: candidate
+    runtimeDefault: UNKNOWN
+    notes: "Official documented package shape from pinned SDK"
+
+backends:
+  - id: cpu
+    design: portable_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Primary scaffold path; still UNKNOWN until lock + evidence"
+  - id: gpu
+    design: accelerator_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Per SDK build × SoC/driver × OS × model × workload; never inherit CPU evidence"
+  - id: npu
+    design: accelerator_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Must not claim SUPPORTED merely because device has NPU (ENGINE-LITERT §3)"
+
+operations:
+  - id: PROBE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: LOAD
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+    notes: "Includes compile / cache phases when SDK requires them"
+  - id: CREATE_SESSION
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+    notes: "Conversation object → opaqueSessionId only"
+  - id: PLAN_INFERENCE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+    notes: "If SDK fuses plan+mutation, adapter must wrap conservative envelope + commit ledger"
+  - id: COMMIT_INFERENCE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: START
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: GENERATE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: EMBED
+    design: unknown_until_sdk_and_model_cell
+    runtimeDefault: UNKNOWN
+    notes: "ENGINE-LITERT §10 — embedding needs SDK version / model cell evidence"
+  - id: CLOSE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: UNLOAD
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+
+# Phase cancellation — design expectation vs measured mode (ENGINE-LITERT §6).
+# SDK cancel that only stops future output ≠ native execution stopped.
+# UNKNOWN measured mode ⇒ killable worker for full LoadedModel lifecycle.
+phaseCancellation:
+  - phase: PROBE
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Bounded SDK/runtime presence check; no untrusted model load in privileged process"
+  - phase: LOAD
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Model load/compile/cache; measure max non-preemptible; cache lifecycle in model/module"
+  - phase: CREATE_SESSION
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Conversation create"
+  - phase: PLAN
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Plan has no KV/domain mutation (ADR-002)"
+  - phase: COMMIT
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: START
+    expectedMode: INTERRUPTIBLE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: GENERATE
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Prefill/decode; terminal only after fenced output + disposition + allocation"
+  - phase: CLOSE
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: UNLOAD
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+
+prefixCapabilities:
+  - id: EXACT_SAME_SESSION
+    runtimeDefault: UNKNOWN
+    notes: "Same-SDK conversation continuation only when conformance passes"
+  - id: EXACT_CROSS_SESSION
+    runtimeDefault: UNKNOWN
+  - id: TRUNCATE
+    runtimeDefault: UNKNOWN
+  - id: FORK
+    runtimeDefault: UNKNOWN
+
+placement:
+  - class: PRIVILEGED_TRUSTED
+    design: conditional
+    runtimeDefault: UNKNOWN
+    requires: "verified SDK code + catalog model + all phases qualified"
+  - class: CRASH_CONTAINED_TRUSTED
+    design: conditional
+    runtimeDefault: UNKNOWN
+  - class: ISOLATED_CPU_UNTRUSTED
+    design: preferred_for_untrusted_import
+    runtimeDefault: UNKNOWN
+  - class: EXTERNAL_UID_ACCELERATED
+    design: when_sdk_supports_boundary
+    runtimeDefault: UNKNOWN
+    notes: "ADR-007 companion; if SDK forces privileged accelerator in main UID, untrusted = policy unsupported"
+
+# Initial matrix rows for Registry seeding (all UNQUALIFIED / NOT_EXECUTED).
+# Control plane may load these; adapters never write domain DB.
+cells:
+  - backend: cpu
+    phase: PROBE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: LOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: CREATE_SESSION
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: PLAN
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: COMMIT
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: START
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: CLOSE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: UNLOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  # Accelerator backends — explicit UNKNOWN rows (no silent inheritance from CPU)
+  - backend: gpu
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: npu
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: gpu
+    phase: LOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: npu
+    phase: LOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+
+unsupportedByDefault:
+  - "Prefix truncate / fork / cross-session reuse without SDK+model cell evidence (ENGINE-LITERT §10)"
+  - "Embedding without SDK version / model cell evidence"
+  - "Multimodal and structured output without cell evidence"
+  - "GPU/NPU backends without per-device/driver/model/workload qualification"
+  - "Claiming SUPPORTED because device has NPU (ENGINE-LITERT §3)"
+  - "Untrusted accelerated inference when SDK cannot isolate under different UID (ADR-007)"
+  - "Treating SDK stream cancel as native execution stopped without measurement"
+  - "Silent ignore of unsupported sampling / template / backend parameters"
+  - "Reusing Conversation / Engine objects after worker death"
+  - "Cross-process durable KV restore after worker death"
+
+resourceEnvelopeDimensions:
+  - cpuFileBytes          # model package / file charge
+  - cpuAnonBytes          # SDK/runtime fixed + session/KV/workspace
+  - sharedMemoryChargeBytes
+  - gpuDedicatedBytes
+  - gpuSharedBytes
+  - npuBytes
+  - nativeThreads
+  - fileDescriptors
+  - temporaryDiskBytes    # compiled cache, temp SDK artifacts
+  # ENGINE-LITERT §7: SDK fixed overhead, model bytes, compiled cache, KV/session,
+  # prefill/decode workspace, CPU/GPU/NPU, threads, FD, temporary disk.
+  # Vendor self-report must not lower qualified envelope.

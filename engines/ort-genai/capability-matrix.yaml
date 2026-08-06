@@ -1,0 +1,290 @@
+# ONNX Runtime GenAI capability matrix (ENGINE-ORTGENAI / ENGINE-STANDARD §5)
+# Runtime exposure is projected by EngineRegistry from qualification cells.
+# Design baseline ≠ SUPPORTED. Default runtime capability: UNKNOWN.
+#
+# Dimensions: backend (provider) × format × phase × placement × operation profile.
+# Cancellation modes: COOPERATIVE | INTERRUPTIBLE | WORKER_KILL_ONLY | NOT_SUPPORTED | UNKNOWN
+# Cell status: UNQUALIFIED | STATIC_REVIEWED | SPIKE_REQUIRED | QUALIFIED_WITH_ENVELOPE | SUSPENDED
+
+schemaVersion: 1
+engineId: ONNX-Runtime-GenAI
+designStatus: BASELINE
+upstreamLockStatus: NOT_LOCKED
+qualificationStatus: UNQUALIFIED
+registryExposure: UNKNOWN
+runtimeCapabilityDefault: UNKNOWN
+
+# Model package: ONNX model + external data + genai config + tokenizer/template + provider metadata.
+# Multi-file package uses role+BlobId total order; free JSON missing fields / unknown major → fail closed.
+formats:
+  - id: ONNX-GENAI
+    design: candidate
+    runtimeDefault: UNKNOWN
+    notes: "Requires pinned GenAI + config schema + tokenizer/template digests in ModelRevision"
+  - id: ONNX
+    design: candidate_component
+    runtimeDefault: UNKNOWN
+    notes: "Weights alone are not a complete package; genai config required"
+
+backends:
+  - id: cpu
+    design: portable_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Primary Android candidate when EP packaged; still per-cell evidence"
+  - id: nnapi
+    design: accelerator_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Publish only with Android package + device/driver/model/workload evidence; no desktop extrapolation"
+  - id: qnn
+    design: accelerator_candidate
+    runtimeDefault: UNKNOWN
+    notes: "OEM/driver variance high; never inherit CPU evidence"
+
+operations:
+  - id: PROBE
+    design: package_and_provider_check
+    runtimeDefault: UNKNOWN
+  - id: LOAD
+    design: model_generator_params_provider_init_graph_opt
+    runtimeDefault: UNKNOWN
+    notes: "Provider init / graph optimization / compile-cache are LOAD-phase and need pre-execution envelope"
+  - id: PLAN_INFERENCE
+    design: session_or_sequence_state
+    runtimeDefault: UNKNOWN
+    notes: "If upstream lacks separate plan/commit, wrap with worker + qualified envelope + ledger"
+  - id: COMMIT_INFERENCE
+    design: session_or_sequence_state
+    runtimeDefault: UNKNOWN
+  - id: START
+    design: token_generation_drive
+    runtimeDefault: UNKNOWN
+  - id: GENERATE
+    design: token_generation
+    runtimeDefault: UNKNOWN
+  - id: EMBED
+    design: unknown_until_api_and_model_qualified
+    runtimeDefault: UNKNOWN
+  - id: MULTIMODAL
+    design: unknown_until_api_and_model_qualified
+    runtimeDefault: UNKNOWN
+  - id: STRUCTURED_TOOLS
+    design: unknown_until_api_and_model_qualified
+    runtimeDefault: UNKNOWN
+  - id: CLOSE
+    design: drain
+    runtimeDefault: UNKNOWN
+  - id: UNLOAD
+    design: drain
+    runtimeDefault: UNKNOWN
+
+# Phase cancellation — design expectation vs measured mode (ENGINE-ORTGENAI §6).
+# Provider without bounded cooperative cancel ⇒ full lifecycle on killable worker.
+phaseCancellation:
+  - phase: PROBE
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Bounded package/provider check; no blind load of untrusted models in privileged process"
+  - phase: LOAD
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Includes provider init, graph optimization, compile/cache"
+  - phase: CREATE_SESSION
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: PLAN
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Plan has no KV / sequence mutation (ADR-002)"
+  - phase: COMMIT
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: START
+    expectedMode: INTERRUPTIBLE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: GENERATE
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Token generation; measure max non-preemptible if EP lacks cooperative cancel"
+  - phase: CLOSE
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: UNLOAD
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+
+prefixCapabilities:
+  - id: EXACT_SAME_SESSION
+    runtimeDefault: UNKNOWN
+    notes: "Only when upstream exposes precise token/state ops and conformance passes"
+  - id: EXACT_CROSS_SESSION
+    runtimeDefault: UNKNOWN
+  - id: TRUNCATE
+    runtimeDefault: UNKNOWN
+  - id: FORK
+    runtimeDefault: UNKNOWN
+
+placement:
+  - class: PRIVILEGED_TRUSTED
+    design: conditional
+    runtimeDefault: UNKNOWN
+    requires: "verified runtime + provider + model + all phases qualified + privileged-safe cancel"
+  - class: CRASH_CONTAINED_TRUSTED
+    design: conditional
+    runtimeDefault: UNKNOWN
+  - class: ISOLATED_CPU_UNTRUSTED
+    design: preferred_for_untrusted_package
+    runtimeDefault: UNKNOWN
+  - class: EXTERNAL_UID_ACCELERATED
+    design: for_untrusted_acceleration
+    runtimeDefault: UNKNOWN
+    notes: "ADR-007 companion package/UID; provider module version handshake required"
+
+# Initial matrix rows for Registry seeding (all UNQUALIFIED / NOT_EXECUTED).
+# Control plane may load these; adapters never write domain DB.
+# Placeholder fingerprints: real cells must bind deviceExecutionFingerprint + driver.
+cells:
+  - backend: cpu
+    phase: PROBE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: LOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: CREATE_SESSION
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: PLAN
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: COMMIT
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: START
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: CLOSE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: UNLOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  # Accelerator / EP backends — explicit UNKNOWN rows (no silent inheritance from CPU)
+  - backend: nnapi
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: qnn
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: nnapi
+    phase: LOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: qnn
+    phase: LOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+
+unsupportedByDefault:
+  - "Unpinned ORT/GenAI/provider/model config as rebuild baseline"
+  - "Desktop EP support extrapolated to Android"
+  - "Provider capability/cancel/memory without per-device cell evidence"
+  - "Prefix/KV from ONNX format alone"
+  - "Embedding / multimodal / tool / structured without API+model qualification"
+  - "Free-form genai JSON missing required fields or unknown major"
+  - "Native generator/sequence handles across AIDL"
+  - "Privileged placement under UNKNOWN cancellation or unknown memory envelope"
+  - "Base/feature provider module version mismatch loads"
+  - "Silent ignore of unsupported sampling / template / provider parameters"
+
+resourceEnvelopeDimensions:
+  - cpuFileBytes           # weights + external data mmap / file charge
+  - cpuAnonBytes           # model/generator anon + KV estimate
+  - sharedMemoryChargeBytes
+  - gpuDedicatedBytes
+  - gpuSharedBytes
+  - npuBytes               # QNN / NPU provider allocations (conservative upper bound when unknown)
+  - nativeThreads
+  - fileDescriptors
+  - temporaryDiskBytes
+  # graph optimization / provider compile-cache / workspace roll into peak envelope; never claim 0 for unknown EP memory
+
+knownLimitations:
+  - "NOT_QUALIFIED_UNTIL_UPSTREAM_LOCK — design BASELINE only"
+  - "Provider variance across Android/OEM requires per-cell qualification"
+  - "Prefix/KV/embed/multimodal/tools not inferred from ONNX format"
+  - "Config + external-data packages need bounded parser and complete manifest"
+  - "Provider crash poisons all native state; reply-loss uses ledger query only"

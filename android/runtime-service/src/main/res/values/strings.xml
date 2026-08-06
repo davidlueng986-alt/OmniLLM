@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="permission_bind_runtime_label">Bind OmniLLM Runtime</string>
+    <string name="permission_bind_runtime_description">
+        Allows an application to discover and bind the OmniLLM runtime facade.
+        Authorization still requires local pairing and user-approved registration.
+    </string>
+
+    <string name="runtime_notification_channel_id">omnillm_runtime_inference</string>
+    <string name="runtime_notification_channel_name">On-device inference</string>
+    <string name="runtime_notification_channel_description">
+        Status for local model loading and inference. Cancel uses a canonical command path.
+    </string>
+    <string name="runtime_notification_title">OmniLLM runtime</string>
+    <string name="runtime_notification_text_starting">Starting control plane…</string>
+    <string name="runtime_notification_text_ready">Runtime ready</string>
+    <string name="runtime_notification_text_degraded">Runtime degraded</string>
+    <string name="runtime_notification_text_recovering">Recovering durable state…</string>
+    <string name="runtime_notification_text_draining">Draining…</string>
+    <string name="runtime_notification_text_waiting_fg">Waiting for user foreground</string>
+    <string name="runtime_notification_text_faulted">Runtime faulted</string>
+    <string name="runtime_notification_text_stopped">Runtime stopped</string>
+    <string name="runtime_notification_action_cancel">Cancel</string>
+
+    <string name="transfer_notification_channel_id">omnillm_transfer</string>
+    <string name="transfer_notification_channel_name">Model transfer</string>
+    <string name="transfer_notification_channel_description">
+        Download and import progress. Separate from inference foreground service.
+    </string>
+    <string name="transfer_notification_title">OmniLLM transfer</string>
+    <string name="transfer_notification_text_idle">Transfer service active</string>
+    <string name="transfer_notification_text_running">Transferring models…</string>
+</resources>

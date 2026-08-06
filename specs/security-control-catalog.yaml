@@ -1,0 +1,59 @@
+schemaVersion: 2
+controls:
+- id: SEC-001
+  threat: untrusted model/native parser RCE
+  control: different UID/package sandbox, narrow FD/IPC, no privileged secret/data access
+  qualityScenario: Q-008
+  residualRisk: resource DoS and kernel/driver vulnerabilities
+- id: SEC-002
+  threat: model byte substitution
+  control: content-addressed quarantine and fresh privileged-load identity/signature/revocation verification
+  qualityScenario: Q-009
+- id: SEC-003
+  threat: SSRF/DNS rebinding/redirect abuse
+  control: HTTPS host/port policy, per-hop validation, private/link-local deny, bounded redirect
+  qualityScenario: Q-010
+- id: SEC-004
+  threat: JSON/decompression/resource bomb
+  control: compressed and decompressed byte limits, streaming parser depth/node/string limits, deadline and quota
+  qualityScenario: Q-010
+- id: SEC-005
+  threat: PFD/SAF TOCTOU and infinite stream
+  control: dup, fstat, byte/time bounds, quarantine copy/hash, owner/TTL/close policy
+  qualityScenario: Q-010
+- id: SEC-006
+  threat: token/ACL/risk-mode revocation bypass
+  control: monotonic revocation epoch fences streams, queues, sessions and commands
+  qualityScenario: Q-007
+- id: SEC-007
+  threat: Binder principal spoofing
+  control: calling UID + Android user + verified binding; ignore caller-reported package
+  qualityScenario: Q-014
+- id: SEC-008
+  threat: LAN MITM/replay/brute force
+  control: TLS identity, channel-bound high-entropy one-time pairing, attempt limit, scoped token and rotation
+  qualityScenario: Q-010
+- id: SEC-009
+  threat: same-UID logical-owner bypass
+  control: do not treat same-UID process as security sandbox; move risky execution out of UID
+  qualityScenario: Q-008
+- id: SEC-010
+  threat: sensitive diagnostics exposure
+  control: field allowlist, redaction, local explicit action and expiring export
+  qualityScenario: Q-017
+- id: SEC-011
+  threat: cryptographic algorithm or key lifecycle divergence
+  control: single versioned security profile, exact release lock, monotonic rotation and compromise playbook
+  qualityScenario: Q-010
+- id: SEC-012
+  threat: AI content report silently exfiltrates local prompt/output
+  control: in-app exact payload preview, explicit consent, minimization, encryption, TTL and separate content-report scope
+  qualityScenario: Q-019
+- id: SEC-013
+  threat: stale Android/Play policy claim causes rejected or incompatible release
+  control: dated official source claim registry with affected authorities and recheck triggers
+  qualityScenario: Q-015
+- id: SEC-014
+  threat: retention ambiguity keeps or removes security/user data incorrectly
+  control: typed data classes with event-specific retention, delete triggers and explicit user action
+  qualityScenario: Q-017

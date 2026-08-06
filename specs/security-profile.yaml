@@ -1,0 +1,79 @@
+schemaVersion: 2
+profileId: OMNILLM-SECURITY-PROFILE-2
+status: BASELINE
+canonicalization:
+  signedJson: RFC 8785 JCS over UTF-8 JSON without duplicate keys
+  digestEncoding: lower-case hexadecimal
+  tokenEncoding: base64url without padding
+algorithms:
+  contentDigest: SHA-256
+  signedMetadata: Ed25519
+  lanTls: TLS 1.3 only
+  lanCertificateKey: ECDSA P-256
+  lanCertificateSignature: ECDSA with SHA-256
+  spkiFingerprint: SHA-256
+  bearerTokenGeneration: 256-bit CSPRNG
+  bearerTokenVerifier: HMAC-SHA-256 with a non-exportable 256-bit Android Keystore key
+  pairingSecretGeneration: 192-bit CSPRNG
+  pairingProof: HMAC-SHA-256 over the canonical pairing transcript
+  comparison: constant-time for token verifiers, pairing proofs and secret-derived digests
+keyLifecycle:
+  rootBootstrap: Full initial root metadata bytes and Ed25519 public keys are embedded with the app; network data cannot replace
+    bootstrap trust.
+  rotation: Versioned, monotonic, signed and auditable; role-specific overlap and expiry are explicit.
+  compromise: Revoke affected keys, bump trust and credential epochs, stop new privileged loads, rotate credentials, integrity-scan
+    trusted content and require re-pairing where applicable.
+  backup: Private TLS keys, HMAC verifier keys, pairing secrets and bearer plaintext are excluded from app backup.
+controls:
+- Unknown schema version, algorithm identifier, key state, certificate state or trusted-time state fails closed.
+- Loopback HTTP may be cleartext only on literal loopback and still requires a scoped bearer token outside health/bootstrap
+  paths.
+- A URL or TLS connection alone never establishes model provenance.
+- Same-UID native code is not a security boundary.
+- Changing this profile requires a dedicated ADR, migration design, compatibility analysis and fresh negative/fault tests.
+aidlRegistration:
+  identity: system-observed calling UID + Android user/profile + signing/package evidence for display
+  approval: explicit local approval in OmniLLM UI
+  challengeTtlSeconds: 300
+  proof: no caller-supplied cryptographic proof; authorization is bound to the observed Binder principal and durable registration
+    epoch
+  sharedUid: treated as one principal unless a stronger managed-platform identity is available
+lanPairing:
+  ttlSeconds: 300
+  maxAttempts: 5
+  oneTime: true
+  requiresLocalApproval: true
+  transcriptSchemaVersion: 1
+  transcriptFields:
+  - protocolLabel
+  - serverSpkiSha256
+  - connectionEpoch
+  - challengeId
+  - serverNonce
+  - clientPublicKey
+  - requestedScopes
+  - issuedAt
+  - expiresAt
+  protocolLabel: OmniLLM-LAN-Pairing-1
+  successAction: issue a scoped 256-bit bearer token bound to client registration and revocation epoch; erase the pairing
+    secret
+  failureAction: increment attempts atomically; at limit, expiry, epoch change or replay, invalidate the challenge
+recordEncryption:
+  algorithm: AES-256-GCM
+  nonce: 96-bit CSPRNG unique per key
+  tagBits: 128
+  keyStorage: non-exportable platform secret-broker key; Android implementation uses Android Keystore
+  aadFields:
+  - profileId
+  - recordType
+  - recordId
+  - schemaVersion
+  - keyVersion
+  - expiresAt
+  appliesTo:
+  - LAN pairing secret while pending
+  - bounded token issuance receipt
+  - AI content-report draft
+  - other explicitly classified local secret records
+  rotation: every encrypted record stores keyVersion; rotation decrypts and re-encrypts in a crash-safe transaction or expires
+    the record fail-closed

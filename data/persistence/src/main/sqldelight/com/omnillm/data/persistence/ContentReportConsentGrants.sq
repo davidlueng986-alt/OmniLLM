@@ -1,0 +1,50 @@
+-- ConsentGrant rows for content reports (FEAT-AI-CONTENT-REPORT).
+-- Authority: specs/database/omnillm-schema.sql#content_report_consent_grants
+-- One-time grant; consumption is durable so crash cannot double-submit with same grant.
+
+CREATE TABLE content_report_consent_grants (
+  grant_id TEXT NOT NULL PRIMARY KEY,
+  report_id TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  canonical_payload_digest TEXT NOT NULL,
+  warning_policy_version TEXT NOT NULL,
+  local_user_profile_id TEXT NOT NULL,
+  nonce TEXT NOT NULL,
+  state TEXT NOT NULL,
+  issued_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  consumed_at TEXT
+);
+
+selectByGrantId:
+SELECT grant_id, report_id, principal_id, canonical_payload_digest, warning_policy_version,
+       local_user_profile_id, nonce, state, issued_at, expires_at, consumed_at
+FROM content_report_consent_grants
+WHERE grant_id = ?;
+
+listByReportId:
+SELECT grant_id, report_id, principal_id, canonical_payload_digest, warning_policy_version,
+       local_user_profile_id, nonce, state, issued_at, expires_at, consumed_at
+FROM content_report_consent_grants
+WHERE report_id = ?
+ORDER BY issued_at ASC;
+
+upsertGrant:
+INSERT INTO content_report_consent_grants(
+  grant_id, report_id, principal_id, canonical_payload_digest, warning_policy_version,
+  local_user_profile_id, nonce, state, issued_at, expires_at, consumed_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(grant_id) DO UPDATE SET
+  report_id = excluded.report_id,
+  principal_id = excluded.principal_id,
+  canonical_payload_digest = excluded.canonical_payload_digest,
+  warning_policy_version = excluded.warning_policy_version,
+  local_user_profile_id = excluded.local_user_profile_id,
+  nonce = excluded.nonce,
+  state = excluded.state,
+  issued_at = excluded.issued_at,
+  expires_at = excluded.expires_at,
+  consumed_at = excluded.consumed_at;
+
+deleteByGrantId:
+DELETE FROM content_report_consent_grants WHERE grant_id = ?;

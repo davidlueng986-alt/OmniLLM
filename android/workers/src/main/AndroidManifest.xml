@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Same-UID crash containment worker process (ARCH-TRUST-TOPOLOGY / SEC-PLACEMENT).
+
+  :engine_worker shares App UID with :runtime — crash isolation only, NOT a security sandbox.
+  Untrusted accelerated inference must use companion (ADR-007), not this process.
+
+  Service is not exported; only runtime control plane binds explicitly.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <service
+            android:name="com.omnillm.android.workers.EngineWorkerService"
+            android:exported="false"
+            android:process=":engine_worker"
+            android:stopWithTask="false" />
+    </application>
+</manifest>

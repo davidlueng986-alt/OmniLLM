@@ -1,0 +1,67 @@
+-- Authority: specs/database/omnillm-schema.sql#jobs
+-- Claim key: UNIQUE (principal_id, job_kind, idempotency_key)
+-- Job state / attempt / event / checkpoint same transaction (FEAT-ADMIN §3, DATA-OWNERSHIP).
+--
+-- canonical_spec_json holds the control-plane job body envelope
+-- (digest + parameters + progress + error + cancel + currentAttempt).
+-- checkpoint_json holds durable JobCheckpoint only (no ephemeral FDs).
+
+CREATE TABLE jobs (
+  job_id TEXT NOT NULL PRIMARY KEY,
+  principal_id TEXT NOT NULL,
+  job_kind TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  canonical_spec_json TEXT NOT NULL,
+  state TEXT NOT NULL,
+  resource_version INTEGER NOT NULL DEFAULT 0,
+  checkpoint_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+selectByJobId:
+SELECT job_id, principal_id, job_kind, idempotency_key, canonical_spec_json,
+       state, resource_version, checkpoint_json, created_at, updated_at
+FROM jobs
+WHERE job_id = ?;
+
+selectByClaimKey:
+SELECT job_id, principal_id, job_kind, idempotency_key, canonical_spec_json,
+       state, resource_version, checkpoint_json, created_at, updated_at
+FROM jobs
+WHERE principal_id = ? AND job_kind = ? AND idempotency_key = ?;
+
+listByPrincipal:
+SELECT job_id, principal_id, job_kind, idempotency_key, canonical_spec_json,
+       state, resource_version, checkpoint_json, created_at, updated_at
+FROM jobs
+WHERE principal_id = ?
+ORDER BY created_at ASC;
+
+listActive:
+SELECT job_id, principal_id, job_kind, idempotency_key, canonical_spec_json,
+       state, resource_version, checkpoint_json, created_at, updated_at
+FROM jobs
+WHERE state NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+ORDER BY created_at ASC;
+
+listAll:
+SELECT job_id, principal_id, job_kind, idempotency_key, canonical_spec_json,
+       state, resource_version, checkpoint_json, created_at, updated_at
+FROM jobs
+ORDER BY created_at ASC;
+
+insertJob:
+INSERT INTO jobs(
+  job_id, principal_id, job_kind, idempotency_key, canonical_spec_json,
+  state, resource_version, checkpoint_json, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateJob:
+UPDATE jobs
+SET canonical_spec_json = ?, state = ?, resource_version = ?,
+    checkpoint_json = ?, updated_at = ?
+WHERE job_id = ?;
+
+deleteByJobId:
+DELETE FROM jobs WHERE job_id = ?;

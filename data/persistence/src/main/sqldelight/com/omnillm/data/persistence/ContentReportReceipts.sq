@@ -1,0 +1,36 @@
+-- Developer endpoint receipts for submitted content reports (FEAT-AI-CONTENT-REPORT).
+-- Authority: specs/database/omnillm-schema.sql#content_report_receipts
+-- Receipt proves SUBMITTED; never invent a second reportId on reply loss.
+
+CREATE TABLE content_report_receipts (
+  receipt_id TEXT NOT NULL PRIMARY KEY,
+  report_id TEXT NOT NULL,
+  accepted_at TEXT NOT NULL,
+  status_url TEXT NOT NULL,
+  response_digest TEXT NOT NULL,
+  last_queried_at TEXT
+);
+
+selectByReportId:
+SELECT receipt_id, report_id, accepted_at, status_url, response_digest, last_queried_at
+FROM content_report_receipts
+WHERE report_id = ?;
+
+selectByReceiptId:
+SELECT receipt_id, report_id, accepted_at, status_url, response_digest, last_queried_at
+FROM content_report_receipts
+WHERE receipt_id = ?;
+
+upsertReceipt:
+INSERT INTO content_report_receipts(
+  receipt_id, report_id, accepted_at, status_url, response_digest, last_queried_at
+) VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(receipt_id) DO UPDATE SET
+  report_id = excluded.report_id,
+  accepted_at = excluded.accepted_at,
+  status_url = excluded.status_url,
+  response_digest = excluded.response_digest,
+  last_queried_at = excluded.last_queried_at;
+
+deleteByReportId:
+DELETE FROM content_report_receipts WHERE report_id = ?;

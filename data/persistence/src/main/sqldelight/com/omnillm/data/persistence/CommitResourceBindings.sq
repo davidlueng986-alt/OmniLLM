@@ -1,0 +1,27 @@
+-- Authority: specs/database/omnillm-schema.sql#commit_resource_bindings
+-- RR-006: transfer crash reconciles to exactly one TRANSFERRED or QUARANTINED disposition.
+
+CREATE TABLE commit_resource_bindings (
+  commit_id TEXT NOT NULL,
+  allocation_id TEXT NOT NULL,
+  binding_role TEXT NOT NULL,
+  resource_vector_digest TEXT NOT NULL,
+  disposition TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (commit_id, allocation_id, binding_role)
+);
+
+listByCommitId:
+SELECT commit_id, allocation_id, binding_role, resource_vector_digest, disposition, updated_at
+FROM commit_resource_bindings
+WHERE commit_id = ?;
+
+upsertBinding:
+INSERT OR REPLACE INTO commit_resource_bindings(
+  commit_id, allocation_id, binding_role, resource_vector_digest, disposition, updated_at
+) VALUES (?, ?, ?, ?, ?, ?);
+
+updateDisposition:
+UPDATE commit_resource_bindings
+SET disposition = ?, updated_at = ?
+WHERE commit_id = ? AND allocation_id = ? AND binding_role = ?;

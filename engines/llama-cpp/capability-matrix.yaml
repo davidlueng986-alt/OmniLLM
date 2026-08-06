@@ -1,0 +1,256 @@
+# llama.cpp capability matrix rows (ENGINE-LLAMACPP / ENGINE-STANDARD §5)
+# Runtime exposure is projected by EngineRegistry from qualification cells.
+# Design baseline ≠ SUPPORTED. Default runtime capability: UNKNOWN.
+#
+# Dimensions: backend × format × phase × placement × operation profile.
+# Cancellation modes: COOPERATIVE | INTERRUPTIBLE | WORKER_KILL_ONLY | NOT_SUPPORTED | UNKNOWN
+# Cell status: UNQUALIFIED | STATIC_REVIEWED | SPIKE_REQUIRED | QUALIFIED_WITH_ENVELOPE | SUSPENDED
+
+schemaVersion: 1
+engineId: llama.cpp
+designStatus: BASELINE
+upstreamLockStatus: NOT_LOCKED
+qualificationStatus: UNQUALIFIED
+registryExposure: UNKNOWN
+runtimeCapabilityDefault: UNKNOWN
+# Native packaging note: libomnillm_llama.so may be present in runtime/worker
+# processes (vendored llama.cpp and/or EXPERIMENTAL_FIXTURE C++ path).
+# Presence of .so does NOT elevate any cell to SUPPORTED / QUALIFIED.
+# EXPERIMENTAL_FIXTURE is exploratory packaging only — NOT_SUPPORTED.
+
+# Supported-format claim is never based on file extension alone (ENGINE-LLAMACPP §3).
+formats:
+  - id: GGUF
+    design: candidate
+    runtimeDefault: UNKNOWN
+    notes: "Requires pinned build + metadata parser qualification; architecture support is per-build"
+
+backends:
+  - id: cpu
+    design: portable_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Primary production candidate for GGUF text generation"
+  - id: vulkan
+    design: accelerator_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Per backend/device/driver/model/workload cell; never inherit CPU evidence"
+  - id: opencl
+    design: accelerator_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Unqualified by default"
+
+operations:
+  - id: PROBE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: LOAD
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: PLAN_INFERENCE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: COMMIT_INFERENCE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: START
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: GENERATE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: EMBED
+    design: unknown_until_pooling_qualified
+    runtimeDefault: UNKNOWN
+    notes: "Publish dimension/normalization only for qualified pooling/model config"
+  - id: CLOSE
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+  - id: UNLOAD
+    design: supported_when_locked
+    runtimeDefault: UNKNOWN
+
+# Phase cancellation — design expectation vs measured mode (ENGINE-LLAMACPP §6).
+# UNKNOWN phase cancellation ⇒ full LoadedModel lifecycle on killable worker only.
+phaseCancellation:
+  - phase: PROBE
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Bounded metadata/backend check; no blind load of untrusted models in privileged process"
+  - phase: LOAD
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Create model/context only after matching Reservation; measure max non-preemptible"
+  - phase: CREATE_SESSION
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: PLAN
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Plan has no KV mutation (ADR-002)"
+  - phase: COMMIT
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "One-shot truncate/fork/new-session mutation bound to CommitId"
+  - phase: START
+    expectedMode: INTERRUPTIBLE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: GENERATE
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Decode loop expected cooperative cancel; prefill/grammar may be longer"
+  - phase: CLOSE
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Drain-aware native release; measure non-preemptible close"
+  - phase: UNLOAD
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+
+prefixCapabilities:
+  - id: EXACT_SAME_SESSION
+    runtimeDefault: UNKNOWN
+  - id: EXACT_CROSS_SESSION
+    runtimeDefault: UNKNOWN
+  - id: TRUNCATE
+    runtimeDefault: UNKNOWN
+  - id: FORK
+    runtimeDefault: UNKNOWN
+
+placement:
+  - class: PRIVILEGED_TRUSTED
+    design: conditional
+    runtimeDefault: UNKNOWN
+    requires: "signed engine + verified catalog model + all phases qualified"
+  - class: CRASH_CONTAINED_TRUSTED
+    design: conditional
+    runtimeDefault: UNKNOWN
+  - class: ISOLATED_CPU_UNTRUSTED
+    design: preferred_for_untrusted_gguf
+    runtimeDefault: UNKNOWN
+  - class: EXTERNAL_UID_ACCELERATED
+    design: for_untrusted_acceleration
+    runtimeDefault: UNKNOWN
+    notes: "ADR-007 companion package/UID"
+
+# Initial matrix rows for Registry seeding (all UNQUALIFIED / NOT_EXECUTED).
+# Control plane may load these; adapters never write domain DB.
+cells:
+  - backend: cpu
+    phase: PROBE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: LOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: CREATE_SESSION
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: PLAN
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: COMMIT
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: START
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: CLOSE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: UNLOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  # Accelerator backends — explicit UNKNOWN rows (no silent inheritance from CPU)
+  - backend: vulkan
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: opencl
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+
+unsupportedByDefault:
+  - "Android accelerator backends without per-device qualification"
+  - "Mixed quantization without cell evidence"
+  - "Multimodal projector / vision towers"
+  - "Embedding pooling without qualified config"
+  - "Prefix FORK / TRUNCATE / EXACT_CROSS_SESSION until conformance fixtures pass"
+  - "KV cross-process durable restore after worker death"
+  - "Silent ignore of unsupported sampling / grammar / template parameters"
+
+resourceEnvelopeDimensions:
+  - cpuFileBytes        # weights mmap / file charge
+  - cpuAnonBytes        # model/context anonymous
+  - sharedMemoryChargeBytes
+  - gpuDedicatedBytes
+  - gpuSharedBytes
+  - npuBytes
+  - nativeThreads
+  - fileDescriptors
+  - temporaryDiskBytes
+  # KV / compute / sampling / grammar buffers roll into cpuAnonBytes (+ accelerator dims)

@@ -1,0 +1,255 @@
+# OmniLLM Android - signed release assemble (optional secrets)
+#
+# Trigger: manual workflow_dispatch or version tags (v*).
+# Signing material MUST live in GitHub Actions secrets - never commit keystores
+# or passwords. See tools/ci/README.md § Secrets.
+#
+# Produces signed APKs (and AAB when signing is configured) for:
+#   - :android:app-ui          (com.omnillm)
+#   - :android:companion-sandbox (com.omnillm.companion)  # ADR-007 separate UID
+
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_aab:
+        description: "Also run bundleRelease (AAB) for Play upload"
+        type: boolean
+        default: true
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: "17"
+  ANDROID_COMPILE_SDK: "36"
+  ANDROID_BUILD_TOOLS: "36.0.0"
+  ANDROID_NDK: "28.2.13676358"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g"
+
+jobs:
+  release-build:
+    name: Signed release build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Ensure `python` invokes Python 3
+        run: |
+          if ! command -v python >/dev/null 2>&1; then
+            sudo ln -sf "$(command -v python3)" /usr/local/bin/python
+          fi
+
+      - name: Install codegen dependencies
+        run: pip install -r tools/codegen/requirements.txt
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-${ANDROID_COMPILE_SDK}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "ndk;${ANDROID_NDK}"
+
+      - name: Specs authority present
+        run: |
+          set -euo pipefail
+          for f in \
+            specs/canonical-types.yaml \
+            specs/error-catalog.yaml \
+            specs/state-machines.yaml \
+            specs/access-control-catalog.yaml \
+            specs/capability-catalog.yaml \
+            specs/capability-availability-matrix.yaml \
+            specs/engine-qualification-status.yaml \
+            specs/openapi/omnillm.openapi.yaml \
+            specs/aidl/omnillm-aidl.yaml \
+            specs/platform-policy-register.yaml \
+            specs/database/omnillm-schema.sql
+          do
+            test -f "$f" || { echo "MISSING authority file: $f" >&2; exit 1; }
+          done
+          echo "Critical specs present."
+
+      - name: Contract drift gate
+        run: ./gradlew checkContractDrift --no-daemon --stacktrace
+
+      - name: Module dependency boundary gate
+        run: |
+          set -euo pipefail
+          ./gradlew checkModuleDependencyRules --no-daemon --stacktrace
+          python tools/ci/check_module_dependency_rules.py --repo-root .
+
+      - name: Dependency edge gate (INV-001 / engines↛data)
+        run: |
+          set -euo pipefail
+          ./gradlew checkDependencyEdges --no-daemon --stacktrace
+          python tools/ci/check_dependency_edges.py
+
+      - name: Unit tests (JVM + Android host; fail closed)
+        run: ./gradlew test --no-daemon --stacktrace
+
+      - name: Root check (drift + 16 KB + dep edges)
+        run: ./gradlew check --no-daemon --stacktrace
+
+      - name: Decode release keystore (optional secrets)
+        id: keystore
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SIGNING_KEYSTORE_BASE64:-}" ] || \
+             [ -z "${SIGNING_STORE_PASSWORD:-}" ] || \
+             [ -z "${SIGNING_KEY_ALIAS:-}" ] || \
+             [ -z "${SIGNING_KEY_PASSWORD:-}" ]; then
+            echo "signing=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Release signing secrets not fully configured. Building unsigned release."
+            echo "Required secrets: SIGNING_KEYSTORE_BASE64, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS, SIGNING_KEY_PASSWORD"
+            echo "Documented in tools/ci/README.md - never commit keystore material."
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/omnillm-signing"
+          KEYSTORE_PATH="$RUNNER_TEMP/omnillm-signing/release.jks"
+          echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+          test -s "$KEYSTORE_PATH"
+          echo "signing=true" >> "$GITHUB_OUTPUT"
+          echo "keystore_path=$KEYSTORE_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble signed release (when secrets present)
+        if: steps.keystore.outputs.signing == 'true'
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KS="${{ steps.keystore.outputs.keystore_path }}"
+          # AGP injected signing properties (no signingConfig required in build.gradle.kts)
+          SIGN_PROPS=(
+            "-Pandroid.injected.signing.store.file=$KS"
+            "-Pandroid.injected.signing.store.password=$SIGNING_STORE_PASSWORD"
+            "-Pandroid.injected.signing.key.alias=$SIGNING_KEY_ALIAS"
+            "-Pandroid.injected.signing.key.password=$SIGNING_KEY_PASSWORD"
+          )
+          ./gradlew \
+            :android:app-ui:assembleRelease \
+            :android:companion-sandbox:assembleRelease \
+            "${SIGN_PROPS[@]}" \
+            --no-daemon --stacktrace
+
+      - name: Assemble unsigned release (no secrets)
+        if: steps.keystore.outputs.signing != 'true'
+        run: |
+          set -euo pipefail
+          ./gradlew \
+            :android:app-ui:assembleRelease \
+            :android:companion-sandbox:assembleRelease \
+            --no-daemon --stacktrace
+
+      - name: Bundle release AAB (signed, optional)
+        if: |
+          steps.keystore.outputs.signing == 'true' &&
+          (github.event_name == 'push' || inputs.build_aab)
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KS="${{ steps.keystore.outputs.keystore_path }}"
+          SIGN_PROPS=(
+            "-Pandroid.injected.signing.store.file=$KS"
+            "-Pandroid.injected.signing.store.password=$SIGNING_STORE_PASSWORD"
+            "-Pandroid.injected.signing.key.alias=$SIGNING_KEY_ALIAS"
+            "-Pandroid.injected.signing.key.password=$SIGNING_KEY_PASSWORD"
+          )
+          ./gradlew \
+            :android:app-ui:bundleRelease \
+            :android:companion-sandbox:bundleRelease \
+            "${SIGN_PROPS[@]}" \
+            --no-daemon --stacktrace
+
+      - name: Native 16 KB gates
+        run: |
+          set -euo pipefail
+          ./gradlew checkNative16kb --no-daemon --stacktrace
+          python tools/ci/check_elf_16kb_alignment.py --min-align 16384
+          shopt -s nullglob
+          apks=(
+            android/app-ui/build/outputs/apk/release/*.apk
+            android/companion-sandbox/build/outputs/apk/release/*.apk
+          )
+          if [ ${#apks[@]} -eq 0 ]; then
+            echo "::error::No release APKs for 16 KB zip-align (fail closed)."
+            exit 1
+          fi
+          for apk in "${apks[@]}"; do
+            python tools/ci/check_apk_16kb_zipalign.py "$apk"
+          done
+
+      - name: Assert release APK artifacts exist (fail closed)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          required=(
+            android/app-ui/build/outputs/apk/release
+            android/companion-sandbox/build/outputs/apk/release
+          )
+          for d in "${required[@]}"; do
+            apks=("$d"/*.apk)
+            if [ ${#apks[@]} -eq 0 ]; then
+              echo "::error::No APK under $d after assembleRelease (fail closed)."
+              exit 1
+            fi
+            echo "OK release artifact(s): ${apks[*]}"
+          done
+
+      - name: Upload release APK / AAB artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnillm-release-${{ github.ref_name }}-${{ github.sha }}
+          path: |
+            android/app-ui/build/outputs/apk/release/**/*.apk
+            android/app-ui/build/outputs/bundle/release/**/*.aab
+            android/companion-sandbox/build/outputs/apk/release/**/*.apk
+            android/companion-sandbox/build/outputs/bundle/release/**/*.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Scrub keystore from runner
+        if: always() && steps.keystore.outputs.signing == 'true'
+        run: |
+          rm -rf "$RUNNER_TEMP/omnillm-signing" || true

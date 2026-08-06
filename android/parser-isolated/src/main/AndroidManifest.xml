@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Isolated parser process (ARCH-TRUST-TOPOLOGY / ANDROID-ISOLATED-PROCESS).
+
+  isolatedProcess=true ⇒ special isolated UID without app permissions.
+  Not a complete security boundary against resource exhaustion or native bugs
+  (platform-policy-register ANDROID-ISOLATED-PROCESS).
+
+  Runtime materializes quarantine first, then passes read-only FDs only.
+  Service is not exported; only runtime binds explicitly.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <service
+            android:name="com.omnillm.android.parserisolated.IsolatedParserService"
+            android:exported="false"
+            android:isolatedProcess="true"
+            android:process=":parser" />
+    </application>
+</manifest>

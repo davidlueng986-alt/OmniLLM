@@ -1,0 +1,21 @@
+-- Authority: specs/database/omnillm-schema.sql#request_terminals
+-- Exactly one durable terminal per request_id
+
+CREATE TABLE request_terminals (
+  request_id TEXT NOT NULL PRIMARY KEY,
+  terminal_state TEXT NOT NULL,
+  output_digest TEXT,
+  error_code TEXT,
+  terminal_seq INTEGER NOT NULL,
+  completed_at TEXT NOT NULL
+);
+
+selectByRequestId:
+SELECT request_id, terminal_state, output_digest, error_code, terminal_seq, completed_at
+FROM request_terminals
+WHERE request_id = ?;
+
+insertTerminal:
+INSERT INTO request_terminals(
+  request_id, terminal_state, output_digest, error_code, terminal_seq, completed_at
+) VALUES (?, ?, ?, ?, ?, ?);

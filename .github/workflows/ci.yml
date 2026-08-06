@@ -1,0 +1,315 @@
+# OmniLLM Android - continuous integration (fail closed)
+#
+# Pipeline order (authoritative; see tools/ci/README.md):
+#   1. Checkout + JDK 17 + Android SDK / NDK lock
+#   2. Specs authority present
+#   3. Contract drift gate (specs/ vs committed generated/) BEFORE regenerate
+#   4. Optional generate + git clean check (belt-and-suspenders)
+#   5. Module dependency rules + dep edges (INV-001 / ADR-010 / ADR-007)
+#   6. Unit tests (JVM + Android host) - fail closed
+#   7. Root check (drift + 16 KB + dep edges + module rules) + Android lint
+#   8. assembleDebug + assembleRelease (unsigned; no secrets on PR CI)
+#   9. Native 16 KB ELF + APK zip-align gates
+#  10. Upload APK artifacts
+#
+# Hard rules: do not invent types/states/errors; never put signing secrets in the
+# repo; no Play Console upload automation; never elevate engine QUALIFIED/SUPPORTED.
+# detekt is not configured — intentionally skipped (lint + architecture gates).
+
+name: ci
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Mirror gradle/libs.versions.toml toolchain lock
+  JAVA_VERSION: "17"
+  ANDROID_COMPILE_SDK: "36"
+  ANDROID_BUILD_TOOLS: "36.0.0"
+  ANDROID_NDK: "28.2.13676358"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g"
+  # Prefer python3 on ubuntu; Gradle tasks use `python` - we create a shim below if needed.
+  OMNILLM_PYTHON: python3
+
+jobs:
+  verify:
+    name: Verify (contracts, JVM tests, assemble, 16KB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Ensure `python` invokes Python 3
+        run: |
+          # Gradle Exec tasks default to `python` (see root build.gradle.kts).
+          if ! command -v python >/dev/null 2>&1; then
+            sudo ln -sf "$(command -v python3)" /usr/local/bin/python
+          fi
+          python --version
+          python3 --version
+
+      - name: Install codegen dependencies
+        run: pip install -r tools/codegen/requirements.txt
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages (API 36 / build-tools / NDK r28)
+        run: |
+          set -euo pipefail
+          # Licenses: fail closed if sdkmanager cannot install required packages.
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-${ANDROID_COMPILE_SDK}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "ndk;${ANDROID_NDK}"
+          # Surface paths for later 16 KB / zipalign steps
+          echo "ANDROID_HOME=${ANDROID_HOME:-}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [ -n "${ANDROID_HOME:-}" ]; then
+            echo "ANDROID_SDK_ROOT=${ANDROID_HOME}" >> "$GITHUB_ENV"
+          fi
+
+      # ------------------------------------------------------------------
+      # Specs presence (fail closed on missing authority files)
+      # ------------------------------------------------------------------
+      - name: Specs authority present
+        run: |
+          set -euo pipefail
+          for f in \
+            specs/canonical-types.yaml \
+            specs/error-catalog.yaml \
+            specs/state-machines.yaml \
+            specs/access-control-catalog.yaml \
+            specs/capability-catalog.yaml \
+            specs/capability-availability-matrix.yaml \
+            specs/engine-qualification-status.yaml \
+            specs/openapi/omnillm.openapi.yaml \
+            specs/aidl/omnillm-aidl.yaml \
+            specs/platform-policy-register.yaml \
+            specs/database/omnillm-schema.sql
+          do
+            test -f "$f" || { echo "MISSING authority file: $f" >&2; exit 1; }
+          done
+          echo "Critical specs present."
+
+      # ------------------------------------------------------------------
+      # Contract codegen drift - MUST run before any in-tree regenerate
+      # ------------------------------------------------------------------
+      - name: Contract drift gate (checkContractDrift)
+        run: |
+          set -euo pipefail
+          # Fail closed when catalogs and committed generated Kotlin diverge.
+          ./gradlew checkContractDrift --no-daemon --stacktrace
+
+      - name: Contract codegen + verify clean git (generated sources)
+        run: |
+          set -euo pipefail
+          # Belt-and-suspenders: regenerate into the tree; must leave no diff.
+          # Authors must commit generateContracts output after catalog edits.
+          ./gradlew generateContracts --no-daemon --stacktrace
+          if ! git diff --quiet -- \
+            'core/canonical/src/main/kotlin/com/omnillm/core/canonical/generated' \
+            'core/state/src/main/kotlin/com/omnillm/core/state/generated' \
+            'core/errors/src/main/kotlin/com/omnillm/core/errors/generated'
+          then
+            echo "::error::Generated contract sources are dirty after generateContracts."
+            echo "Run ./gradlew generateContracts and commit the delta."
+            git --no-pager diff -- \
+              'core/canonical/src/main/kotlin/com/omnillm/core/canonical/generated' \
+              'core/state/src/main/kotlin/com/omnillm/core/state/generated' \
+              'core/errors/src/main/kotlin/com/omnillm/core/errors/generated' | head -n 200
+            exit 1
+          fi
+          # Untracked generated files also fail closed
+          untracked="$(git ls-files --others --exclude-standard -- \
+            core/canonical/src/main/kotlin/com/omnillm/core/canonical/generated \
+            core/state/src/main/kotlin/com/omnillm/core/state/generated \
+            core/errors/src/main/kotlin/com/omnillm/core/errors/generated \
+            || true)"
+          if [ -n "$untracked" ]; then
+            echo "::error::Untracked generated contract sources present."
+            echo "$untracked"
+            git status --short
+            exit 1
+          fi
+          echo "Generated sources clean."
+
+      # ------------------------------------------------------------------
+      # Module dependency boundaries (INV-001 / ADR-010 / ADR-007)
+      # ------------------------------------------------------------------
+      - name: Module dependency boundary gate
+        run: |
+          set -euo pipefail
+          # Fail closed on forbidden Gradle edges (UI→data/engines, engine→Room, etc.).
+          ./gradlew checkModuleDependencyRules --no-daemon --stacktrace
+          python tools/ci/check_module_dependency_rules.py --repo-root .
+
+      - name: Dependency edge gate (INV-001 / engines↛data)
+        run: |
+          set -euo pipefail
+          # Explicit second edge scanner (also wired into root `check`).
+          ./gradlew checkDependencyEdges --no-daemon --stacktrace
+          python tools/ci/check_dependency_edges.py
+
+      # ------------------------------------------------------------------
+      # Unit tests - JVM + Android host unit tests (fail closed)
+      # ------------------------------------------------------------------
+      - name: Unit tests (JVM modules + Android testDebugUnitTest)
+        run: |
+          set -euo pipefail
+          # Root `test` aggregates:
+          #   - all org.jetbrains.kotlin.jvm module tests
+          #   - all Android library/application testDebugUnitTest (host JVM)
+          # Previously only kotlin.jvm was wired — that skipped INV-011 / companion
+          # isolation suites under :android:runtime-service and peers.
+          # Any failure fails the job (fail closed).
+          ./gradlew test --no-daemon --stacktrace --continue
+        # Note: --continue surfaces all module failures, but step still fails if any failed.
+
+      # ------------------------------------------------------------------
+      # Root verification + lint (detekt not configured — intentionally skipped)
+      # ------------------------------------------------------------------
+      - name: Root check (contract drift + native 16 KB + dependency rules)
+        run: |
+          set -euo pipefail
+          # Aggregates: checkContractDrift + checkNative16kb + checkDependencyEdges
+          # + checkModuleDependencyRules
+          ./gradlew check --no-daemon --stacktrace
+
+      - name: Android lint (app modules)
+        run: |
+          set -euo pipefail
+          # AGP lint is always available for application modules.
+          # detekt: NOT configured in this monorepo — skip (no baseline file).
+          # Revisit only if product adds an org-wide Kotlin static-analysis mandate.
+          ./gradlew \
+            :android:app-ui:lintDebug \
+            :android:companion-sandbox:lintDebug \
+            --no-daemon --stacktrace
+
+      # ------------------------------------------------------------------
+      # Assemble
+      # ------------------------------------------------------------------
+      - name: Assemble debug APKs
+        run: |
+          set -euo pipefail
+          ./gradlew \
+            :android:app-ui:assembleDebug \
+            :android:companion-sandbox:assembleDebug \
+            --no-daemon --stacktrace
+
+      - name: Assemble release APKs (unsigned / no repo secrets)
+        run: |
+          set -euo pipefail
+          # Signing secrets are optional on PR/main CI. Release signing lives in
+          # release.yml + repository secrets (see tools/ci/README.md).
+          # Without signingConfig, AGP still produces release artifacts (unsigned).
+          ./gradlew \
+            :android:app-ui:assembleRelease \
+            :android:companion-sandbox:assembleRelease \
+            --no-daemon --stacktrace
+
+      # ------------------------------------------------------------------
+      # Native 16 KB packaging gates (ANDROID-16KB)
+      # ------------------------------------------------------------------
+      - name: Native 16 KB ELF alignment (*.so scan)
+        run: |
+          set -euo pipefail
+          # Pass when no .so present (skeleton). Fail when misaligned .so appear.
+          ./gradlew checkNative16kb --no-daemon --stacktrace
+          python tools/ci/check_elf_16kb_alignment.py --min-align 16384
+
+      - name: APK 16 KB zip-align check
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(
+            android/app-ui/build/outputs/apk/debug/*.apk
+            android/app-ui/build/outputs/apk/release/*.apk
+            android/companion-sandbox/build/outputs/apk/debug/*.apk
+            android/companion-sandbox/build/outputs/apk/release/*.apk
+          )
+          if [ ${#apks[@]} -eq 0 ]; then
+            echo "No APKs found for zip-align check (unexpected after assemble)."
+            exit 1
+          fi
+          for apk in "${apks[@]}"; do
+            echo "Checking zip-align: $apk"
+            python tools/ci/check_apk_16kb_zipalign.py "$apk"
+          done
+
+      # ------------------------------------------------------------------
+      # Artifacts
+      # ------------------------------------------------------------------
+      - name: Assert release/debug APK artifacts exist (fail closed)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # After assemble, missing APKs must fail the job (not soft-warn on upload).
+          required=(
+            android/app-ui/build/outputs/apk/debug
+            android/app-ui/build/outputs/apk/release
+            android/companion-sandbox/build/outputs/apk/debug
+            android/companion-sandbox/build/outputs/apk/release
+          )
+          for d in "${required[@]}"; do
+            apks=("$d"/*.apk)
+            if [ ${#apks[@]} -eq 0 ]; then
+              echo "::error::No APK under $d after assemble (fail closed)."
+              exit 1
+            fi
+            echo "OK artifact(s): ${apks[*]}"
+          done
+
+      - name: Upload APK artifacts
+        # Only when assemble produced artifacts; fail closed if globs empty.
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnillm-apks-${{ github.sha }}
+          path: |
+            android/app-ui/build/outputs/apk/**/*.apk
+            android/companion-sandbox/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload test reports (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnillm-test-reports-${{ github.sha }}
+          path: |
+            **/build/reports/tests/**
+            **/build/test-results/**
+            **/build/reports/lint-results*.html
+            **/build/reports/lint-results*.xml
+          if-no-files-found: ignore
+          retention-days: 7

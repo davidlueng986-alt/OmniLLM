@@ -1,0 +1,77 @@
+﻿# Build
+.gradle/
+.gradle-isolated/
+.gradle-isolated-audit/
+build/
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Local config / secrets
+local.properties
+*.jks
+*.keystore
+keystore.properties
+*.pem
+*.p12
+secrets/
+.env
+.env.*
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Kotlin / Java
+*.hprof
+.kotlin/
+
+# Test / e2e large artifacts
+e2e-artifacts/models/
+e2e-artifacts/*.png
+e2e-artifacts/*.db
+e2e-artifacts/*.db.bin
+e2e-artifacts/logcat*
+e2e-artifacts/*_source.txt
+e2e-artifacts/omnillm.db*
+
+# Root clutter / compile logs
+/*.txt
+/*.log
+/*.err.txt
+/compile-*/
+/admin-*/
+/assemble-*/
+/test-*/
+/arch-*/
+/final-*/
+/resource-*/
+/api-ok.txt
+/build-api.txt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Coverage
+coverage/
+*.lcov
+
+# Node
+node_modules/

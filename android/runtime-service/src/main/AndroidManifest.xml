@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ANDROID-SERVICE / ARCH-TRUST-TOPOLOGY process topology.
+
+  - main UI process: Activities only (declared in :android:app-ui); never hosts these services.
+  - :runtime process: control plane, FGS, DB/model-store single writer, binders.
+
+  Exported surface is RuntimeBindingService (IOmniBinding to IOmniRuntime only).
+  AdminBindingService and RuntimeForegroundService are non-exported.
+  Inference FGS uses specialUse; downloads use TransferService dataSync — never mixed.
+  Worker + isolated parser services merge from dependent library manifests.
+
+  PLAY-FGS-DECLARATION checklist (recheck before every Play submission):
+  RuntimeForegroundService: type specialUse, FOREGROUND_SERVICE_SPECIAL_USE, exported false.
+  TransferService: type dataSync, FOREGROUND_SERVICE_DATA_SYNC, exported false.
+  RuntimeBindingService: not an FGS host, exported true (discovery permission only).
+  AdminBindingService: not exported.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- FGS base + type-specific permissions (PLAY-FGS-DECLARATION / ANDROID-SERVICE §3). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      Network used by TransferService (model fetch) and content-report submit path
+      hosted in the control plane. Companion must not receive these permissions.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+      Same-signer signature permission defined by companion APK (com.omnillm.companion).
+      Required for runtime to companion bind (SEC-EXTERNAL-SANDBOX §2). Not a trust elevation.
+    -->
+    <uses-permission android:name="com.omnillm.companion.permission.BIND_SANDBOX" />
+
+    <!--
+      App-defined normal permission: discovery / intent filtering only.
+      NOT a security boundary (ANDROID-SERVICE §2). Real auth = calling UID +
+      Android user + approved ClientRegistration + scope/epoch.
+    -->
+    <permission
+        android:name="com.omnillm.permission.BIND_RUNTIME"
+        android:protectionLevel="normal"
+        android:label="@string/permission_bind_runtime_label"
+        android:description="@string/permission_bind_runtime_description" />
+
+    <application>
+        <!-- Inference / control-plane FGS. Non-exported. Holds control plane (not third-party bind entry). -->
+        <service
+            android:name="com.omnillm.android.runtimeservice.service.RuntimeForegroundService"
+            android:exported="false"
+            android:process=":runtime"
+            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="On-device LLM inference control plane and trusted engine host" />
+            <intent-filter>
+                <action android:name="com.omnillm.action.RUNTIME_FOREGROUND" />
+            </intent-filter>
+        </service>
+
+        <!--
+          Exported Runtime Binding facade. Returns IOmniBinding only.
+          Never exposes IOmniAdmin, secret broker, or arbitrary file I/O.
+        -->
+        <service
+            android:name="com.omnillm.android.runtimeservice.service.RuntimeBindingService"
+            android:exported="true"
+            android:process=":runtime"
+            android:permission="com.omnillm.permission.BIND_RUNTIME">
+            <intent-filter>
+                <action android:name="com.omnillm.action.BIND_RUNTIME" />
+            </intent-filter>
+        </service>
+
+        <!-- Same-app UI Admin binder. Non-exported; never returned by RuntimeBindingService. -->
+        <service
+            android:name="com.omnillm.android.runtimeservice.service.AdminBindingService"
+            android:exported="false"
+            android:process=":runtime">
+            <intent-filter>
+                <action android:name="com.omnillm.action.BIND_ADMIN" />
+            </intent-filter>
+        </service>
+
+        <!--
+          Transfer path for user-started download/import (dataSync).
+          Separate type/permission from inference specialUse (ANDROID-SERVICE §3).
+        -->
+        <service
+            android:name="com.omnillm.android.runtimeservice.service.TransferService"
+            android:exported="false"
+            android:process=":runtime"
+            android:foregroundServiceType="dataSync">
+            <intent-filter>
+                <action android:name="com.omnillm.action.TRANSFER" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

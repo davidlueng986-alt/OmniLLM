@@ -1,0 +1,35 @@
+# Dependabot — keep Gradle catalog / wrapper and GitHub Actions current.
+# Version bumps still require human review against the toolchain lock
+# (gradle/libs.versions.toml: JDK 17, AGP 9.3.x, compile/target 36, NDK r28+).
+
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - gradle
+    groups:
+      android-agp-kotlin:
+        patterns:
+          - "com.android.*"
+          - "org.jetbrains.kotlin*"
+          - "androidx.*"
+      ktor-coroutines:
+        patterns:
+          - "io.ktor*"
+          - "org.jetbrains.kotlinx:kotlinx-coroutines*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions

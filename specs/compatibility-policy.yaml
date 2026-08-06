@@ -1,0 +1,43 @@
+schemaVersion: 1
+versionAxes:
+- documentSchema
+- canonicalTypes
+- stateMachines
+- HTTPProfile
+- AIDLInterface
+- databaseSchema
+- engineAdapter
+- securityProtocol
+changeClasses:
+- id: PATCH
+  allowed:
+  - clarification
+  - new evidence
+  - non-semantic typo
+  requiresClientMajor: false
+- id: ADDITIVE
+  allowed:
+  - optional field with safe default
+  - new capability state entry
+  - new error detail
+  requiresNegotiation: true
+- id: BREAKING
+  examples:
+  - field meaning change
+  - state removal
+  - sequence semantic change
+  - principal change
+  - identity formula change
+  requiresMajor: true
+- id: SECURITY_BREAKING
+  examples:
+  - trust placement change
+  - pairing protocol change
+  - revocation semantics change
+  requiresMajor: true
+  requiresThreatReview: true
+rules:
+- unknown major schema versions fail closed
+- unknown capabilities remain UNKNOWN rather than SUPPORTED
+- unknown enum values are preserved only where explicitly declared extensible
+- wire and state changes require golden fixtures and migration/recovery semantics

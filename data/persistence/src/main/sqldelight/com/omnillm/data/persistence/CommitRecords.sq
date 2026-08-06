@@ -1,0 +1,63 @@
+-- Authority: specs/database/omnillm-schema.sql#commit_records
+-- INTENT_RECORDED must be durable before worker commitLoad (runtime-recovery-fixtures).
+-- States: INTENT_RECORDED|EXECUTING|RESULT_RECORDED|RECONCILING|COMMITTED|ABORTED|UNCERTAIN_QUARANTINED
+
+CREATE TABLE commit_records (
+  commit_id TEXT NOT NULL PRIMARY KEY,
+  request_id TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  plan_id TEXT NOT NULL,
+  reservation_id TEXT NOT NULL,
+  revision_lease_id TEXT NOT NULL,
+  issuer_boot_id TEXT NOT NULL,
+  runtime_epoch INTEGER NOT NULL,
+  revocation_epoch INTEGER NOT NULL,
+  source_session_epoch INTEGER,
+  target_policy_digest TEXT NOT NULL,
+  engine_build_id TEXT NOT NULL,
+  canonical_input_digest TEXT NOT NULL,
+  commit_nonce_digest TEXT NOT NULL,
+  state TEXT NOT NULL,
+  result_json TEXT,
+  error_code TEXT,
+  reconciliation_disposition TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+selectByCommitId:
+SELECT commit_id, request_id, principal_id, plan_id, reservation_id, revision_lease_id,
+       issuer_boot_id, runtime_epoch, revocation_epoch, source_session_epoch,
+       target_policy_digest, engine_build_id, canonical_input_digest, commit_nonce_digest,
+       state, result_json, error_code, reconciliation_disposition, created_at, updated_at
+FROM commit_records
+WHERE commit_id = ?;
+
+selectByNonceDigest:
+SELECT commit_id, request_id, principal_id, plan_id, reservation_id, revision_lease_id,
+       issuer_boot_id, runtime_epoch, revocation_epoch, source_session_epoch,
+       target_policy_digest, engine_build_id, canonical_input_digest, commit_nonce_digest,
+       state, result_json, error_code, reconciliation_disposition, created_at, updated_at
+FROM commit_records
+WHERE commit_nonce_digest = ?;
+
+insertCommit:
+INSERT INTO commit_records(
+  commit_id, request_id, principal_id, plan_id, reservation_id, revision_lease_id,
+  issuer_boot_id, runtime_epoch, revocation_epoch, source_session_epoch,
+  target_policy_digest, engine_build_id, canonical_input_digest, commit_nonce_digest,
+  state, result_json, error_code, reconciliation_disposition, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateState:
+UPDATE commit_records
+SET state = ?, result_json = ?, error_code = ?, reconciliation_disposition = ?, updated_at = ?
+WHERE commit_id = ?;
+
+listOpen:
+SELECT commit_id, request_id, principal_id, plan_id, reservation_id, revision_lease_id,
+       issuer_boot_id, runtime_epoch, revocation_epoch, source_session_epoch,
+       target_policy_digest, engine_build_id, canonical_input_digest, commit_nonce_digest,
+       state, result_json, error_code, reconciliation_disposition, created_at, updated_at
+FROM commit_records
+WHERE state NOT IN ('COMMITTED', 'ABORTED', 'UNCERTAIN_QUARANTINED');

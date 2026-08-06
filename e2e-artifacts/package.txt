@@ -1,0 +1,6 @@
+﻿# dumpsys package (installed package is com.omnillm.debug; com.omnillm not present)
+# captured: 2026-08-06 after UI journey diagnostics
+    versionCode=1 minSdk=28 targetSdk=36
+    versionName=0.1.0-debug
+    codePath=/data/app/~~1OPgn-t6bqzHNwQc7D7aRg==/com.omnillm.debug-LucrFX3oVHyLF6bnubF_pA==
+    dataDir=/data/user/0/com.omnillm.debug

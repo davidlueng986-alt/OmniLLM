@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Different-package / different-UID companion sandbox (SEC-EXTERNAL-SANDBOX, ADR-007).
+
+  applicationId = com.omnillm.companion (see build.gradle.kts) — never sharedUserId with main app.
+  Minimum permissions: no INTERNET, contacts, media, broad storage, backup, or main-app Keystore aliases.
+
+  Binding: explicit component + same-signer signature permission + protocol ticket handshake.
+  Signature permission controls who may bind; untrusted native code inside this process is still untrusted.
+
+  Packaging: separate APK (preferred) or optional AAB — see PACKAGING.md. Not merged into com.omnillm AAB.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Same-signer only: main app (com.omnillm) may control companion; not a trust elevation of model code. -->
+    <permission
+        android:name="com.omnillm.companion.permission.BIND_SANDBOX"
+        android:protectionLevel="signature"
+        android:label="@string/permission_bind_sandbox_label"
+        android:description="@string/permission_bind_sandbox_description" />
+
+    <!-- Companion requests the permission it enforces on its exported service. -->
+    <uses-permission android:name="com.omnillm.companion.permission.BIND_SANDBOX" />
+
+    <!-- Explicitly forbid elevating companion network surface in merges. -->
+    <uses-permission
+        android:name="android.permission.INTERNET"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.ACCESS_NETWORK_STATE"
+        tools:node="remove" />
+
+    <application
+        android:name=".CompanionApplication"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:usesCleartextTraffic="false"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:hasFragileUserData="false"
+        tools:targetApi="36">
+
+        <!--
+          Narrow control plane: plan-qualified load/start/cancel/query/close only.
+          No arbitrary file, network, secret, or admin RPC surface.
+        -->
+        <service
+            android:name=".CompanionSandboxService"
+            android:exported="true"
+            android:permission="com.omnillm.companion.permission.BIND_SANDBOX"
+            android:stopWithTask="false">
+            <intent-filter>
+                <action android:name="com.omnillm.companion.action.BIND_SANDBOX" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

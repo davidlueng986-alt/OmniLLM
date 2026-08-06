@@ -1,0 +1,28 @@
+-- Authority: specs/database/omnillm-schema.sql#schema_migration_attempts
+-- Attempt FSM: STARTED → COMMITTED | ROLLED_BACK | FAILED | QUARANTINED
+
+CREATE TABLE schema_migration_attempts (
+  migration_id TEXT NOT NULL PRIMARY KEY,
+  from_version INTEGER NOT NULL,
+  to_version INTEGER NOT NULL,
+  plan_digest TEXT NOT NULL,
+  state TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  error_code TEXT
+);
+
+selectAttempt:
+SELECT migration_id, from_version, to_version, plan_digest, state, started_at, updated_at, error_code
+FROM schema_migration_attempts
+WHERE migration_id = ?;
+
+insertAttempt:
+INSERT INTO schema_migration_attempts(
+  migration_id, from_version, to_version, plan_digest, state, started_at, updated_at, error_code
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+updateAttemptState:
+UPDATE schema_migration_attempts
+SET state = ?, updated_at = ?, error_code = ?
+WHERE migration_id = ?;

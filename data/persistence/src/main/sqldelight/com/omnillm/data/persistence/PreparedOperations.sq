@@ -1,0 +1,69 @@
+-- Authority: specs/database/omnillm-schema.sql#prepared_operations
+-- Start claim is durable before worker start (RR-005 one-shot).
+
+CREATE TABLE prepared_operations (
+  prepared_operation_id TEXT NOT NULL PRIMARY KEY,
+  operation_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  commit_id TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  reservation_id TEXT NOT NULL,
+  revision_lease_id TEXT NOT NULL,
+  issuer_boot_id TEXT NOT NULL,
+  runtime_epoch INTEGER NOT NULL,
+  revocation_epoch INTEGER NOT NULL,
+  source_session_id TEXT,
+  source_session_epoch INTEGER,
+  target_session_id TEXT,
+  canonical_input_digest TEXT NOT NULL,
+  state TEXT NOT NULL,
+  start_claimed_at TEXT,
+  result_json TEXT,
+  error_code TEXT,
+  reconciliation_disposition TEXT,
+  resource_version INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+selectById:
+SELECT prepared_operation_id, operation_id, request_id, commit_id, principal_id,
+       reservation_id, revision_lease_id, issuer_boot_id, runtime_epoch, revocation_epoch,
+       source_session_id, source_session_epoch, target_session_id, canonical_input_digest,
+       state, start_claimed_at, result_json, error_code, reconciliation_disposition,
+       resource_version, created_at, updated_at
+FROM prepared_operations
+WHERE prepared_operation_id = ?;
+
+selectByCommitId:
+SELECT prepared_operation_id, operation_id, request_id, commit_id, principal_id,
+       reservation_id, revision_lease_id, issuer_boot_id, runtime_epoch, revocation_epoch,
+       source_session_id, source_session_epoch, target_session_id, canonical_input_digest,
+       state, start_claimed_at, result_json, error_code, reconciliation_disposition,
+       resource_version, created_at, updated_at
+FROM prepared_operations
+WHERE commit_id = ?;
+
+selectByOperationId:
+SELECT prepared_operation_id, operation_id, request_id, commit_id, principal_id,
+       reservation_id, revision_lease_id, issuer_boot_id, runtime_epoch, revocation_epoch,
+       source_session_id, source_session_epoch, target_session_id, canonical_input_digest,
+       state, start_claimed_at, result_json, error_code, reconciliation_disposition,
+       resource_version, created_at, updated_at
+FROM prepared_operations
+WHERE operation_id = ?;
+
+insertPrepared:
+INSERT INTO prepared_operations(
+  prepared_operation_id, operation_id, request_id, commit_id, principal_id,
+  reservation_id, revision_lease_id, issuer_boot_id, runtime_epoch, revocation_epoch,
+  source_session_id, source_session_epoch, target_session_id, canonical_input_digest,
+  state, start_claimed_at, result_json, error_code, reconciliation_disposition,
+  resource_version, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateState:
+UPDATE prepared_operations
+SET state = ?, start_claimed_at = ?, result_json = ?, error_code = ?,
+    reconciliation_disposition = ?, resource_version = ?, updated_at = ?
+WHERE prepared_operation_id = ?;

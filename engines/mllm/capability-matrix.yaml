@@ -1,0 +1,260 @@
+# mllm capability matrix rows (ENGINE-MLLM / ENGINE-STANDARD §5)
+# Runtime exposure is projected by EngineRegistry from qualification cells.
+# Design baseline ≠ SUPPORTED. Default runtime capability: UNKNOWN.
+#
+# Integration family: device-local client-server / Go mllm_server.aar
+# Cancellation modes: COOPERATIVE | INTERRUPTIBLE | WORKER_KILL_ONLY | NOT_SUPPORTED | UNKNOWN
+# Cell status: UNQUALIFIED | STATIC_REVIEWED | SPIKE_REQUIRED | QUALIFIED_WITH_ENVELOPE | SUSPENDED
+#
+# Adapter must not infer capability from server marketing claims or model names.
+
+schemaVersion: 1
+engineId: mllm
+designStatus: BASELINE
+upstreamLockStatus: NOT_LOCKED
+qualificationStatus: UNQUALIFIED
+registryExposure: UNKNOWN
+runtimeCapabilityDefault: UNKNOWN
+
+# Formats/backends remain empty-candidate until pinned server/API + device evidence.
+formats:
+  - id: upstream-pinned
+    design: candidate_after_lock
+    runtimeDefault: UNKNOWN
+    notes: "Package identity = server build + model files + tokenizer/template/config + backend target"
+
+backends:
+  - id: cpu
+    design: portable_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Mobile CPU path candidate; requires measured resource envelope including Go/server overhead"
+  - id: npu
+    design: accelerator_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Per backend/device/driver/model/workload cell; never inherit CPU evidence"
+  - id: gpu
+    design: accelerator_candidate
+    runtimeDefault: UNKNOWN
+    notes: "Unqualified by default"
+
+operations:
+  - id: PROBE
+    design: map_to_server_rpc_when_locked
+    runtimeDefault: UNKNOWN
+  - id: LOAD
+    design: map_to_server_rpc_when_locked
+    runtimeDefault: UNKNOWN
+  - id: PLAN_INFERENCE
+    design: conservative_envelope_if_no_separate_plan
+    runtimeDefault: UNKNOWN
+    notes: "If server has no separate plan, Adapter uses conservative envelope; plan must not mutate"
+  - id: COMMIT_INFERENCE
+    design: map_to_server_rpc_when_locked
+    runtimeDefault: UNKNOWN
+  - id: START
+    design: map_to_server_rpc_when_locked
+    runtimeDefault: UNKNOWN
+  - id: GENERATE
+    design: map_to_server_rpc_when_locked
+    runtimeDefault: UNKNOWN
+  - id: EMBED
+    design: unknown_until_api_evidence
+    runtimeDefault: UNKNOWN
+    notes: "Requires tokenizer/pooling API evidence"
+  - id: CLOSE
+    design: map_to_server_rpc_when_locked
+    runtimeDefault: UNKNOWN
+  - id: UNLOAD
+    design: map_to_server_rpc_when_locked
+    runtimeDefault: UNKNOWN
+
+# Phase cancellation — design expectation vs measured mode (ENGINE-MLLM §6).
+# HTTP socket close does NOT prove native/server stop.
+# UNKNOWN cancellation ⇒ full lifecycle on killable worker only.
+phaseCancellation:
+  - phase: PROBE
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Bounded server/backend presence check; no blind model load in privileged process"
+  - phase: LOAD
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Server start + model load; measure non-preemptible window including Go overhead"
+  - phase: CREATE_SESSION
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: PLAN
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Plan has no KV/server mutation (ADR-002); if server forces mutation, cannot claim core contract"
+  - phase: COMMIT
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Server-side mutation bound to CommitId; must be queryable on reply loss"
+  - phase: START
+    expectedMode: INTERRUPTIBLE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+  - phase: GENERATE
+    expectedMode: COOPERATIVE
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Cancellation needs upstream RPC ack or worker termination"
+  - phase: CLOSE
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+    notes: "Shutdown latency measured; self-report does not lower envelope floor"
+  - phase: UNLOAD
+    expectedMode: WORKER_KILL_ONLY
+    measuredMode: UNKNOWN
+    maxNonPreemptibleMs: null
+
+prefixCapabilities:
+  - id: EXACT_SAME_SESSION
+    runtimeDefault: UNKNOWN
+  - id: EXACT_CROSS_SESSION
+    runtimeDefault: UNKNOWN
+    notes: "Do not publish without exact token/KV proof from server"
+  - id: TRUNCATE
+    runtimeDefault: UNKNOWN
+  - id: FORK
+    runtimeDefault: UNKNOWN
+
+placement:
+  - class: PRIVILEGED_TRUSTED
+    design: conditional
+    runtimeDefault: UNKNOWN
+    requires: "signed engine + verified catalog model + all phases qualified + private channel"
+  - class: CRASH_CONTAINED_TRUSTED
+    design: preferred_when_cancellation_unknown
+    runtimeDefault: UNKNOWN
+  - class: ISOLATED_CPU_UNTRUSTED
+    design: conditional
+    runtimeDefault: UNKNOWN
+  - class: EXTERNAL_UID_ACCELERATED
+    design: for_untrusted_acceleration
+    runtimeDefault: UNKNOWN
+    notes: "ADR-007 companion package/UID"
+
+# Initial matrix rows for Registry seeding (all UNQUALIFIED / NOT_EXECUTED).
+# Control plane may load these; adapters never write domain DB.
+cells:
+  - backend: cpu
+    phase: PROBE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: LOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: CREATE_SESSION
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: PLAN
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: COMMIT
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: START
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: CLOSE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: cpu
+    phase: UNLOAD
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  # Accelerator backends — explicit UNKNOWN rows (no silent inheritance from CPU)
+  - backend: npu
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+  - backend: gpu
+    phase: GENERATE
+    platform: android
+    modelEnvelope: "*"
+    workloadEnvelope: default
+    qualificationStatus: UNQUALIFIED
+    evidenceStatus: NOT_EXECUTED
+    cancellationMode: UNKNOWN
+
+# Known limitations / unsupported-by-default (ENGINE-MLLM §9)
+unsupportedByDefault:
+  - "Exactly-once semantics when server protocol lacks idempotent commit/query"
+  - "Localhost TCP without private channel + strong runtime credential (Host/CORS alone insufficient)"
+  - "Tokenizer / KV / prefix EXACT_CROSS_SESSION / TRUNCATE / FORK without server proof"
+  - "Embedding / structured / multimodal without API + cell evidence"
+  - "Go/server fixed overhead and shutdown latency assumed from JNI numbers"
+  - "External exposure of embedded mllm server (Gateway remains sole HTTP/AIDL entry)"
+  - "CORS wildcard, unauthenticated management, or LAN binding on embedded server"
+  - "Orphan server / port collision recovery without measured cleanup path"
+  - "Silent ignore of unsupported sampling / template / multimodal parameters"
+
+resourceEnvelopeDimensions:
+  - cpuFileBytes
+  - cpuAnonBytes          # includes Go/server fixed overhead + model/KV/workspace
+  - sharedMemoryChargeBytes
+  - gpuDedicatedBytes
+  - gpuSharedBytes
+  - npuBytes
+  - nativeThreads
+  - fileDescriptors       # port/socket/FD charge for embedded server
+  - temporaryDiskBytes
+  # queue/accelerator self-report does not lower envelope floor

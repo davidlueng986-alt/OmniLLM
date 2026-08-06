@@ -1,0 +1,48 @@
+-- Authority: specs/database/omnillm-schema.sql#idempotent_commands
+-- Claim key: UNIQUE (principal_id, operation_kind, idempotency_key)
+-- States: RECEIVED|CLAIMED|RUNNING|RECONCILING|SUCCEEDED|FAILED|CANCELLED|UNCERTAIN
+
+CREATE TABLE idempotent_commands (
+  command_id TEXT NOT NULL PRIMARY KEY,
+  principal_id TEXT NOT NULL,
+  operation_kind TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  expected_version INTEGER,
+  canonical_input_digest TEXT NOT NULL,
+  state TEXT NOT NULL,
+  affected_resource_id TEXT,
+  result_json TEXT,
+  error_code TEXT,
+  reconciliation_disposition TEXT,
+  resource_version INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+selectByCommandId:
+SELECT command_id, principal_id, operation_kind, idempotency_key, expected_version,
+       canonical_input_digest, state, affected_resource_id, result_json, error_code,
+       reconciliation_disposition, resource_version, expires_at, created_at, updated_at
+FROM idempotent_commands
+WHERE command_id = ?;
+
+selectByClaimKey:
+SELECT command_id, principal_id, operation_kind, idempotency_key, expected_version,
+       canonical_input_digest, state, affected_resource_id, result_json, error_code,
+       reconciliation_disposition, resource_version, expires_at, created_at, updated_at
+FROM idempotent_commands
+WHERE principal_id = ? AND operation_kind = ? AND idempotency_key = ?;
+
+insertCommand:
+INSERT INTO idempotent_commands(
+  command_id, principal_id, operation_kind, idempotency_key, expected_version,
+  canonical_input_digest, state, affected_resource_id, result_json, error_code,
+  reconciliation_disposition, resource_version, expires_at, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateResult:
+UPDATE idempotent_commands
+SET state = ?, result_json = ?, error_code = ?, affected_resource_id = ?,
+    reconciliation_disposition = ?, resource_version = ?, updated_at = ?
+WHERE command_id = ?;

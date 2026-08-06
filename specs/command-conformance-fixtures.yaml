@@ -1,0 +1,38 @@
+schemaVersion: 1
+authority:
+  request: specs/canonical-types.yaml#CommandRequest
+  state: specs/state-machines.yaml#COMMAND
+  ledger: specs/database/omnillm-schema.sql#idempotent_commands
+  http: specs/openapi/omnillm.openapi.yaml
+  aidl: specs/aidl/omnillm-aidl.yaml
+durableMutations:
+- cancelRequest
+- createAsset
+- uploadAsset
+- commitAsset
+- deleteAsset
+- createJob
+- cancelJob
+- patchSettings
+- revokeClient
+- enableLan
+- disableLan
+- createDiagnosticExport
+- createContentReportProposal
+- cancelContentReport
+- discardContentReport
+- issueLoopbackAdminToken
+- revokeToken
+- createLanPairingChallenge
+- completeLanPairing
+requiredFixturesPerMutation:
+- reply lost after commit then queryCommand returns the durable original result
+- duplicate identical request executes the mutation exactly once
+- same idempotency key with a different canonical input digest returns IDEMPOTENCY_CONFLICT
+- runtime restart between durable result and reply preserves queryCommand result
+- stale expectedVersion returns STATE_CONFLICT without side effect
+carrierRules:
+- JSON mutations embed CommandRequest as command
+- binary Asset upload uses multipart command plus content
+- pre-auth pairing binds CommandRequest to the channel-bound challenge as provisional principal
+- synchronous compatibility inference uses RequestId semantics and is not a durable Command mutation

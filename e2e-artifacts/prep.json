@@ -1,0 +1,9 @@
+﻿{
+    "device_sdk":  36,
+    "product_model":  "sdk_gphone64_x86_64",
+    "serial":  "emulator-5554",
+    "model_path":  "C:\\Users\\daive\\Downloads\\OmniLLM_Build\\omnillm-android\\e2e-artifacts\\models\\gemma-3-270m-Q8_0.gguf",
+    "model_size_bytes":  301651328,
+    "model_size_mb":  287.68,
+    "verified_gt_100mb":  true
+}

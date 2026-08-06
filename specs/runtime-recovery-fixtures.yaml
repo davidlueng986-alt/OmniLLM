@@ -1,0 +1,36 @@
+schemaVersion: 1
+authorities:
+  identity: specs/canonical-types.yaml
+  fsm: specs/state-machines.yaml
+  database: specs/database/omnillm-schema.sql
+invariants:
+- Commit INTENT_RECORDED is durable before a worker receives commitLoad or commitInference
+- PreparedOperation is durable before a worker receives start
+- runtime epoch and principal revocation epoch are checked on every worker reply and start claim
+- allocation transfer and commit result converge through commit_resource_bindings without blind replay
+crashMatrix:
+- id: RR-001
+  fault: worker dies before commit side effect
+  expectedCommitState: ABORTED
+  expectedDisposition: ROLLED_BACK
+- id: RR-002
+  fault: worker dies after side effect before reply
+  expectedCommitState: RECONCILING
+  allowedTerminal:
+  - COMMITTED
+  - UNCERTAIN_QUARANTINED
+- id: RR-003
+  fault: runtime restarts after worker reply before result transaction
+  expectedAction: query epoch-bound worker journal and reconcile the existing CommitId
+- id: RR-004
+  fault: late reply from prior runtimeEpoch
+  expectedAction: reject reply and quarantine affected resource binding
+- id: RR-005
+  fault: second start for the same PreparedOperationId
+  expectedError: STATE_CONFLICT
+- id: RR-006
+  fault: crash during reservation-to-allocation transfer
+  expectedAction: reconcile commit_resource_bindings to exactly one TRANSFERRED or QUARANTINED disposition
+- id: RR-007
+  fault: changed reservation, revision lease, principal, digest or revocation epoch under the same CommitId
+  expectedError: IDEMPOTENCY_CONFLICT

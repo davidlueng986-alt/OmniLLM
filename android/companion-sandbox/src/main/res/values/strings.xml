@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OmniLLM Companion</string>
+    <string name="permission_bind_sandbox_label">Bind OmniLLM companion sandbox</string>
+    <string name="permission_bind_sandbox_description">Allows the same-signer OmniLLM main app to bind the untrusted acceleration companion.</string>
+</resources>

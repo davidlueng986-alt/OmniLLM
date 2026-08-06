@@ -1,0 +1,46 @@
+schemaVersion: 1
+evidenceStatus: NOT_EXECUTED_PRE_BUILD
+scenarios:
+- id: UX-FIRST-SUCCESS
+  task: complete device explanation, model acquisition, first inference and one recovery path
+  acceptance:
+  - all critical states are understandable
+  - no blocker
+  - recovery action is available
+- id: UX-TALKBACK
+  task: complete setup and inference using TalkBack
+  acceptance:
+  - logical traversal
+  - all interactive controls have semantic labels
+  - live progress and terminal state are announced
+- id: UX-LARGE-TEXT
+  task: use 200% text scaling
+  acceptance:
+  - no clipped critical action
+  - no hidden terminal error
+  - horizontal scrolling is not required for primary flow
+- id: UX-KEYBOARD-SWITCH
+  task: operate all primary flows by keyboard or switch access
+  acceptance:
+  - visible focus
+  - deterministic focus order
+  - all actions operable
+- id: UX-VISUAL
+  task: verify contrast and touch targets
+  acceptance:
+  - WCAG-aligned contrast
+  - minimum touch target is documented
+  - state is not encoded by colour alone
+- id: UX-RTL-I18N
+  task: render Traditional Chinese, English and RTL fixture
+  acceptance:
+  - no semantic truncation
+  - directional icons mirror where required
+  - IDs and technical tokens remain stable
+- id: UX-AI-CONTENT-REPORT
+  task: report generated content in-app
+  acceptance:
+  - payload preview
+  - explicit consent before content upload
+  - offline queue state visible
+  - cancel/discard/accepted states are distinct

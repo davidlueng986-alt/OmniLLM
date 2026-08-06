@@ -1,0 +1,46 @@
+schemaVersion: 1
+platforms:
+- Android
+- iOS
+- PC
+- IoT
+components:
+- id: canonical-domain
+  Android: portable
+  iOS: portable
+  PC: portable
+  IoT: portable
+- id: engine-adapter-interface
+  Android: portable-core + native adapter
+  iOS: portable-core + platform adapter
+  PC: portable-core + service adapter
+  IoT: portable-core + daemon adapter
+- id: process-isolation
+  Android: UID/process/isolated service
+  iOS: app extension/helper constraints
+  PC: OS sandbox/service account
+  IoT: container/service user
+- id: local-interface
+  Android: AIDL + HTTP
+  iOS: in-process/XPC-like adapter + HTTP policy
+  PC: IPC + HTTP/gRPC policy
+  IoT: headless HTTP/IPC
+- id: background-lifecycle
+  Android: FGS/UIDT/platform constrained
+  iOS: strict background limits
+  PC: service/daemon
+  IoT: system service
+- id: accelerator
+  Android: CPU/GPU/NPU vendor drivers
+  iOS: Metal/CoreML where adapter qualifies
+  PC: CPU/CUDA/DirectML/Vulkan/Metal
+  IoT: vendor NPU/runtime
+- id: storage-access
+  Android: SAF/app private
+  iOS: document picker/app container
+  PC: filesystem ACL
+  IoT: managed storage
+invariants:
+- portable core owns semantic identity/state/error/resource contracts
+- platform adapter owns lifecycle, IPC, permissions, packaging and driver evidence
+- future platform documents are architecture roadmaps, not delivery schedules

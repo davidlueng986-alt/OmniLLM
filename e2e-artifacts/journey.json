@@ -1,0 +1,143 @@
+{
+  "test": "OmniLLM Android full UI smoke journey",
+  "timestamp": "2026-08-06T07:33:00Z",
+  "device": {
+    "serial": "emulator-5554",
+    "product": "sdk_gphone64_x86_64",
+    "api": 36,
+    "platform": "Android 16"
+  },
+  "package": {
+    "requested": "com.omnillm",
+    "actual": "com.omnillm.debug",
+    "activity": "com.omnillm.ui.MainActivity",
+    "note": "Debug applicationId uses .debug suffix"
+  },
+  "modelUnderTest": {
+    "pathOnDevice": "/sdcard/Download/omnillm-e2e/gemma-3-270m-Q8_0.gguf",
+    "present": true,
+    "bytes": 301651328,
+    "source": "ggml-org/gemma-3-270m-GGUF Q8_0"
+  },
+  "automation": {
+    "primary": "Appium MCP (embedded UiAutomator2)",
+    "sessionId": "38b166be-46b4-4cc0-ab8d-888cef4bdab3",
+    "fallback": "adb am start / logcat / uiautomator used for install and crash diagnosis; no full adb-only UI path required after launch fixes"
+  },
+  "engineQualification": {
+    "claim": "NONE — smoke E2E only; do not invent PASS for engines",
+    "exploratoryExecuteEnabled": false
+  },
+  "launchBlockersFixedDuringSession": [
+    {
+      "id": "keystore-iv",
+      "file": "android/runtime-service/.../AndroidKeystoreMasterKey.kt",
+      "symptom": "runtime FATAL InvalidAlgorithmParameterException: Caller-provided IV not permitted",
+      "fix": "Use Keystore-generated GCM IV on encrypt (setRandomizedEncryptionRequired=true)"
+    },
+    {
+      "id": "primaryRail-nulls",
+      "file": "android/app-ui/.../OmniDestinations.kt",
+      "symptom": "UI FATAL NoWhenBranchMatchedException / NPE on destinationLabel — primaryRail held null data objects",
+      "fix": "Make primaryRail/moreDestinations lazy so nested data objects are initialized"
+    },
+    {
+      "id": "modelhub-lazy-keys",
+      "file": "android/app-ui/.../ModelHubScreen.kt",
+      "symptom": "IllegalArgumentException: LazyColumn key already used (same modelRevisionId for pin + SAF hint)",
+      "fix": "Composite LazyColumn key including channel + displayName"
+    }
+  ],
+  "steps": [
+    {
+      "id": "A",
+      "name": "Launch app; dismiss first-run/onboarding if present",
+      "result": "PASS",
+      "details": "After launch fixes, cold start reaches Home. Runtime: READY. No forced Onboarding modal; first-run not blocking. Screenshots: A_launch_home.png",
+      "artifacts": ["e2e-artifacts/A_launch_home.png"]
+    },
+    {
+      "id": "B",
+      "name": "Settings — enable runtime.exploratoryExecuteEnabled",
+      "result": "FAIL",
+      "details": "Opened More drawer → Settings. Field runtime.exploratoryExecuteEnabled is displayed as read-only false. No Switch/toggle, no applySettings control. Advanced engine section is warning-only. omnillm.db has no settings/kv table for prefs write. Residual: flag remains false; exploratory generate cannot be enabled via UI or shared_prefs.",
+      "artifacts": ["e2e-artifacts/B_settings.png"],
+      "observedValues": {
+        "privacy.telemetryMode": "LOCAL_ONLY",
+        "runtime.backendPreference": "AUTO",
+        "runtime.exploratoryExecuteEnabled": "false",
+        "runtime.fallbackPolicy": "NONE",
+        "server.lanEnabled": "false",
+        "server.loopbackEnabled": "false"
+      }
+    },
+    {
+      "id": "C",
+      "name": "ModelHub — SAF import of gemma-3-270m-Q8_0.gguf",
+      "result": "FAIL",
+      "details": "ModelHub opens (after key fix). Suggested shows: (1) OmniLLM Offline Fixture PINNED_DOWNLOAD (2) OmniLLM Offline Fixture (SAF import) LOCAL_IMPORT. Detail for fixture exposes Download / View license / View evidence. Import UI incomplete: ModelHubScreen action buttons use empty onClick stub; no ActivityResultContracts.OpenDocument / DocumentsUI flow; no path to pick /sdcard/Download/omnillm-e2e/*.gguf. startImport API requires opaque assetId (not file path) — UI never creates asset. SAF picker never launched.",
+      "artifacts": [
+        "e2e-artifacts/C_modelhub.png",
+        "e2e-artifacts/modelhub.png",
+        "e2e-artifacts/C_import_detail.png",
+        "e2e-artifacts/import.png"
+      ],
+      "codeBlocker": {
+        "file": "android/app-ui/src/main/kotlin/com/omnillm/ui/screens/ModelHubScreen.kt",
+        "snippet": "card.allowedActions.forEach { action -> SecondaryActionButton(label = actionLabel(action), onClick = { /* mutations via ViewModel when user confirms */ }) }"
+      },
+      "pageSourceSnippet": "Suggested cards: text=OmniLLM Offline Fixture (SAF import) + text=LOCAL_IMPORT; Model detail actions: text=Download, text=View license, text=View evidence; no text=Import local file interactable with working handler"
+    },
+    {
+      "id": "D",
+      "name": "Wait for import/install job (≤10 min)",
+      "result": "FAIL",
+      "details": "No import job started. Downloads & imports tab empty state path not reached with active job. Poll skipped (nothing to poll).",
+      "artifacts": []
+    },
+    {
+      "id": "E",
+      "name": "Playground — select model, enter prompt",
+      "result": "FAIL",
+      "details": "Playground opens. Empty/gate state: 'No usable model for inference' + 'Inference entry points route to Model acquisition when no model is ready.' CTA Open ModelHub only. No model dropdown, no prompt field, no Send when no READY model.",
+      "artifacts": ["e2e-artifacts/playground_before.png"],
+      "pageSourceSnippet": "text=\"No usable model for inference\"; text=\"Open ModelHub\"; tabs Chat/Embeddings/Multimodal/Structured / Tools present"
+    },
+    {
+      "id": "F",
+      "name": "Send/Generate — wait ≤5 min for token/output/error",
+      "result": "FAIL",
+      "details": "Cannot generate: no installed model + exploratory flag false + no prompt UI in empty state. No Send control present.",
+      "artifacts": ["e2e-artifacts/playground_after.png"]
+    },
+    {
+      "id": "G",
+      "name": "Capture screenshots",
+      "result": "PASS",
+      "details": "Required screenshots captured (import/progress partial — no active job).",
+      "artifacts": {
+        "modelhub": "e2e-artifacts/modelhub.png",
+        "import": "e2e-artifacts/import.png",
+        "playground_before": "e2e-artifacts/playground_before.png",
+        "playground_after": "e2e-artifacts/playground_after.png",
+        "settings": "e2e-artifacts/B_settings.png",
+        "launch_home": "e2e-artifacts/A_launch_home.png"
+      }
+    },
+    {
+      "id": "H",
+      "name": "Record journey.json",
+      "result": "PASS",
+      "details": "This file."
+    }
+  ],
+  "overall": {
+    "result": "FAIL",
+    "summary": "Smoke journey reached Home, Settings, ModelHub, and Playground via Appium after three launch-blocking fixes. Cannot complete model import (UI action stubs; no SAF picker) or generate (no model + no exploratory toggle). Not an engine qualification PASS.",
+    "nextBlockersForGreenPath": [
+      "Wire ModelHub action buttons to ViewModel (download/import) with SAF OpenDocument → asset registration → StartImportSpec",
+      "Add Settings UI toggle or applySettings path for runtime.exploratoryExecuteEnabled",
+      "Optional: deep-link / test harness for offline fixture materialization without full SAF if product allows smoke path"
+    ]
+  }
+}

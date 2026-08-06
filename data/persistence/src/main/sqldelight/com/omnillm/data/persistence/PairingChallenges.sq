@@ -1,0 +1,80 @@
+-- Control-plane pairing challenges (SEC-PROFILE lanPairing / PAIRING_CHALLENGE FSM).
+-- Authority base: specs/database/omnillm-schema.sql#pairing_challenges
+-- Extension: server_nonce for channel binding; secret only as AES-GCM ciphertext.
+-- secret_plaintext is NEVER stored.
+
+CREATE TABLE pairing_challenges (
+  challenge_id TEXT NOT NULL PRIMARY KEY,
+  challenge_kind TEXT NOT NULL,
+  principal_id TEXT,
+  observed_uid INTEGER,
+  android_user_id INTEGER,
+  state TEXT NOT NULL,
+  protocol_label TEXT,
+  requested_scope_json TEXT NOT NULL,
+  server_spki_sha256 TEXT,
+  connection_epoch INTEGER,
+  server_nonce TEXT,
+  secret_ciphertext BLOB,
+  secret_nonce BLOB,
+  secret_key_version INTEGER,
+  secret_expires_at_epoch_ms INTEGER,
+  secret_schema_version INTEGER,
+  attempts_remaining INTEGER NOT NULL,
+  expires_at_epoch_ms INTEGER NOT NULL,
+  approved_at_epoch_ms INTEGER,
+  consumed_at_epoch_ms INTEGER,
+  created_at_epoch_ms INTEGER NOT NULL,
+  updated_at_epoch_ms INTEGER NOT NULL
+);
+
+selectByChallengeId:
+SELECT challenge_id, challenge_kind, principal_id, observed_uid, android_user_id, state,
+       protocol_label, requested_scope_json, server_spki_sha256, connection_epoch, server_nonce,
+       secret_ciphertext, secret_nonce, secret_key_version, secret_expires_at_epoch_ms,
+       secret_schema_version, attempts_remaining, expires_at_epoch_ms, approved_at_epoch_ms,
+       consumed_at_epoch_ms, created_at_epoch_ms, updated_at_epoch_ms
+FROM pairing_challenges
+WHERE challenge_id = ?;
+
+listAll:
+SELECT challenge_id, challenge_kind, principal_id, observed_uid, android_user_id, state,
+       protocol_label, requested_scope_json, server_spki_sha256, connection_epoch, server_nonce,
+       secret_ciphertext, secret_nonce, secret_key_version, secret_expires_at_epoch_ms,
+       secret_schema_version, attempts_remaining, expires_at_epoch_ms, approved_at_epoch_ms,
+       consumed_at_epoch_ms, created_at_epoch_ms, updated_at_epoch_ms
+FROM pairing_challenges
+ORDER BY created_at_epoch_ms ASC;
+
+upsertChallenge:
+INSERT INTO pairing_challenges(
+  challenge_id, challenge_kind, principal_id, observed_uid, android_user_id, state,
+  protocol_label, requested_scope_json, server_spki_sha256, connection_epoch, server_nonce,
+  secret_ciphertext, secret_nonce, secret_key_version, secret_expires_at_epoch_ms,
+  secret_schema_version, attempts_remaining, expires_at_epoch_ms, approved_at_epoch_ms,
+  consumed_at_epoch_ms, created_at_epoch_ms, updated_at_epoch_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(challenge_id) DO UPDATE SET
+  challenge_kind = excluded.challenge_kind,
+  principal_id = excluded.principal_id,
+  observed_uid = excluded.observed_uid,
+  android_user_id = excluded.android_user_id,
+  state = excluded.state,
+  protocol_label = excluded.protocol_label,
+  requested_scope_json = excluded.requested_scope_json,
+  server_spki_sha256 = excluded.server_spki_sha256,
+  connection_epoch = excluded.connection_epoch,
+  server_nonce = excluded.server_nonce,
+  secret_ciphertext = excluded.secret_ciphertext,
+  secret_nonce = excluded.secret_nonce,
+  secret_key_version = excluded.secret_key_version,
+  secret_expires_at_epoch_ms = excluded.secret_expires_at_epoch_ms,
+  secret_schema_version = excluded.secret_schema_version,
+  attempts_remaining = excluded.attempts_remaining,
+  expires_at_epoch_ms = excluded.expires_at_epoch_ms,
+  approved_at_epoch_ms = excluded.approved_at_epoch_ms,
+  consumed_at_epoch_ms = excluded.consumed_at_epoch_ms,
+  updated_at_epoch_ms = excluded.updated_at_epoch_ms;
+
+deleteByChallengeId:
+DELETE FROM pairing_challenges WHERE challenge_id = ?;

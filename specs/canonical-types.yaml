@@ -1,0 +1,397 @@
+schemaVersion: 3
+encoding:
+  digest: lower-case hexadecimal without prefix
+  time: RFC3339 UTC for wall time; monotonic nanoseconds plus bootId for deadlines
+  sequenceRange: '[fromInclusive,toExclusive)'
+  canonicalJson: RFC 8785 JSON data model; binary values represented by lower-case hex or base64url without padding as declared
+    by field
+  integer: signed 64-bit unless a narrower range is stated; byte counters are non-negative and use checked arithmetic
+  identityUnknownFields: rejected before canonicalization
+  identityHashInput: UTF-8 domain separator followed by LF followed by RFC 8785 bytes
+types:
+- id: BlobId
+  kind: string
+  pattern: ^[0-9a-f]{64}$
+  meaning: SHA-256 of exactly one raw byte sequence
+- id: ArtifactPackageId
+  kind: string
+  pattern: ^[0-9a-f]{64}$
+  hash: SHA-256("OmniLLM.ArtifactPackageId.v1\\n" || RFC8785(ArtifactPackageManifest))
+  meaning: Hash of the one canonical ArtifactPackageManifest schema below
+- id: ArtifactPackageEntry
+  kind: object
+  additionalProperties: false
+  required:
+  - role
+  - blobId
+  - byteLength
+  - shardIndex
+  fields:
+    role: non-empty UTF-8 string from the versioned role catalog
+    blobId: BlobId
+    byteLength: non-negative signed 64-bit integer; must equal blobs.byte_length for blobId
+    shardIndex: non-negative signed 32-bit integer
+- id: ArtifactPackageManifest
+  kind: object
+  additionalProperties: false
+  required:
+  - schemaVersion
+  - files
+  fields:
+    schemaVersion: integer constant 1
+    files: non-empty array of ArtifactPackageEntry
+  normalization:
+    sortBy:
+    - role
+    - blobId
+    - byteLength
+    - shardIndex
+    duplicateRule: reject duplicate canonical entries and duplicate role/shardIndex slots
+- id: ModelRevisionId
+  kind: string
+  pattern: ^[0-9a-f]{64}$
+  hash: SHA-256("OmniLLM.ModelRevisionId.v1\\n" || RFC8785(ModelRevisionManifest))
+  meaning: Hash of the one canonical ModelRevisionManifest schema below
+- id: ModelRevisionManifest
+  kind: object
+  additionalProperties: false
+  required:
+  - schemaVersion
+  - artifactPackageId
+  - formatProfile
+  - tokenizerDigest
+  - templateDigest
+  - quantizationDescriptor
+  - semanticDescriptor
+  - tensorLayoutPolicyDigest
+  - modelMetadataSchemaVersion
+  fields:
+    schemaVersion: integer constant 1
+    artifactPackageId: ArtifactPackageId
+    formatProfile: non-empty versioned string
+    tokenizerDigest: lower-case 64-character SHA-256
+    templateDigest: lower-case 64-character SHA-256
+    quantizationDescriptor: versioned object with unknown fields rejected by its declared schema
+    semanticDescriptor: versioned object with unknown fields rejected by its declared schema
+    tensorLayoutPolicyDigest: lower-case 64-character SHA-256
+    modelMetadataSchemaVersion: positive integer
+- id: InstallationId
+  kind: uuid
+  meaning: One installed instance of one ModelRevisionId
+- id: EngineBuildId
+  kind: string
+  meaning: Upstream revision, patches, build options, toolchain and artifact digests
+- id: DeviceExecutionFingerprint
+  kind: string
+  meaning: Platform, OS build, ABI, CPU features and backend-specific driver/runtime fingerprint
+- id: LoadKey
+  kind: object
+  required:
+  - modelRevisionId
+  - engineBuildId
+  - backend
+  - deviceExecutionFingerprint
+  - templateEpoch
+  - tokenizerEpoch
+  - loadConfigurationDigest
+- id: PrincipalId
+  kind: string
+  meaning: Authenticated caller principal; never a caller-supplied package name
+- id: RequestId
+  kind: uuid
+  generatedBy: client
+- id: IdempotencyKey
+  kind: string
+  maxBytes: 128
+  scope:
+  - principalId
+  - operationKind
+- id: PlanId
+  kind: opaque-handle
+  oneShot: true
+  boundTo:
+  - requestId
+  - principalId
+  - loadKey
+  - sourceSessionEpoch
+  - canonicalInputDigest
+  - expiry
+- id: CommitId
+  kind: uuid
+  queryable: true
+  boundTo:
+  - planId
+  - requestId
+  - principalId
+  - reservationId
+  - revisionLeaseId
+  - issuerBootId
+  - runtimeEpoch
+  - revocationEpoch
+  - sourceSessionEpoch
+  - targetPolicyDigest
+  - engineBuildId
+  - canonicalInputDigest
+  - oneShotNonce
+- id: PreparedOperationId
+  kind: opaque-handle
+  queryable: true
+  oneShotStartClaim: true
+  durableAuthority: prepared_operations
+  boundTo:
+  - operationId
+  - requestId
+  - commitId
+  - principalId
+  - reservationId
+  - revisionLeaseId
+  - issuerBootId
+  - runtimeEpoch
+  - revocationEpoch
+  - sourceSessionEpoch
+  - targetSessionId
+  - canonicalInputDigest
+  invariants:
+  - start claim is persisted before any worker start side effect
+  - old epoch, late reply, changed binding and second start fail closed
+  - terminal result includes allocation/session reconciliation disposition
+- id: SessionHandleId
+  kind: opaque-handle
+  boundTo:
+  - principalId
+  - runtimeEpoch
+  - sessionEpoch
+  - loadKey
+- id: AssetHandleId
+  kind: opaque-handle
+  boundTo:
+  - principalId
+  - purpose
+  - ttl
+  - maxBytes
+  - expectedDigest
+- id: RevisionLeaseId
+  kind: opaque-handle
+  boundTo:
+  - requestId
+  - modelRevisionId
+  - principalId
+  - runtimeEpoch
+- id: ReservationId
+  kind: opaque-handle
+  boundTo:
+  - issuerBootId
+  - runtimeEpoch
+  - principalId
+  - resourceEnvelope
+  - deadline
+- id: AllocationHandleId
+  kind: opaque-handle
+  meaning: Resident resource ownership produced by reservation conversion
+- id: ResourceVector
+  kind: object
+  semantics: All dimensions are additive charges; no peak field is embedded in this type
+  dimensions:
+  - cpuAnonBytes
+  - cpuFileBytes
+  - sharedMemoryChargeBytes
+  - gpuDedicatedBytes
+  - gpuSharedBytes
+  - npuBytes
+  - nativeThreads
+  - fileDescriptors
+  - temporaryDiskBytes
+  - networkBytesInFlight
+- id: ResourceEnvelope
+  kind: object
+  required:
+  - steady
+  - peak
+  fields:
+    steady: ResourceVector resident after operation commit
+    peak: ResourceVector maximum during the bounded operation; each dimension MUST be >= steady
+- id: OperationContext
+  kind: object
+  required:
+  - operationId
+  - principalId
+  - deadline
+  - cancelHandle
+  - runtimeEpoch
+  - revocationEpoch
+- id: FallbackPolicy
+  kind: enum
+  values:
+  - NONE
+  - SAME_REVISION_ONLY
+  - ALLOW_LIST
+- id: CapabilityState
+  kind: enum
+  values:
+  - SUPPORTED
+  - UNSUPPORTED
+  - CONDITIONAL
+  - UNKNOWN
+  - TEMPORARILY_UNAVAILABLE
+- id: EvidenceLabel
+  kind: enum
+  values:
+  - MEASURED
+  - ESTIMATED
+  - REPORTED
+  - LAST_SAMPLED
+  - UNKNOWN
+- id: PrefixDecision
+  kind: enum
+  values:
+  - NONE
+  - EXACT_SAME_SESSION
+  - EXACT_CROSS_SESSION
+  - TRUNCATE
+  - FORK
+- id: StreamBatch
+  kind: object
+  required:
+  - streamEpoch
+  - seqFrom
+  - seqTo
+  - events
+  range: '[seqFrom,seqTo)'
+  invariants:
+  - seqTo >= seqFrom
+  - terminal event position equals current next sequence
+  - application acknowledgement is distinct from transport write completion
+- id: CommandResult
+  kind: object
+  required:
+  - commandId
+  - state
+  - resourceVersion
+  optional:
+  - result
+  - error
+- id: CommandRequest
+  kind: object
+  additionalProperties: false
+  required:
+  - commandId
+  - idempotencyKey
+  - canonicalInputDigest
+  fields:
+    commandId: caller-generated UUID
+    idempotencyKey: IdempotencyKey
+    expectedVersion: optional non-negative resource version; omitted only when the target does not yet exist
+    canonicalInputDigest: lower-case SHA-256 of the canonical operation name, target identity, expectedVersion and payload
+  invariants:
+  - claim key is principalId, operationKind and idempotencyKey
+  - same claim key or commandId with a different canonicalInputDigest returns IDEMPOTENCY_CONFLICT
+  - every accepted durable mutation is queryable by commandId after reply loss
+- id: ContentReportCategory
+  kind: enum
+  values:
+  - HATE_HARASSMENT
+  - SEXUAL_CONTENT
+  - CHILD_SAFETY
+  - VIOLENCE_SELF_HARM
+  - ILLEGAL_ACTIVITY
+  - DECEPTION_IMPERSONATION
+  - PRIVACY_PERSONAL_DATA
+  - DANGEROUS_ADVICE
+  - OTHER
+- id: ContentReportState
+  kind: enum
+  values:
+  - DRAFT
+  - REVIEWING
+  - CONSENT_GRANTED
+  - QUEUED_OFFLINE
+  - SUBMITTING
+  - CANCELLING
+  - RECONCILING
+  - FAILED_RETRYABLE
+  - FAILED_FINAL
+  - SUBMITTED
+  - DISCARDED
+  - EXPIRED
+- id: ContentReportPayload
+  kind: object
+  additionalProperties: false
+  required:
+  - schemaVersion
+  - reportId
+  - category
+  - createdAt
+  - appBuild
+  - modelRevisionId
+  - engineBuildId
+  - backend
+  - localPolicyVersion
+  - outputDigest
+  - userLocale
+  fields:
+    schemaVersion: integer constant 1
+    reportId: UUID
+    category: ContentReportCategory
+    createdAt: RFC3339 UTC
+    appBuild: non-empty versioned string
+    modelRevisionId: ModelRevisionId
+    engineBuildId: EngineBuildId
+    backend: non-empty canonical backend ID
+    localPolicyVersion: non-empty versioned string
+    outputDigest: lower-case 64-character SHA-256
+    userLocale: BCP 47 locale tag
+    description: optional UTF-8 string, maximum 4096 bytes
+    promptExcerpt: optional user-selected UTF-8 string, maximum 4096 bytes
+    outputExcerpt: optional user-selected UTF-8 string, maximum 4096 bytes
+    diagnosticSummary: optional redacted UTF-8 string, maximum 4096 bytes
+  canonicalDigest: SHA-256("OmniLLM.ContentReportPayload.v1\\n" || RFC8785(payload))
+- id: ConsentGrant
+  kind: object
+  additionalProperties: false
+  oneTime: true
+  issuedBy: trusted local Secret Broker after non-exported local UI review
+  required:
+  - grantId
+  - principalId
+  - reportId
+  - canonicalPayloadDigest
+  - warningPolicyVersion
+  - localUserProfileId
+  - issuedAt
+  - expiresAt
+  - nonce
+  boundTo:
+  - principalId
+  - reportId
+  - canonicalPayloadDigest
+  - warningPolicyVersion
+  - localUserProfileId
+  - nonce
+  invariants:
+  - submission atomically consumes the durable grant row
+  - expiry, replay, principal mismatch, report mismatch or digest substitution fails closed
+- id: QualificationStatus
+  kind: enum
+  values:
+  - NOT_EXECUTED
+  - PASS
+  - FAIL
+  - EXPIRED
+  - INVALIDATED
+- id: DocumentStatus
+  kind: enum
+  values:
+  - BASELINE
+  - VALIDATION_REQUIRED
+  - FUTURE_BASELINE
+  - RETIRED
+- id: TokenState
+  kind: enum
+  values:
+  - ISSUING
+  - ACTIVE
+  - REVOCATION_REQUESTED
+  - DRAINING
+  - REVOKED
+  - EXPIRED
+  - FAILED

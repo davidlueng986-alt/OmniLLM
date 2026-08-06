@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Native packaging library — no components.
+  extractNativeLibs=false preferred for 16 KB zip alignment of uncompressed .so
+  (set on application modules that package jniLibs).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

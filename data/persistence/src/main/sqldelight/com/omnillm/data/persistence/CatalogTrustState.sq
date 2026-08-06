@@ -1,0 +1,34 @@
+-- Catalog trusted clock / sequence projection (SEC-SUPPLY / DATA-OWNERSHIP).
+-- Authority base: specs/database/omnillm-schema.sql#catalog_trust_state
+-- Control-plane sole writer; UI never opens this table (INV-001).
+
+CREATE TABLE catalog_trust_state (
+  singleton_id INTEGER NOT NULL PRIMARY KEY,
+  highest_sequence INTEGER NOT NULL DEFAULT 0,
+  trusted_clock_epoch_ms INTEGER,
+  boot_id TEXT,
+  elapsed_realtime_anchor_ms INTEGER,
+  uncertain INTEGER NOT NULL DEFAULT 1,
+  root_digest TEXT,
+  updated_at TEXT NOT NULL
+);
+
+selectSingleton:
+SELECT singleton_id, highest_sequence, trusted_clock_epoch_ms, boot_id,
+       elapsed_realtime_anchor_ms, uncertain, root_digest, updated_at
+FROM catalog_trust_state
+WHERE singleton_id = 1;
+
+upsert:
+INSERT INTO catalog_trust_state(
+  singleton_id, highest_sequence, trusted_clock_epoch_ms, boot_id,
+  elapsed_realtime_anchor_ms, uncertain, root_digest, updated_at
+) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(singleton_id) DO UPDATE SET
+  highest_sequence = excluded.highest_sequence,
+  trusted_clock_epoch_ms = excluded.trusted_clock_epoch_ms,
+  boot_id = excluded.boot_id,
+  elapsed_realtime_anchor_ms = excluded.elapsed_realtime_anchor_ms,
+  uncertain = excluded.uncertain,
+  root_digest = excluded.root_digest,
+  updated_at = excluded.updated_at;

@@ -1,0 +1,66 @@
+-- Control-plane access token HMAC verifiers (SEC-AUTH-NET §2 / SEC-PROFILE §3).
+-- Authority base: specs/database/omnillm-schema.sql#access_tokens
+-- Extension: principal_id / label / client_id for admin list + auth subject binding.
+-- NEVER store bearer plaintext — verifier BLOB only.
+
+CREATE TABLE access_tokens (
+  token_id TEXT NOT NULL PRIMARY KEY,
+  registration_id TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  verifier BLOB NOT NULL,
+  verifier_algorithm TEXT NOT NULL,
+  verifier_key_version INTEGER NOT NULL,
+  transport_constraint TEXT NOT NULL,
+  scope_json TEXT NOT NULL,
+  revocation_epoch INTEGER NOT NULL,
+  issued_at_epoch_ms INTEGER NOT NULL,
+  expires_at_epoch_ms INTEGER NOT NULL,
+  last_seen_at_epoch_ms INTEGER,
+  label TEXT,
+  client_id TEXT,
+  updated_at_epoch_ms INTEGER NOT NULL
+);
+
+selectByTokenId:
+SELECT token_id, registration_id, principal_id, state, verifier, verifier_algorithm,
+       verifier_key_version, transport_constraint, scope_json, revocation_epoch,
+       issued_at_epoch_ms, expires_at_epoch_ms, last_seen_at_epoch_ms, label, client_id,
+       updated_at_epoch_ms
+FROM access_tokens
+WHERE token_id = ?;
+
+listAll:
+SELECT token_id, registration_id, principal_id, state, verifier, verifier_algorithm,
+       verifier_key_version, transport_constraint, scope_json, revocation_epoch,
+       issued_at_epoch_ms, expires_at_epoch_ms, last_seen_at_epoch_ms, label, client_id,
+       updated_at_epoch_ms
+FROM access_tokens
+ORDER BY issued_at_epoch_ms ASC;
+
+upsertToken:
+INSERT INTO access_tokens(
+  token_id, registration_id, principal_id, state, verifier, verifier_algorithm,
+  verifier_key_version, transport_constraint, scope_json, revocation_epoch,
+  issued_at_epoch_ms, expires_at_epoch_ms, last_seen_at_epoch_ms, label, client_id,
+  updated_at_epoch_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(token_id) DO UPDATE SET
+  registration_id = excluded.registration_id,
+  principal_id = excluded.principal_id,
+  state = excluded.state,
+  verifier = excluded.verifier,
+  verifier_algorithm = excluded.verifier_algorithm,
+  verifier_key_version = excluded.verifier_key_version,
+  transport_constraint = excluded.transport_constraint,
+  scope_json = excluded.scope_json,
+  revocation_epoch = excluded.revocation_epoch,
+  issued_at_epoch_ms = excluded.issued_at_epoch_ms,
+  expires_at_epoch_ms = excluded.expires_at_epoch_ms,
+  last_seen_at_epoch_ms = excluded.last_seen_at_epoch_ms,
+  label = excluded.label,
+  client_id = excluded.client_id,
+  updated_at_epoch_ms = excluded.updated_at_epoch_ms;
+
+deleteByTokenId:
+DELETE FROM access_tokens WHERE token_id = ?;

@@ -1,0 +1,91 @@
+schemaVersion: 1
+evidenceLabels:
+- MEASURED
+- ESTIMATED
+- REPORTED
+- LAST_SAMPLED
+- UNKNOWN
+metrics:
+- id: request.ttft_ms
+  unit: ms
+  aggregation: histogram
+  dimensions:
+  - engineBuildId
+  - modelRevisionId
+  - backend
+  - deviceClass
+  privacy: operational
+  freshness: per request
+- id: request.tokens_per_second
+  unit: token/s
+  aggregation: histogram
+  dimensions:
+  - measurementProfileId
+  privacy: operational
+  freshness: per request
+- id: request.queue_ms
+  unit: ms
+  aggregation: histogram
+  dimensions:
+  - principalClass
+  - operationKind
+  privacy: restricted
+  freshness: per request
+- id: request.error_count
+  unit: count
+  aggregation: counter
+  dimensions:
+  - errorCode
+  - phase
+  privacy: operational
+  freshness: event
+- id: resource.reserved_bytes
+  unit: bytes
+  aggregation: gauge
+  dimensions:
+  - resourceDimension
+  - ownerKind
+  privacy: operational
+  freshness: 2s or transition
+- id: resource.allocated_bytes
+  unit: bytes
+  aggregation: gauge
+  dimensions:
+  - resourceDimension
+  - ownerKind
+  privacy: operational
+  freshness: 2s or transition
+- id: resource.memory_sample_age_ms
+  unit: ms
+  aggregation: gauge
+  dimensions:
+  - processInstance
+  privacy: operational
+  freshness: 2s
+- id: thermal.status
+  unit: enum
+  aggregation: last
+  dimensions:
+  - deviceFingerprint
+  privacy: device-sensitive
+  freshness: platform callback
+- id: engine.health
+  unit: enum
+  aggregation: last
+  dimensions:
+  - engineBuildId
+  - backend
+  privacy: operational
+  freshness: transition
+- id: job.progress
+  unit: ratio
+  aggregation: last
+  dimensions:
+  - jobKind
+  privacy: restricted
+  freshness: event
+rules:
+- count+sum cannot claim percentile
+- percentiles require histogram/sketch and methodVersion
+- all UI values expose evidence label and sampledAt
+- raw prompt and model private path are not metrics dimensions

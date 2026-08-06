@@ -1,0 +1,206 @@
+schemaVersion: 2
+principals:
+- id: LOCAL_UI
+  authentication: non-exported admin binder
+  defaultProfile: LOCAL_ADMIN
+- id: ANDROID_APP
+  authentication: observed calling UID + Android user/profile + approved ClientRegistration
+  defaultProfile: APP_CLIENT
+- id: HTTP_LOOPBACK
+  authentication: scoped bearer token
+  defaultProfile: DEVELOPER_CLIENT
+- id: HTTP_LOCAL_ADMIN
+  authentication: user-created loopback-only admin bearer token + local explicit issuance
+  defaultProfile: LOCAL_ADMIN_HTTP
+- id: HTTP_LAN
+  authentication: TLS server identity + channel-bound pairing + scoped bearer token
+  defaultProfile: LAN_CLIENT
+- id: ISOLATED_WORKER
+  authentication: supervisor-issued epoch-bound capability handles
+  defaultProfile: WORKER
+scopes:
+- id: assets.create
+  operations:
+  - create-upload-handle
+  - upload
+  - commit
+- id: assets.delete-own
+  operations:
+  - delete-own-asset
+- id: assets.read-own
+  operations:
+  - query-own-asset
+- id: clients.manage
+  operations:
+  - approve-suspend-revoke-clients
+- id: clients.read
+  operations:
+  - list-client-registrations
+- id: content-reports.propose
+  operations:
+  - create-ai-output-report-proposal
+- id: content-reports.manage-own
+  operations:
+  - cancel-own-content-report
+  - discard-own-content-report
+- id: content-reports.read-own
+  operations:
+  - read-own-content-report-status
+  - read-own-content-report-receipt
+- id: content-reports.review-submit
+  operations:
+  - review-report-in-trusted-local-ui
+  - issue-one-time-consent-grant
+  - submit-report-with-consumed-grant
+  transport: non-exported local admin AIDL only
+- id: commands.read-own
+  operations:
+  - query-own-command-result
+- id: diagnostics.export
+  operations:
+  - create-redacted-diagnostic-export
+- id: inference.cancel
+  operations:
+  - cancel-own-request
+- id: inference.create
+  operations:
+  - chat
+  - embedding
+  - structured-output
+  - tool-call
+- id: inference.read-own
+  operations:
+  - query-own-request
+  - resume-own-stream
+- id: jobs.manage
+  operations:
+  - create-control-jobs
+- id: jobs.read-all
+  operations:
+  - read-all-jobs
+- id: jobs.read-own
+  operations:
+  - read-own-jobs
+- id: lan.manage
+  operations:
+  - enable-disable-configure-lan
+- id: metrics.read-detail
+  operations:
+  - read-local-detailed-metrics
+- id: metrics.read-summary
+  operations:
+  - read-redacted-summary
+- id: models.manage
+  operations:
+  - acquire-model
+  - import-model
+  - delete-model
+  - set-alias
+- id: models.read
+  operations:
+  - list-models
+  - get-model
+- id: settings.read
+  operations:
+  - read-effective-settings
+- id: settings.write
+  operations:
+  - change-settings
+- id: tokens.manage
+  operations:
+  - issue-rotate-revoke-tokens
+profiles:
+- id: LOCAL_ADMIN
+  scopes:
+  - '*'
+  transport: non-exported AIDL
+- id: LOCAL_ADMIN_HTTP
+  scopes:
+  - assets.create
+  - assets.delete-own
+  - assets.read-own
+  - clients.manage
+  - clients.read
+  - content-reports.propose
+  - content-reports.manage-own
+  - content-reports.read-own
+  - commands.read-own
+  - diagnostics.export
+  - inference.cancel
+  - inference.create
+  - inference.read-own
+  - jobs.manage
+  - jobs.read-all
+  - jobs.read-own
+  - lan.manage
+  - metrics.read-detail
+  - metrics.read-summary
+  - models.manage
+  - models.read
+  - settings.read
+  - settings.write
+  - tokens.manage
+  transport: literal loopback HTTP only
+  requiresExplicitLocalIssuance: true
+  acceptedOnLanListener: false
+- id: APP_CLIENT
+  scopes:
+  - models.read
+  - inference.create
+  - inference.cancel
+  - inference.read-own
+  - assets.create
+  - assets.read-own
+  - assets.delete-own
+  - jobs.read-own
+  - content-reports.propose
+  - content-reports.manage-own
+  - content-reports.read-own
+  - commands.read-own
+  transport: exported runtime AIDL
+- id: DEVELOPER_CLIENT
+  scopes:
+  - models.read
+  - inference.create
+  - inference.cancel
+  - inference.read-own
+  - assets.create
+  - assets.read-own
+  - assets.delete-own
+  - metrics.read-summary
+  - jobs.read-own
+  - content-reports.propose
+  - content-reports.manage-own
+  - content-reports.read-own
+  - commands.read-own
+  transport: loopback HTTP
+- id: LAN_CLIENT
+  scopes:
+  - models.read
+  - inference.create
+  - inference.cancel
+  - inference.read-own
+  - assets.create
+  - assets.read-own
+  - assets.delete-own
+  - jobs.read-own
+  - content-reports.propose
+  - content-reports.manage-own
+  - content-reports.read-own
+  - commands.read-own
+  transport: TLS LAN HTTP
+  requiresExplicitApprovalForEveryScope: true
+- id: WORKER
+  scopes: []
+  transport: narrow supervisor binder only
+invariants:
+- caller-supplied package name is never a principal
+- each operation declares exactly one required scope from this catalog
+- revocation bumps a monotonic epoch and fences active, queued and pooled state
+- admin binder is never returned by the exported runtime service
+- response fields are allowlisted per scope and transport
+- loopback admin bearer tokens are never accepted by the LAN listener
+- LAN bearer tokens are issued only by the channel-bound LAN pairing exchange
+- AIDL registration uses observed UID/user plus local approval and does not reuse the LAN pairing secret protocol
+- content-reports.review-submit is reachable only through LOCAL_UI/LOCAL_ADMIN on the non-exported admin binder
+- no exported profile can assert consent; external profiles can only propose, query, cancel or discard their own report

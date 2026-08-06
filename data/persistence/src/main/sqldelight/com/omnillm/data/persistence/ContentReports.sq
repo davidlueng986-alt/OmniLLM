@@ -1,0 +1,120 @@
+-- Control-plane ContentReport drafts / queue (FEAT-AI-CONTENT-REPORT / ADR-010).
+-- Authority base: specs/database/omnillm-schema.sql#content_reports
+--
+-- Report stream is AI_CONTENT_REPORT — never telemetry (SEC-PRIVACY).
+-- SQLDelight projection omits FKs to idempotent_commands for hermetic ledger tests;
+-- production still co-locates tables in the single control-plane DB.
+--
+-- encrypted_* BLOBs hold Secret Broker REPORT_QUEUE_ENCRYPTION AES-GCM envelopes
+-- (OCR1 binary via EncryptedRecordCodec); never plaintext payload JSON.
+-- logs / metrics must not re-export raw content as telemetry.
+
+CREATE TABLE content_reports (
+  report_id TEXT NOT NULL PRIMARY KEY,
+  principal_id TEXT NOT NULL,
+  proposal_command_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  resource_version INTEGER NOT NULL DEFAULT 0,
+  state TEXT NOT NULL,
+  category TEXT NOT NULL,
+  app_build TEXT NOT NULL,
+  model_revision_id TEXT NOT NULL,
+  engine_build_id TEXT NOT NULL,
+  backend TEXT NOT NULL,
+  local_policy_version TEXT NOT NULL,
+  output_digest TEXT NOT NULL,
+  user_locale TEXT NOT NULL,
+  encrypted_proposal BLOB NOT NULL,
+  canonical_payload_digest TEXT,
+  encrypted_payload BLOB,
+  cancel_pending INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT NOT NULL,
+  error_code TEXT,
+  active_grant_id TEXT,
+  receipt_id TEXT,
+  receipt_accepted_at TEXT,
+  receipt_status_url TEXT,
+  payload_created_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+selectByReportId:
+SELECT report_id, principal_id, proposal_command_id, idempotency_key, resource_version,
+       state, category, app_build, model_revision_id, engine_build_id, backend,
+       local_policy_version, output_digest, user_locale, encrypted_proposal,
+       canonical_payload_digest, encrypted_payload, cancel_pending, expires_at,
+       error_code, active_grant_id, receipt_id, receipt_accepted_at, receipt_status_url,
+       payload_created_at, created_at, updated_at
+FROM content_reports
+WHERE report_id = ?;
+
+selectByPrincipalAndIdempotency:
+SELECT report_id, principal_id, proposal_command_id, idempotency_key, resource_version,
+       state, category, app_build, model_revision_id, engine_build_id, backend,
+       local_policy_version, output_digest, user_locale, encrypted_proposal,
+       canonical_payload_digest, encrypted_payload, cancel_pending, expires_at,
+       error_code, active_grant_id, receipt_id, receipt_accepted_at, receipt_status_url,
+       payload_created_at, created_at, updated_at
+FROM content_reports
+WHERE principal_id = ? AND idempotency_key = ?;
+
+listByPrincipal:
+SELECT report_id, principal_id, proposal_command_id, idempotency_key, resource_version,
+       state, category, app_build, model_revision_id, engine_build_id, backend,
+       local_policy_version, output_digest, user_locale, encrypted_proposal,
+       canonical_payload_digest, encrypted_payload, cancel_pending, expires_at,
+       error_code, active_grant_id, receipt_id, receipt_accepted_at, receipt_status_url,
+       payload_created_at, created_at, updated_at
+FROM content_reports
+WHERE principal_id = ?
+ORDER BY updated_at DESC;
+
+listAll:
+SELECT report_id, principal_id, proposal_command_id, idempotency_key, resource_version,
+       state, category, app_build, model_revision_id, engine_build_id, backend,
+       local_policy_version, output_digest, user_locale, encrypted_proposal,
+       canonical_payload_digest, encrypted_payload, cancel_pending, expires_at,
+       error_code, active_grant_id, receipt_id, receipt_accepted_at, receipt_status_url,
+       payload_created_at, created_at, updated_at
+FROM content_reports
+ORDER BY updated_at DESC;
+
+upsertReport:
+INSERT INTO content_reports(
+  report_id, principal_id, proposal_command_id, idempotency_key, resource_version,
+  state, category, app_build, model_revision_id, engine_build_id, backend,
+  local_policy_version, output_digest, user_locale, encrypted_proposal,
+  canonical_payload_digest, encrypted_payload, cancel_pending, expires_at,
+  error_code, active_grant_id, receipt_id, receipt_accepted_at, receipt_status_url,
+  payload_created_at, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(report_id) DO UPDATE SET
+  principal_id = excluded.principal_id,
+  proposal_command_id = excluded.proposal_command_id,
+  idempotency_key = excluded.idempotency_key,
+  resource_version = excluded.resource_version,
+  state = excluded.state,
+  category = excluded.category,
+  app_build = excluded.app_build,
+  model_revision_id = excluded.model_revision_id,
+  engine_build_id = excluded.engine_build_id,
+  backend = excluded.backend,
+  local_policy_version = excluded.local_policy_version,
+  output_digest = excluded.output_digest,
+  user_locale = excluded.user_locale,
+  encrypted_proposal = excluded.encrypted_proposal,
+  canonical_payload_digest = excluded.canonical_payload_digest,
+  encrypted_payload = excluded.encrypted_payload,
+  cancel_pending = excluded.cancel_pending,
+  expires_at = excluded.expires_at,
+  error_code = excluded.error_code,
+  active_grant_id = excluded.active_grant_id,
+  receipt_id = excluded.receipt_id,
+  receipt_accepted_at = excluded.receipt_accepted_at,
+  receipt_status_url = excluded.receipt_status_url,
+  payload_created_at = excluded.payload_created_at,
+  updated_at = excluded.updated_at;
+
+deleteByReportId:
+DELETE FROM content_reports WHERE report_id = ?;

@@ -1,0 +1,179 @@
+schemaVersion: 2
+states:
+- SUPPORTED
+- UNSUPPORTED
+- CONDITIONAL
+- UNKNOWN
+- TEMPORARILY_UNAVAILABLE
+requiredEvidenceBinding:
+- engineBuildId
+- backend
+- deviceFingerprint
+- modelEnvelope
+- operationProfile
+- evidenceId
+- expiresAt
+capabilities:
+- id: DEVICE_DISCOVERY
+  owner: device-platform
+  dependsOn: []
+- id: MODEL_ACQUISITION
+  owner: model-platform
+  dependsOn: []
+- id: MODEL_IDENTITY
+  owner: model-platform
+  dependsOn: []
+- id: COMPATIBILITY_EVALUATION
+  owner: capability-platform
+  dependsOn:
+  - MODEL_IDENTITY
+- id: RECOMMENDATION
+  owner: auto-setup
+  dependsOn:
+  - DEVICE_DISCOVERY
+  - COMPATIBILITY_EVALUATION
+- id: AUTOMATED_CONFIGURATION
+  owner: auto-setup
+  dependsOn:
+  - RECOMMENDATION
+- id: SAFE_INSTALLATION
+  owner: model-platform
+  dependsOn:
+  - MODEL_ACQUISITION
+  - MODEL_IDENTITY
+- id: TEXT_GENERATION
+  owner: engine-platform
+  dependsOn: []
+- id: EMBEDDING
+  owner: engine-platform
+  dependsOn: []
+- id: VISION_INPUT
+  owner: engine-platform
+  dependsOn: []
+- id: AUDIO_INPUT
+  owner: engine-platform
+  dependsOn: []
+- id: STRUCTURED_OUTPUT
+  owner: engine-platform
+  dependsOn:
+  - TEXT_GENERATION
+- id: TOOL_CALLING
+  owner: engine-platform
+  dependsOn:
+  - STRUCTURED_OUTPUT
+- id: ENGINE_LIFECYCLE
+  owner: engine-platform
+  dependsOn: []
+- id: MODEL_LIFECYCLE
+  owner: model-platform
+  dependsOn:
+  - ENGINE_LIFECYCLE
+- id: SESSION_LIFECYCLE
+  owner: session-platform
+  dependsOn:
+  - MODEL_LIFECYCLE
+- id: REQUEST_LIFECYCLE
+  owner: orchestrator
+  dependsOn:
+  - SESSION_LIFECYCLE
+- id: JOB_LIFECYCLE
+  owner: admin-platform
+  dependsOn: []
+- id: CAPABILITY_NEGOTIATION
+  owner: capability-platform
+  dependsOn: []
+- id: STREAMING
+  owner: interface-platform
+  dependsOn:
+  - REQUEST_LIFECYCLE
+- id: CANCELLATION
+  owner: interface-platform
+  dependsOn:
+  - REQUEST_LIFECYCLE
+- id: DEADLINE
+  owner: interface-platform
+  dependsOn:
+  - REQUEST_LIFECYCLE
+- id: IDEMPOTENCY
+  owner: reliability-platform
+  dependsOn:
+  - REQUEST_LIFECYCLE
+- id: RECONNECT
+  owner: reliability-platform
+  dependsOn:
+  - IDEMPOTENCY
+- id: HTTP_INTERFACE
+  owner: interface-platform
+  dependsOn: []
+- id: AIDL_INTERFACE
+  owner: interface-platform
+  dependsOn: []
+- id: ADMIN_INTERFACE
+  owner: interface-platform
+  dependsOn: []
+- id: LOCAL_UI_INTERFACE
+  owner: experience-platform
+  dependsOn: []
+- id: LAN_INTERFACE
+  owner: network-platform
+  dependsOn:
+  - HTTP_INTERFACE
+- id: MULTI_MODEL_ROUTING
+  owner: orchestrator
+  dependsOn:
+  - CAPABILITY_NEGOTIATION
+- id: FALLBACK_POLICY
+  owner: orchestrator
+  dependsOn:
+  - MULTI_MODEL_ROUTING
+- id: SERVICE_HEALTH
+  owner: observability
+  dependsOn: []
+- id: ENGINE_HEALTH
+  owner: observability
+  dependsOn:
+  - ENGINE_LIFECYCLE
+- id: MODEL_HEALTH
+  owner: observability
+  dependsOn:
+  - MODEL_LIFECYCLE
+- id: REQUEST_TRACE
+  owner: observability
+  dependsOn:
+  - REQUEST_LIFECYCLE
+- id: JOB_PROGRESS
+  owner: observability
+  dependsOn:
+  - JOB_LIFECYCLE
+- id: RESOURCE_ACCOUNTING
+  owner: resource-governor
+  dependsOn: []
+- id: PERFORMANCE_MEASUREMENT
+  owner: observability
+  dependsOn: []
+- id: DIAGNOSTIC_REASONING
+  owner: observability
+  dependsOn:
+  - SERVICE_HEALTH
+- id: EVIDENCE_LABELING
+  owner: observability
+  dependsOn: []
+- id: ASSET_LIFECYCLE
+  owner: interface-platform
+  dependsOn: []
+- id: JOB_RECOVERY
+  owner: reliability-platform
+  dependsOn:
+  - JOB_LIFECYCLE
+- id: CONTENT_REPORTING
+  owner: safety-platform
+  dependsOn:
+  - REQUEST_LIFECYCLE
+- id: USABILITY_VALIDATION
+  owner: experience-platform
+  dependsOn:
+  - LOCAL_UI_INTERFACE
+- id: ACCESSIBILITY_VALIDATION
+  owner: experience-platform
+  dependsOn:
+  - LOCAL_UI_INTERFACE

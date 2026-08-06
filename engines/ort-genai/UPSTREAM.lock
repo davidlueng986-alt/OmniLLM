@@ -1,0 +1,115 @@
+# OmniLLM Engine Pack — ONNX Runtime GenAI UPSTREAM.lock (template)
+# Authority: ENGINE-ORTGENAI §1, ENGINE-STANDARD §4
+#
+# Rules:
+# - Architecture docs never pin "latest". Empty digests ⇒ NOT_LOCKED.
+# - Registry must NOT publish QUALIFIED / SUPPORTED without a complete lock
+#   (repository, tag/commit, sourceDigest, ORT/GenAI + provider artifacts,
+#   patchDigest, toolchain, ABI, config schema, artifactDigest, observedAt,
+#   license).
+# - Builds without a complete lock are exploratory evidence only.
+# - Updating any lock field ⇒ new EngineBuildId; old evidence does not auto-carry.
+#
+# Status of this file in-tree: NOT_LOCKED (template placeholders).
+# Human pin checklist: fill every empty digest field below, then set lockState: LOCKED.
+
+schemaVersion: 1
+engineId: ONNX-Runtime-GenAI
+lockState: NOT_LOCKED
+
+upstream:
+  # Official repository (discovery / license source)
+  repository: "https://github.com/microsoft/onnxruntime-genai"
+  # Exact tag and/or full commit SHA (both preferred when available)
+  tag: ""
+  commit: ""
+  # SHA-256 of the pinned GenAI source tree (tarball or git archive)
+  sourceDigest: ""
+  # SHA-256 of OmniLLM patch set applied on top of upstream (empty string = no patches;
+  # field must be present for lock completeness)
+  patchDigest: ""
+  # When the lock fields above were observed (ISO-8601 UTC). Empty until locked.
+  observedAt: ""
+
+# Companion ORT runtime / EP libraries (ENGINE-ORTGENAI required lock fields)
+ortRuntime:
+  # Separate pin for ONNX Runtime used by GenAI (repository/tag/commit/digest)
+  repository: "https://github.com/microsoft/onnxruntime"
+  tag: ""
+  commit: ""
+  artifactDigest: ""
+
+providerLibraries:
+  # Digests of EP shared libraries packaged with this EngineBuildId (empty until locked).
+  # Each backend cell may only be qualified when its digest is non-empty + device evidence.
+  cpu: ""
+  nnapi: ""
+  qnn: ""
+
+license:
+  # SPDX or short name recorded at qualification time (upstream MIT at discovery)
+  spdx: "MIT"
+  # Path relative to pinned source for LICENSE / NOTICE capture
+  licensePath: "LICENSE"
+  # SHA-256 of license bytes captured at lock time
+  licenseDigest: ""
+  # Optional notice / third-party report digests (ORT + providers + GenAI)
+  noticeDigest: ""
+  dependencyReportDigest: ""
+
+toolchain:
+  # Must match product ANDROID-NATIVE / platform-policy locks when building for Android
+  ndkVersion: "28.2.13676358"
+  cmakeVersion: "3.22.1"
+  # Opaque digest of the full toolchain fingerprint (NDK+CMake+host+flags template)
+  toolchainDigest: ""
+  hostOs: ""
+  hostArch: ""
+
+build:
+  # Canonical build flag set for this EngineBuildId
+  buildFlags: ""
+  # ABIs included in this build (Android: arm64-v8a, x86_64, …)
+  abis: []
+  # Page-size / 16 KB packaging evidence pointer (digest or evidence id)
+  pageSizeEvidence: ""
+  # GenAI / model package config schema identity (digest or version id)
+  configSchemaDigest: ""
+  features:
+    cpu: true
+    nnapi: false
+    qnn: false
+    # Multimodal / tools / structured are unsupported-by-default until cell qualification
+    multimodal: false
+    tools: false
+    structured: false
+
+artifact:
+  # EngineBuildId string published with this lock (opaque; not a native pointer)
+  engineBuildId: ""
+  # SHA-256 of packaged native artifact(s) (.so / AAR jni + provider modules)
+  artifactDigest: ""
+  symbolIndexDigest: ""
+
+testedProfile:
+  # Labels only — evidence lives in EngineRegistry cells, not this lock alone
+  platform: "android"
+  backends: ["cpu"]
+  formats: ["ONNX-GENAI"]
+  # Qualification profile id once defined; empty until first evidence pack
+  profileId: ""
+
+notes:
+  integrationShape: "GenAI runtime API + execution provider adapter (JNI/C API); not a desktop-server port"
+  placementHint: "Verified runtime/provider/model may use privileged/crash-contained when all phases qualify; untrusted model/provider → isolated CPU or companion UID acceleration (ADR-007)"
+  failClosed: "Incomplete lock ⇒ Registry exposure UNKNOWN; dry-load never elevates trust; desktop EP support does not extrapolate to Android"
+  lockEligibility: "NOT_QUALIFIED_UNTIL_UPSTREAM_LOCK"
+  humanPinSteps: |
+    1. Pick GenAI release tag/commit; compute sourceDigest (sha256 of archive).
+    2. Pin matching ORT tag/commit + artifactDigest.
+    3. Record provider library digests for each packaged EP (cpu/nnapi/qnn).
+    4. Record patchDigest (empty string if no OmniLLM patches).
+    5. Record toolchainDigest, abis, pageSizeEvidence, configSchemaDigest.
+    6. Capture licenseDigest + noticeDigest; set observedAt (UTC).
+    7. Assign engineBuildId + artifactDigest; set lockState: LOCKED.
+    8. Re-run qualification cells; never inherit evidence across EngineBuildId.

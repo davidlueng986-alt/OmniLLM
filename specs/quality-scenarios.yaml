@@ -1,0 +1,151 @@
+schemaVersion: 2
+scenarios:
+- id: Q-001
+  statement: first model load has an execution-time envelope before side effects
+  area: model-load
+  verification: fault-injection + peak measurement
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-002
+  statement: first request creates a session without pre-existing session dependency
+  area: request-session
+  verification: contract fixture
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-003
+  statement: commit reply loss resolves to one durable outcome
+  area: transaction
+  verification: kill-at-boundary
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-004
+  statement: request terminal preserves resident model/KV accounting
+  area: resource
+  verification: conservation property test
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-005
+  statement: SSE disconnect never reuses unprovable hidden session state
+  area: delivery
+  verification: network fault fixture
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-006
+  statement: AIDL final data has an unambiguous final ACK path
+  area: delivery
+  verification: slow consumer + reconnect
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-007
+  statement: revocation fences active, queued and pooled state within a declared bound
+  area: security
+  verification: race + epoch fixture
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-008
+  statement: untrusted model/native code cannot modify privileged trust/token/model state
+  area: security
+  verification: different-UID adversarial test
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-009
+  statement: privileged load detects post-install byte modification
+  area: supply-chain
+  verification: tamper fixture
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-010
+  statement: URL/redirect/DNS/PFD/JSON input remains bounded and fail-closed
+  area: input-security
+  verification: negative corpus + fuzz
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-011
+  statement: canonical identities match across Kotlin/C++/Python
+  area: identity
+  verification: golden vectors + permutation property test
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-012
+  statement: returned context limit is admissible across every resource dimension
+  area: resource
+  verification: solver property test
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-013
+  statement: metrics percentile is computed from declared sketch/histogram method
+  area: observability
+  verification: known distribution fixture
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-014
+  statement: exported runtime binder cannot yield admin binder
+  area: android-security
+  verification: external app manifest test
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-015
+  statement: all native libraries and packaging satisfy 16 KB requirements
+  area: android-native
+  verification: alignment + 16KB runtime
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-016
+  statement: engine capability is never reused outside its device/driver/model/workload envelope
+  area: engine-qualification
+  verification: negative matching
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-017
+  statement: document authority, type, state, feature and trace references have zero unresolved links
+  area: documentation
+  verification: repository lint
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+  evidence: null
+  evidenceNote: Repository validation evidence is release-generated and must include the validator digest, exact command,
+    UTC timestamp, MANIFEST.sha256 digest, machine-readable JSON result and human summary. Packaged design files never
+    self-assert PASS.
+- id: Q-018
+  title: Canonical contract projections are identical
+  stimulus: Generate or parse all canonical enums, fields, scopes and errors across YAML, OpenAPI, AIDL projection and normative
+    Markdown
+  response: No private alias or unknown canonical token remains
+  measure: zero unresolved canonical-token differences
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-019
+  title: AI output report can be submitted in-app without silent content upload
+  stimulus: A user flags a generated response
+  response: The UI explains payload, obtains explicit consent, minimizes/redacts content, queues safely offline and exposes
+    status
+  measure: all report states and privacy actions are observable; zero report without user confirmation
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true
+- id: Q-020
+  title: Accessibility and first-success journey are testable
+  stimulus: A screen reader or large-text user completes setup, model acquisition and first inference including an error recovery
+  response: All controls, states and errors are perceivable and operable
+  measure: zero blocker in the defined accessibility protocol and all critical tasks meet acceptance thresholds
+  designStatus: BASELINE
+  evidenceStatus: NOT_EXECUTED
+  evidenceRequired: true

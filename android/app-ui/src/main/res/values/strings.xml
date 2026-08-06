@@ -1,0 +1,352 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  OmniLLM UI strings (UX-A11Y-I18N).
+  Do not concatenate translatable sentences in code — use format placeholders.
+  Risk / consent copy must not be diluted by localization (UX-SAFETY-COPY).
+-->
+<resources>
+    <string name="app_name">OmniLLM</string>
+
+    <!-- Navigation destinations (UX-IA tree) -->
+    <string name="nav_home">Home</string>
+    <string name="nav_modelhub">ModelHub</string>
+    <string name="nav_playground">Playground</string>
+    <string name="nav_server_clients">Server &amp; Clients</string>
+    <string name="nav_dashboard">Dashboard</string>
+    <string name="nav_settings">Settings</string>
+    <string name="nav_diagnostics">Diagnostics</string>
+    <string name="nav_onboarding">Setup</string>
+    <string name="nav_content_report">Content report</string>
+    <string name="nav_more">More</string>
+    <string name="nav_cd_bottom_bar">Primary destinations</string>
+    <string name="nav_cd_open_drawer">Open navigation menu</string>
+
+    <!-- Density (UX-ARCH §3) -->
+    <string name="density_standard">Standard</string>
+    <string name="density_expert">Expert</string>
+    <string name="density_toggle_cd">Toggle information density. Current: %1$s</string>
+    <string name="density_standard_desc">Tasks, recommendations, risks, and next steps</string>
+    <string name="density_expert_desc">Engine build, backend, load key, profiles, raw errors, resource vector</string>
+
+    <!-- Common presentation phases (UX-STATE-CATALOG / UX-ARCH §4) -->
+    <string name="state_loading">Loading</string>
+    <string name="state_empty">Nothing here yet</string>
+    <string name="state_error">Something went wrong</string>
+    <string name="state_degraded">Service is degraded</string>
+    <string name="state_recovering">Recovering</string>
+    <string name="state_partial">Partial data</string>
+    <string name="state_blocked">Blocked</string>
+    <string name="state_stale">Data may be outdated</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_wait">Wait</string>
+    <string name="action_view_details">View details</string>
+    <string name="action_open_modelhub">Open ModelHub</string>
+    <string name="action_open_playground">Open Playground</string>
+    <string name="action_open_dashboard">Open Dashboard</string>
+    <string name="action_open_diagnostics">Open Diagnostics</string>
+    <string name="action_start_setup">Start setup</string>
+    <string name="action_dismiss">Dismiss</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_back">Back</string>
+    <string name="cd_close">Close</string>
+    <string name="cd_expand">Expand</string>
+    <string name="cd_collapse">Collapse</string>
+    <string name="label_unknown">Unknown</string>
+    <string name="label_not_available">Not available</string>
+    <string name="label_canonical_id">ID: %1$s</string>
+    <string name="label_request_id">Request ID: %1$s</string>
+    <string name="label_job_id">Job ID: %1$s</string>
+    <string name="label_error_code">Error: %1$s</string>
+    <string name="label_sampled_at">Sampled %1$s</string>
+    <string name="label_age_ms">Age: %1$d ms</string>
+    <string name="connecting_runtime">Connecting to runtime…</string>
+    <string name="runtime_disconnected">Runtime not connected</string>
+    <string name="runtime_disconnected_body">OmniLLM talks to the control plane only through Admin. Start or reconnect the runtime service, then refresh.</string>
+
+    <!-- Evidence labels (ADR-009 / UX-STATE §6) — never render UNKNOWN as 0 -->
+    <string name="evidence_measured">Measured</string>
+    <string name="evidence_estimated">Estimated</string>
+    <string name="evidence_reported">Reported</string>
+    <string name="evidence_last_sampled">Last sampled</string>
+    <string name="evidence_unknown">Unknown</string>
+    <string name="evidence_cd">Evidence: %1$s</string>
+    <string name="metric_value_with_unit">%1$s %2$s</string>
+    <string name="metric_unknown_value">—</string>
+    <string name="metric_source">Source: %1$s</string>
+
+    <!-- Home (UX-IA) -->
+    <string name="home_title">Home</string>
+    <string name="home_quick_start">Quick start</string>
+    <string name="home_active_model">Active model / request</string>
+    <string name="home_blocking_issues">Blocking issues</string>
+    <string name="home_runtime_state">Runtime: %1$s</string>
+    <string name="home_lan_state">LAN: %1$s</string>
+    <string name="home_active_jobs">Active jobs: %1$d</string>
+    <string name="home_no_jobs">No active jobs</string>
+    <string name="home_no_models">No models installed</string>
+    <string name="home_no_models_cta">Get a model to start local inference</string>
+    <string name="home_resource_pressure">Resource pressure: %1$s</string>
+    <string name="home_snapshot_version">Snapshot %1$d</string>
+    <string name="home_empty_body">When the runtime is ready, status, models, and next actions appear here.</string>
+    <string name="home_job_row_cd">Job %1$s, state %2$s</string>
+    <string name="home_model_row_cd">Model %1$s</string>
+
+    <!-- ModelHub -->
+    <string name="modelhub_title">ModelHub</string>
+    <string name="modelhub_suggested">Suggested</string>
+    <string name="modelhub_installed">Installed</string>
+    <string name="modelhub_downloads">Downloads &amp; imports</string>
+    <string name="modelhub_detail">Model detail</string>
+    <string name="modelhub_empty_suggested">No catalog suggestions yet</string>
+    <string name="modelhub_empty_installed">No installations yet</string>
+    <string name="modelhub_empty_jobs">No downloads or imports in progress</string>
+    <string name="modelhub_blocking">Blocking issues</string>
+    <string name="modelhub_import">Import local file</string>
+    <string name="modelhub_download">Download</string>
+    <string name="modelhub_delete">Delete</string>
+    <string name="modelhub_pin">Pin</string>
+    <string name="modelhub_unpin">Unpin</string>
+    <string name="modelhub_load">Load</string>
+    <string name="modelhub_unload">Unload</string>
+    <string name="modelhub_benchmark">Benchmark</string>
+    <string name="modelhub_view_license">View license</string>
+    <string name="modelhub_view_evidence">View evidence</string>
+    <string name="modelhub_installation_state">Installation: %1$s</string>
+    <string name="modelhub_loaded_state">Loaded model: %1$s</string>
+    <string name="modelhub_source_channel">Source: %1$s</string>
+    <string name="modelhub_compat">Compatibility: %1$s</string>
+    <string name="modelhub_license">License: %1$s</string>
+    <string name="modelhub_placement">Placement: %1$s</string>
+    <string name="modelhub_authenticity_ok">Authenticity checks passed</string>
+    <string name="modelhub_authenticity_fail">Authenticity checks failed or incomplete</string>
+    <string name="modelhub_authenticity_unknown">Authenticity not asserted</string>
+    <string name="modelhub_pinned">Pinned</string>
+    <string name="modelhub_refs">Live references: %1$d</string>
+    <string name="modelhub_risk_flags">Risk flags</string>
+    <string name="modelhub_no_selection">Select a model for detail</string>
+    <string name="modelhub_card_cd">Model %1$s, installation %2$s, compatibility %3$s</string>
+    <string name="modelhub_compat_not_safety">Compatibility success is not a source or security proof</string>
+
+    <!-- Playground -->
+    <string name="playground_title">Playground</string>
+    <string name="playground_tab_chat">Chat</string>
+    <string name="playground_tab_embeddings">Embeddings</string>
+    <string name="playground_tab_multimodal">Multimodal</string>
+    <string name="playground_tab_tools">Structured / Tools</string>
+    <string name="playground_empty_no_model">No usable model for inference</string>
+    <string name="playground_empty_no_model_body">Inference entry points route to Model acquisition when no model is ready. This is not a blank chat.</string>
+    <string name="playground_select_model">Select model</string>
+    <string name="playground_prompt_hint">Message</string>
+    <string name="playground_send">Send</string>
+    <string name="playground_send_cd">Send message</string>
+    <string name="playground_capability_blocked">This tab is not operable for the selected model</string>
+    <string name="playground_capability_reason">Reason: %1$s</string>
+    <string name="playground_request_strip">Request status</string>
+    <string name="playground_runtime">Runtime: %1$s</string>
+    <string name="playground_degraded">Degraded reasons</string>
+    <string name="playground_actual_revision">Actual revision: %1$s</string>
+    <string name="playground_engine">Engine: %1$s</string>
+    <string name="playground_backend">Backend: %1$s</string>
+    <string name="playground_assistant">Assistant</string>
+    <string name="playground_user">You</string>
+    <string name="playground_embedding_result">Embeddings: %1$d vectors, %2$d dims</string>
+    <string name="playground_conversation_empty">Start a conversation when a model is ready</string>
+    <string name="playground_cancel_phase">Cancel: %1$s</string>
+    <!-- PLAY-AI-REPORTING / FEAT-AI-CONTENT-REPORT: in-app only, not external web -->
+    <string name="playground_report_content">Report content</string>
+    <string name="playground_report_content_cd">Report this AI-generated content in the app</string>
+
+    <!-- Server & Clients -->
+    <string name="server_title">Server &amp; Clients</string>
+    <string name="server_local_endpoint">Local endpoint</string>
+    <string name="server_lan">LAN</string>
+    <string name="server_aidl_clients">AIDL / developer clients</string>
+    <string name="server_tokens">Tokens &amp; permissions</string>
+    <string name="server_loopback_url">Loopback: %1$s</string>
+    <string name="server_loopback_not_running">Loopback server is not running</string>
+    <string name="server_ensure_loopback">Start loopback</string>
+    <string name="server_create_client">Create client</string>
+    <string name="server_issue_token">Issue token</string>
+    <string name="server_revoke_client">Revoke client</string>
+    <string name="server_revoke_token">Revoke token</string>
+    <string name="server_token_once">Show this token once — it will not be stored in plain text</string>
+    <string name="server_token_ack">I have copied the token</string>
+    <string name="server_sdk_samples">SDK samples</string>
+    <string name="server_smoke">Smoke test</string>
+    <string name="server_empty">No clients yet</string>
+    <string name="server_empty_body">Create a named client principal, issue a scoped token, then connect over loopback.</string>
+    <string name="server_client_row_cd">Client %1$s, state %2$s</string>
+    <string name="server_token_row_cd">Token %1$s, state %2$s</string>
+    <string name="server_lan_default_off">LAN is off by default and requires an explicit enable action</string>
+    <string name="server_lan_enabled">LAN enabled</string>
+    <string name="server_lan_disabled">LAN disabled</string>
+    <string name="server_lan_enable">Enable LAN</string>
+    <string name="server_lan_disable">Disable LAN</string>
+    <string name="server_lan_pair">Create pairing challenge</string>
+    <string name="server_lan_approve_pair">Approve pairing challenge</string>
+    <string name="server_lan_fingerprint">TLS fingerprint: %1$s</string>
+    <string name="server_lan_epoch">Connection epoch: %1$d</string>
+    <string name="server_lan_locator">Locator: %1$s</string>
+    <string name="server_lan_clients">Active LAN clients: %1$d</string>
+    <string name="server_lan_clients_section">LAN clients</string>
+    <string name="server_lan_qr_section">Pairing QR / short payload</string>
+    <string name="server_lan_qr_hint">Scan or transfer this one-time payload. It has no long-lived secrets; approve on this device after the peer starts exchange.</string>
+    <string name="server_degraded_reasons">Degraded reasons</string>
+    <string name="nav_lan">LAN access</string>
+    <string name="nav_routing">Routing</string>
+    <string name="nav_benchmark">Benchmark</string>
+    <string name="routing_title">Routing</string>
+    <string name="routing_empty">Routing controls unavailable</string>
+    <string name="routing_fallback_section">Fallback policy</string>
+    <string name="routing_fallback_help">NONE forbids backend/revision substitution. SAME_REVISION_ONLY allows alternate backends. ALLOW_LIST requires an explicit revision allowlist — never silent cross-revision.</string>
+    <string name="routing_no_silent_cross_revision">Cross-revision only with ALLOW_LIST + allowlist (fail closed).</string>
+    <string name="routing_aliases_section">Aliases (expert)</string>
+    <string name="routing_aliases_empty">No aliases registered; bare revision hex still accepted.</string>
+    <string name="routing_last_decision">Last decision</string>
+    <string name="benchmark_title">Benchmark</string>
+    <string name="benchmark_empty_title">No benchmark plan yet</string>
+    <string name="benchmark_empty_body">Benchmark jobs run on the control plane. Plan a measurement profile first, then start a recoverable BENCHMARK job. Engine SUPPORTED is never invented without device evidence.</string>
+    <string name="benchmark_honest_cells">Measurements stay honest: fixture or live runs never elevate engine qualification cells without device PASS evidence.</string>
+    <string name="benchmark_no_supported_claim">Capability matrix and qualification YAML remain UNKNOWN / UNQUALIFIED until real device evidence is recorded.</string>
+    <string name="benchmark_phase">Phase: %1$s</string>
+    <string name="benchmark_expert_hint">Expert density shows full profile dimensions (engine build, backend, fingerprint, threads, sketch version).</string>
+    <string name="benchmark_plan_section">Plan measurement</string>
+    <string name="benchmark_plan_help">Plan has no domain mutation. Starting a job claims a BENCHMARK handle on the control plane (Plan → Reserve → Commit → Execute).</string>
+    <string name="benchmark_plan_quick_smoke">Plan quick smoke</string>
+    <string name="benchmark_plan_quick_smoke_cd">Plan a quick smoke measurement profile</string>
+    <string name="benchmark_preview_section">Plan preview</string>
+    <string name="benchmark_plan_cd">Benchmark plan profile %1$s</string>
+    <string name="benchmark_profile_id">Profile: %1$s</string>
+    <string name="benchmark_fallback_policy">Fallback: %1$s</string>
+    <string name="benchmark_samples">Samples: %1$d · Warmup: %2$d</string>
+    <string name="benchmark_start">Start benchmark job</string>
+    <string name="benchmark_start_cd">Start recoverable benchmark job on control plane</string>
+    <string name="benchmark_active_job">Active job</string>
+    <string name="benchmark_job_cd">Benchmark job %1$s, state %2$s</string>
+    <string name="benchmark_run_id">Run: %1$s</string>
+    <string name="benchmark_runs_section">Runs</string>
+    <string name="benchmark_run_cd">Run %1$s, outcome %2$s</string>
+    <string name="benchmark_run_outcome">Outcome: %1$s</string>
+    <string name="benchmark_run_seq">Sequence: %1$d</string>
+    <string name="dashboard_no_measurement_run">No sealed measurement run yet</string>
+    <string name="dashboard_last_run_outcome">Last run: %1$s</string>
+    <string name="dashboard_fixture_metrics">Fixture metrics (no engine SUPPORTED): %1$s</string>
+    <string name="playground_schema_hint">JSON schema name (structured mode)</string>
+    <string name="playground_structured_send">Run structured</string>
+    <string name="playground_structured_help">STRUCTURED_TOOLS uses FEAT-TOOLS schema admission and explicit mode. OmniLLM never executes host tools.</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard_title">Dashboard</string>
+    <string name="dashboard_overview">Overview</string>
+    <string name="dashboard_models_engines">Models &amp; engines</string>
+    <string name="dashboard_requests">Requests &amp; queue</string>
+    <string name="dashboard_resources">Resources &amp; thermal</string>
+    <string name="dashboard_measurements">Measurements</string>
+    <string name="dashboard_empty">No operational data yet</string>
+    <string name="dashboard_empty_body">Health, resources, and requests appear after the runtime accepts work.</string>
+    <string name="dashboard_health">Health: %1$s</string>
+    <string name="dashboard_runtime">Runtime: %1$s</string>
+    <string name="dashboard_actions">Recommended actions</string>
+    <string name="dashboard_no_requests">No active requests</string>
+    <string name="dashboard_cancel_request">Cancel request</string>
+    <string name="dashboard_query_request">Query request</string>
+    <string name="dashboard_conservation_ok">Resource conservation OK</string>
+    <string name="dashboard_conservation_fail">Resource conservation check failed</string>
+    <string name="dashboard_request_row_cd">Request %1$s, phase %2$s</string>
+    <string name="dashboard_trace">Trace %1$s</string>
+    <string name="dashboard_operational_only">Operational metrics only — not benchmark rankings</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_automation">Automation policy</string>
+    <string name="settings_storage">Storage</string>
+    <string name="settings_privacy">Privacy</string>
+    <string name="settings_advanced_engine">Advanced engine controls</string>
+    <string name="settings_diagnostics_export">Diagnostics export</string>
+    <string name="settings_resource_version">Settings version: %1$d</string>
+    <string name="settings_empty">No settings loaded</string>
+    <string name="settings_field_cd">Setting %1$s, value %2$s</string>
+    <string name="settings_last_command">Last command: %1$s</string>
+    <string name="settings_advanced_warning">Advanced engine controls can change placement, backends, and risk. Review residual risk before applying.</string>
+    <string name="settings_density_section">Information density</string>
+
+    <!-- Diagnostics -->
+    <string name="diagnostics_title">Diagnostics</string>
+    <string name="diagnostics_plan">Plan export</string>
+    <string name="diagnostics_start_export">Start export</string>
+    <string name="diagnostics_share">Share bundle</string>
+    <string name="diagnostics_delete">Delete bundle</string>
+    <string name="diagnostics_empty">No diagnostic bundles yet</string>
+    <string name="diagnostics_empty_body">Plan an export, review categories, then start a recoverable job.</string>
+    <string name="diagnostics_share_irreversible">Sharing a diagnostic bundle may leave copies outside OmniLLM control. This action is not fully reversible.</string>
+    <string name="diagnostics_phase">Phase: %1$s</string>
+    <string name="diagnostics_job">Export job: %1$s (%2$s)</string>
+    <string name="diagnostics_degraded">Degraded export reasons</string>
+    <string name="diagnostics_bundles">Bundles</string>
+    <string name="diagnostics_metrics">Evidenced metrics</string>
+
+    <!-- Onboarding / AutoSetup -->
+    <string name="onboarding_title">Setup</string>
+    <string name="onboarding_subtitle">Use this device for local inference without learning server or backend details first</string>
+    <string name="onboarding_discover">Discover device</string>
+    <string name="onboarding_recommend">Recommend models</string>
+    <string name="onboarding_select">Select recommendation</string>
+    <string name="onboarding_device_summary">Device summary</string>
+    <string name="onboarding_phase">Phase: %1$s</string>
+    <string name="onboarding_progress">Progress</string>
+    <string name="onboarding_top_candidate">Top candidate: %1$s</string>
+    <string name="onboarding_reasons">Why this recommendation</string>
+    <string name="onboarding_adjustments">Minimal viable adjustments</string>
+    <string name="onboarding_completed">Setup completed</string>
+    <string name="onboarding_failed">Setup failed</string>
+    <string name="onboarding_reset">Start over</string>
+    <string name="onboarding_empty">Ready when you are</string>
+    <string name="onboarding_empty_body">Discover this device, review suggested models, then acquire and run a first local inference.</string>
+
+    <!-- AI content report (UX-STATE §8 / UX-JOURNEYS §8) -->
+    <string name="content_report_title">AI content report</string>
+    <string name="content_report_not_telemetry">This report is not general telemetry. Only reviewed fields you consent to are sent.</string>
+    <string name="content_report_empty">No reports yet</string>
+    <string name="content_report_empty_body">You can report generated content from Playground without leaving the app. Full prompts and outputs are not selected by default.</string>
+    <string name="content_report_privacy_disclosure">Reports go only to the developer reporting endpoint after you review each field. They are not used for ads, model training, or general telemetry unless you give separate consent.</string>
+    <string name="content_report_in_app_required">Reporting is available inside OmniLLM. An external contact link alone is not the report path.</string>
+    <string name="content_report_review">Review payload</string>
+    <string name="content_report_grant_consent">Grant consent</string>
+    <string name="content_report_submit">Submit report</string>
+    <string name="content_report_discard">Discard</string>
+    <string name="content_report_retry">Retry</string>
+    <string name="content_report_queue_offline">Queued offline</string>
+    <string name="content_report_network">Network: %1$s</string>
+    <string name="content_report_network_online">available</string>
+    <string name="content_report_network_offline">unavailable</string>
+    <string name="content_report_endpoint">Endpoint configured: %1$s</string>
+    <string name="content_report_yes">yes</string>
+    <string name="content_report_no">no</string>
+    <string name="content_report_stream_kind">Data stream: %1$s</string>
+    <string name="content_report_not_resolved">A submitted report is not moderated or resolved by OmniLLM</string>
+    <string name="content_report_state">State: %1$s</string>
+    <string name="content_report_row_cd">Report %1$s, state %2$s</string>
+
+    <!-- Safety / trust dimensions (UX-SAFETY-COPY) — separate, never greenwashed -->
+    <string name="trust_dim_source">Source</string>
+    <string name="trust_dim_compatibility">Compatibility</string>
+    <string name="trust_dim_placement">Execution placement</string>
+    <string name="trust_dim_license">License</string>
+    <string name="placement_isolated_cpu">This model runs under an isolated system account and cannot directly read OmniLLM private data. It may still crash that inference, pressure resources, or produce incorrect output.</string>
+    <string name="placement_same_uid">This mode only isolates crashes; it is not a data-security sandbox. The code shares the OmniLLM app account and may access app-reachable data and capabilities.</string>
+    <string name="placement_companion">Accelerated inference runs in a separate install unit and system account, receiving model and request data only through restricted interfaces. Driver, resource-exhaustion, and side-channel risks remain.</string>
+    <string name="compat_success_not_safety">This combination previously ran successfully on this device under the stated conditions. That is not a source or security proof.</string>
+    <string name="risk_ack_not_prechecked">Risk acknowledgement options are never pre-checked</string>
+    <string name="risk_disable_not_safe">Risky mode stopped for future use. Prior data access, if any malicious model was loaded, cannot be undone. OmniLLM terminated workers, rotated client tokens, and re-verified trusted models. If integrity anomalies remain, perform a security reset.</string>
+
+    <!-- Fallback / degraded disclosure -->
+    <string name="fallback_disclosure">Selected: %1$s. Actual: %2$s. Reason: %3$s</string>
+    <string name="error_phase">Stage: %1$s</string>
+    <string name="error_affected">Affected: %1$s</string>
+    <string name="error_auto_recovered">Automatic recovery attempted</string>
+    <string name="error_not_recovered">Not automatically recovered</string>
+    <string name="error_suggested_action">Suggested action</string>
+    <string name="uncertain_outcome">Outcome is not proven. Do not reuse the session. Query status or export diagnostics.</string>
+</resources>

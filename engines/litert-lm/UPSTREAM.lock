@@ -1,0 +1,116 @@
+# OmniLLM Engine Pack — LiteRT-LM UPSTREAM.lock (template)
+# Authority: ENGINE-LITERT §1, ENGINE-STANDARD §4
+#
+# Rules:
+# - Architecture docs never pin "latest". Empty digests ⇒ NOT_LOCKED.
+# - Registry must NOT publish QUALIFIED / SUPPORTED without a complete lock
+#   (repository, release/tag/commit, SDK/AAR digest, native libs, toolchain, ABI,
+#   model artifact schema, observedAt, license/notice/SBOM digests).
+# - Builds without a complete lock are exploratory evidence only.
+# - Updating any lock field ⇒ new EngineBuildId; old evidence does not auto-carry.
+# - Design status BASELINE ≠ runtime SUPPORTED.
+#
+# Status of this file in-tree: NOT_LOCKED (template placeholders).
+# Lock eligibility label from design: NOT_QUALIFIED_UNTIL_UPSTREAM_LOCK
+
+schemaVersion: 1
+engineId: LiteRT-LM
+lockState: NOT_LOCKED
+
+upstream:
+  # Official repository (discovery / license source)
+  repository: "https://github.com/google-ai-edge/LiteRT-LM"
+  # Exact tag and/or full commit SHA (both preferred when available)
+  tag: ""
+  commit: ""
+  # SHA-256 of the pinned source tree (tarball or git archive) when building from source
+  sourceDigest: ""
+  # SHA-256 of OmniLLM patch / glue set applied on top of upstream (empty if none)
+  patchDigest: ""
+  # When the lock fields above were observed (ISO-8601 UTC). Empty until locked.
+  observedAt: ""
+
+license:
+  # SPDX or short name recorded at qualification time (fill from pinned artifact)
+  spdx: ""
+  # Path relative to pinned source / AAR metadata for LICENSE / NOTICE capture
+  licensePath: ""
+  # SHA-256 of license bytes captured at lock time
+  licenseDigest: ""
+  # Optional notice / third-party / SBOM digests (ENGINE-LITERT §1 / §11)
+  noticeDigest: ""
+  dependencyReportDigest: ""
+  sbomDigest: ""
+
+toolchain:
+  # Must match product ANDROID-NATIVE / platform-policy locks when building for Android
+  ndkVersion: "28.2.13676358"
+  # Official SDK may ship prebuilt native libs; still record host toolchain for rebuilds
+  agpVersion: ""
+  # Opaque digest of the full toolchain fingerprint (SDK + NDK + host + flags template)
+  toolchainDigest: ""
+  hostOs: ""
+  hostArch: ""
+
+sdk:
+  # Official documented SDK / AAR identity (ENGINE-LITERT §2)
+  # Prefer release artifact coordinates over ad-hoc JNI assumptions.
+  # Android Maven (pin exact version — never latest.release for qualification):
+  #   com.google.ai.edge.litertlm:litertlm-android:<version>
+  # JVM host (optional for desktop probes only):
+  #   com.google.ai.edge.litertlm:litertlm-jvm:<version>
+  # Docs: https://developers.google.com/edge/litert-lm/android
+  # Gradle enable for :engines:litert-lm compileOnly:
+  #   -Pomnillm.litertlm.sdkVersion=<version>
+  # Package AAR into :android:runtime-service (or companion) only — never app-ui (INV-001).
+  mavenCoordinate: ""
+  # Example once pinned: "com.google.ai.edge.litertlm:litertlm-android:0.0.0-REPLACE"
+  aarDigest: ""
+  # SHA-256 of the AAR file bytes (required for lock completeness via aarDigest or sourceDigest)
+  # SHA-256 of bundled native libs inside the AAR / jni packs (per ABI preferred)
+  nativeLibsDigest: ""
+  # Documented Engine / Conversation API surface version or schema id
+  # (Engine, EngineConfig, Conversation, Backend, Message / MessageCallback / Flow)
+  apiSurfaceVersion: ""
+  # Model artifact schema id for .litertlm / official packages
+  modelArtifactSchema: ""
+  # Optional: Google Maven URL or evidence id for the pinned version page
+  mavenIndexUrl: ""
+
+build:
+  # Canonical build / packaging flags for this EngineBuildId
+  buildFlags: ""
+  # ABIs included in this build (Android: arm64-v8a, x86_64, …)
+  abis: []
+  # Page-size / 16 KB packaging evidence pointer (digest or evidence id)
+  pageSizeEvidence: ""
+  features:
+    # Design candidates only — runtime remains UNKNOWN until cell evidence
+    cpu: true
+    gpu: false
+    npu: false
+    # Multimodal / structured output unsupported-by-default until qualification
+    multimodal: false
+    structuredOutput: false
+    embedding: false
+
+artifact:
+  # EngineBuildId string published with this lock (opaque; not a native / SDK pointer)
+  engineBuildId: ""
+  # SHA-256 of packaged engine adapter + SDK payload for this build
+  artifactDigest: ""
+  symbolIndexDigest: ""
+
+testedProfile:
+  # Labels only — evidence lives in EngineRegistry cells, not this lock alone
+  platform: "android"
+  backends: ["cpu"]
+  formats: ["litertlm"]
+  # Qualification profile id once defined; empty until first evidence pack
+  profileId: ""
+
+notes:
+  integrationShape: "Official SDK/AAR Engine/Conversation adapter; do not assume traditional JNI exposes all handles; never pass SDK objects across AIDL"
+  placementHint: "Verified SDK + catalog model may use privileged/crash-contained when all phases qualified; untrusted import → isolated CPU or different-UID companion only if SDK can operate under that boundary; privileged accelerator without isolation ⇒ policy unsupported for untrusted"
+  failClosed: "Incomplete lock ⇒ Registry exposure UNKNOWN; dry-load never elevates trust; unlisted backend/NPU never SUPPORTED merely because device has NPU"
+  lockEligibility: "NOT_QUALIFIED_UNTIL_UPSTREAM_LOCK"

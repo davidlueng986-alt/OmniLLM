@@ -1,0 +1,26 @@
+-- Durable host ToolResult claims (FEAT-TOOLS claim-or-return / ADR-004/005).
+-- Keyed by (proposal_id, idempotency_key). Control-plane sole writer (ADR-010).
+
+CREATE TABLE tool_result_claims (
+  proposal_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  attempt INTEGER NOT NULL,
+  result_payload_digest TEXT NOT NULL,
+  is_error INTEGER NOT NULL DEFAULT 0,
+  submitted_at_epoch_ms INTEGER NOT NULL,
+  PRIMARY KEY (proposal_id, idempotency_key)
+);
+
+selectByProposalAndKey:
+SELECT proposal_id, idempotency_key, request_id, attempt, result_payload_digest, is_error, submitted_at_epoch_ms
+FROM tool_result_claims
+WHERE proposal_id = ? AND idempotency_key = ?;
+
+upsertClaim:
+INSERT OR REPLACE INTO tool_result_claims(
+  proposal_id, idempotency_key, request_id, attempt, result_payload_digest, is_error, submitted_at_epoch_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?);
+
+deleteByProposalId:
+DELETE FROM tool_result_claims WHERE proposal_id = ?;

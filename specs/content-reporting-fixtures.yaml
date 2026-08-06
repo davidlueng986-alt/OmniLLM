@@ -1,0 +1,53 @@
+schemaVersion: 1
+aggregate: CONTENT_REPORT
+authority:
+  payloadAndGrant: specs/canonical-types.yaml
+  stateMachine: specs/state-machines.yaml
+  database: specs/database/omnillm-schema.sql
+  http: specs/openapi/omnillm.openapi.yaml
+  aidl: specs/aidl/omnillm-aidl.yaml
+negativeConsentFixtures:
+- id: CR-N001
+  attempt: external caller submits user_confirmed=true without a ConsentGrant
+  expectedError: FORBIDDEN
+- id: CR-N002
+  attempt: consume an already consumed grant
+  expectedError: STATE_CONFLICT
+- id: CR-N003
+  attempt: substitute canonicalPayloadDigest after local review
+  expectedError: STATE_CONFLICT
+- id: CR-N004
+  attempt: use a grant from another principal
+  expectedError: FORBIDDEN
+- id: CR-N005
+  attempt: consume an expired grant
+  expectedError: STATE_CONFLICT
+- id: CR-N006
+  attempt: request a grant through exported AIDL, loopback HTTP or LAN HTTP
+  expectedError: FORBIDDEN
+raceFixtures:
+- id: CR-R001
+  race: submit vs cancel before remote acceptance
+  expectedTerminal: DISCARDED
+- id: CR-R002
+  race: submit vs cancel after remote acceptance
+  expectedTerminal: SUBMITTED
+- id: CR-R003
+  race: accepted response lost
+  expectedPath:
+  - SUBMITTING
+  - RECONCILING
+  - SUBMITTED
+- id: CR-R004
+  race: offline queue plus process restart
+  expectedPath:
+  - QUEUED_OFFLINE
+  - SUBMITTING
+  - SUBMITTED
+- id: CR-R005
+  race: expiry before grant consumption
+  expectedTerminal: EXPIRED
+retentionAssertions:
+- DISCARDED, EXPIRED, FAILED_FINAL and SUBMITTED have no encrypted payload after convergence
+- SUBMITTING, CANCELLING and RECONCILING retain encrypted payload only until remote outcome is known
+- receipt metadata contains no prompt, output excerpt or diagnostic content
