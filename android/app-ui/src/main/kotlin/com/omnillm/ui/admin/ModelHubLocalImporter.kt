@@ -146,8 +146,10 @@ class ModelHubLocalImporter(
     ): OmniResult<ModelHubJobHandle> {
         return try {
             Log.i(TAG, "importFromPublicE2ePath start fileName=$fileName")
+            val internalE2e = java.io.File(context.filesDir, "e2e")
             val appE2eDir = java.io.File(context.getExternalFilesDir(null), "e2e")
             val candidates = listOf(
+                java.io.File(internalE2e, fileName),
                 java.io.File(appE2eDir, fileName),
                 java.io.File("/sdcard/Android/data/${context.packageName}/files/e2e/$fileName"),
                 java.io.File("/storage/emulated/0/Android/data/${context.packageName}/files/e2e/$fileName"),
