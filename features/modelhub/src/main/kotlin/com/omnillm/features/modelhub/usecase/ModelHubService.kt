@@ -36,13 +36,17 @@ import com.omnillm.features.modelhub.api.StartLoadSpec
 import com.omnillm.features.modelhub.api.StartUnloadSpec
 import com.omnillm.features.modelhub.ports.AcquisitionLinkStore
 import com.omnillm.features.modelhub.ports.InMemoryAcquisitionLinkStore
+import com.omnillm.features.modelhub.ports.InMemoryInstallationResourceVersionPort
 import com.omnillm.features.modelhub.ports.InMemoryModelDisplayMetadataPort
+import com.omnillm.features.modelhub.ports.InstallationResourceVersionPort
 import com.omnillm.features.modelhub.ports.LiveReferenceQueryPort
 import com.omnillm.features.modelhub.ports.LicenseAcceptancePort
+import com.omnillm.features.modelhub.ports.LoadedModelLifecyclePort
 import com.omnillm.features.modelhub.ports.LoadedModelQueryPort
 import com.omnillm.features.modelhub.ports.ModelDisplayMetadataPort
 import com.omnillm.features.modelhub.ports.ModelLoadRuntimePort
 import com.omnillm.features.modelhub.ports.NoLicenseAcceptanceLedger
+import com.omnillm.features.modelhub.ports.NoOpLoadedModelLifecyclePort
 import com.omnillm.features.modelhub.ports.SuggestedCatalogPort
 import com.omnillm.features.modelhub.ports.UnavailableModelLoadRuntimePort
 import com.omnillm.features.modelhub.projection.ModelCardProjector
@@ -77,12 +81,13 @@ class ModelHubService(
     private val references: LiveReferenceQueryPort = ZeroReferenceQueryPort,
     private val loadRuntime: ModelLoadRuntimePort = UnavailableModelLoadRuntimePort,
     private val licenseAcceptance: LicenseAcceptancePort = NoLicenseAcceptanceLedger,
+    private val lifecycle: LoadedModelLifecyclePort = NoOpLoadedModelLifecyclePort,
+    private val resourceVersions: InstallationResourceVersionPort = InMemoryInstallationResourceVersionPort(),
     private val clockMs: () -> Long = { System.currentTimeMillis() },
 ) : ModelHubApi {
 
     private val snapshotSeq = AtomicLong(0L)
     private val channelByInstallation = linkedMapOf<String, String>()
-    private val resourceVersionByInstallation = linkedMapOf<String, Long>()
 
     override suspend fun getSnapshot(principal: PrincipalId): OmniResult<ModelHubSnapshot> {
         requireLocalUi(principal)
@@ -155,7 +160,10 @@ class ModelHubService(
     }
 
     override suspend fun listInstalled(principal: PrincipalId): OmniResult<List<ModelCard>> {
-        requireLocalUi(principal)
+        // COR-02: read-only enumeration admits authenticated principals (AIDL /
+        // HTTP transports enforce models.read at their own scope gate). Never an
+        // elevation to manage operations (those stay LOCAL_UI — fail closed).
+        requireReadProjection(principal)
         if (!allowsRead()) return forbiddenRead()
         return OmniResult.ok(listInstalledCards())
     }
@@ -233,7 +241,21 @@ class ModelHubService(
                     details = mapOf("installationId" to spec.installationId),
                 ),
             )
-        val currentRv = resourceVersionByInstallation[spec.installationId] ?: 0L
+        val currentRv = resourceVersions.currentVersion(spec.installationId)
+        if (currentRv == null) {
+            // COR-18: unknown version (e.g. after restart with an in-memory
+            // authority) fails closed — a stale client version must never
+            // silently pass against a reset counter.
+            return OmniResult.err(
+                OmniError.STATE_CONFLICT(
+                    message = "installation resourceVersion unknown — re-fetch snapshot before delete",
+                    details = mapOf(
+                        "expected" to spec.expectedResourceVersion.toString(),
+                        "reason" to "version authority not seeded for installation (restart?)",
+                    ),
+                ),
+            )
+        }
         if (spec.expectedResourceVersion != currentRv) {
             return OmniResult.err(
                 OmniError.STATE_CONFLICT(
@@ -419,6 +441,19 @@ class ModelHubService(
         val loadedModelId = com.omnillm.core.state.domain.LoadedModelId(
             "lm-${java.util.UUID.randomUUID().toString().take(12)}",
         )
+        // COR-08: pre-issue the privileged re-verify ticket BEFORE admission so
+        // a fail-closed gate never leaves a LoadedModel stuck in RESERVED (the
+        // LOADED_MODEL FSM has no LOAD_FAILED edge from RESERVED today).
+        val privilegedTicket = when (
+            val t = modelManager.preparePrivilegedTicket(
+                installationId = installationId,
+                engineBuildId = engineBuildIdRaw,
+                revocationEpoch = 0L,
+            )
+        ) {
+            is OmniResult.Err -> return t
+            is OmniResult.Ok -> t.value
+        }
         val admitted = when (
             val a = modelManager.admitLoad(
                 loadedModelId = loadedModelId,
@@ -431,12 +466,17 @@ class ModelHubService(
             is OmniResult.Err -> return a
             is OmniResult.Ok -> a.value
         }
+        lifecycle.onLoadAdmitted(installationId.value, loadedModelId.value)
+        // Single reservation identity source (COR-08): the reservation created
+        // here is the ONLY reservationId — the commit context reuses it instead
+        // of minting an inconsistent "res-…" twin.
+        val reservation = reservationFor(plan)
         val committed = when (
             val c = modelManager.commitLoad(
                 loadedModelId = loadedModelId,
                 plan = plan,
-                reservation = reservationFor(plan),
-                commit = commitContextFor(plan, principal),
+                reservation = reservation,
+                commit = commitContextFor(plan, principal, reservation, privilegedTicket.ticketId),
                 placementQualified = true,
                 loadEnvelopeMatched = true,
                 revocationEpoch = 0L,
@@ -444,6 +484,9 @@ class ModelHubService(
         ) {
             is OmniResult.Err -> {
                 // Admitted but commit failed — surface RESERVED state honestly.
+                // LoadCoordinator recovers engine failures (LOADING → FAILED);
+                // any still-RESERVED row is unrecoverable via the public
+                // ModelManager API and is surfaced for operator/forensics.
                 return OmniResult.err(c.error)
             }
             is OmniResult.Ok -> c.value
@@ -481,6 +524,7 @@ class ModelHubService(
             is OmniResult.Err -> return d
             is OmniResult.Ok -> d.value
         }
+        lifecycle.onDrainRequested(spec.installationId, loaded.loadedModelId.value)
         return OmniResult.ok(
             ModelLoadResult(
                 loadedModelId = drained.loadedModelId.value,
@@ -559,6 +603,8 @@ class ModelHubService(
     private fun commitContextFor(
         plan: com.omnillm.engines.api.LoadPlan,
         principal: PrincipalId,
+        reservation: Reservation,
+        privilegedLoadTicketId: String,
     ): com.omnillm.engines.api.CommitContext =
         com.omnillm.engines.api.CommitContext(
             commitId = com.omnillm.core.contracts.CommitId.parse(
@@ -566,9 +612,8 @@ class ModelHubService(
             ),
             requestId = plan.requestId,
             principalId = principal,
-            reservationId = com.omnillm.core.resource.ReservationId.parse(
-                "res-${java.util.UUID.randomUUID().toString().take(8)}",
-            ),
+            // COR-08: single reservation identity — always the plan reservation.
+            reservationId = reservation.reservationId,
             revisionLeaseId = com.omnillm.core.contracts.RevisionLeaseId.parse(
                 "lease-${java.util.UUID.randomUUID().toString().take(8)}",
             ),
@@ -576,7 +621,7 @@ class ModelHubService(
             runtimeEpoch = plan.runtimeEpoch,
             revocationEpoch = 0L,
             oneShotNonce = "load-${java.util.UUID.randomUUID().toString().take(8)}",
-            privilegedLoadTicketId = "modelhub-load-ticket",
+            privilegedLoadTicketId = privilegedLoadTicketId,
         )
 
     override suspend fun beginAcquisitionAttempt(
@@ -837,7 +882,7 @@ class ModelHubService(
         }
         links.unlink(jobId)
         channelByInstallation.remove(installationIdRaw)
-        resourceVersionByInstallation.remove(installationIdRaw)
+        resourceVersions.remove(installationIdRaw)
         return OmniResult.ok(toHandle(done, false, installationIdRaw, modelRevisionId))
     }
 
@@ -899,7 +944,7 @@ class ModelHubService(
             }
             channelByInstallation[installationIdRaw] = channel
             display.putDisplayName(modelRevisionIdRaw, displayName)
-            resourceVersionByInstallation.putIfAbsent(installationIdRaw, 0L)
+            resourceVersions.seed(installationIdRaw)
             links.link(jobId, installationIdRaw, modelRevisionIdRaw)
         }
 
@@ -990,14 +1035,23 @@ class ModelHubService(
         )
 
     private fun bumpResourceVersion(installationId: String) {
-        val cur = resourceVersionByInstallation[installationId] ?: 0L
-        resourceVersionByInstallation[installationId] = cur + 1L
+        resourceVersions.bump(installationId)
     }
 
     private fun requireLocalUi(principal: PrincipalId) {
         require(principal.value == LocalUiPrincipal.ID.value) {
             "ModelHubApi accepts LOCAL_UI principal only (got ${principal.value})"
         }
+    }
+
+    /**
+     * Read-only projection admission (COR-02): LOCAL_UI (Admin binder / UI) or
+     * any non-blank authenticated principal (AIDL / HTTP — the transport scope
+     * gate already enforced models.read). Blank principals fail closed.
+     */
+    private fun requireReadProjection(principal: PrincipalId) {
+        if (principal.value == LocalUiPrincipal.ID.value) return
+        require(principal.value.isNotBlank()) { "blank principal rejected for read projection" }
     }
 
     private fun allowsRead(): Boolean =

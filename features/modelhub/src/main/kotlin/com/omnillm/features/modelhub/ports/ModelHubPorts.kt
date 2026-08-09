@@ -104,6 +104,71 @@ class EmptySuggestedCatalogPort : SuggestedCatalogPort {
 }
 
 /**
+ * Loaded-model lifecycle notification (COR-06/COR-07).
+ *
+ * The runtime host tracks installation↔loadedModel index because ModelManager
+ * exposes no public findByInstallation; the host port then resolves the
+ * authoritative snapshot via [com.omnillm.runtime.modelmanager.ModelManager.getLoadedModel].
+ * NoOp default keeps feature tests hermetic (read-only).
+ */
+interface LoadedModelLifecyclePort {
+    /** Called after a LoadedModel row was admitted (RESERVED) for [installationId]. */
+    fun onLoadAdmitted(installationId: String, loadedModelId: String)
+
+    /** Called after a drain was requested for a loaded model (DRAINING/UNLOADING). */
+    fun onDrainRequested(installationId: String, loadedModelId: String)
+}
+
+/** No-op lifecycle observer — feature tests / unhosted builds. */
+object NoOpLoadedModelLifecyclePort : LoadedModelLifecyclePort {
+    override fun onLoadAdmitted(installationId: String, loadedModelId: String) = Unit
+    override fun onDrainRequested(installationId: String, loadedModelId: String) = Unit
+}
+
+/**
+ * Installation resource-version authority for delete CAS (COR-18).
+ *
+ * Must be durable / restart-surviving in production (persistent installation
+ * row version); in-memory default is the control-plane scaffold and resets on
+ * process restart. Returning null means the version is UNKNOWN → delete CAS
+ * fails closed instead of silently accepting a stale client version.
+ */
+interface InstallationResourceVersionPort {
+    /** Current version for [installationId], or null when unknown (fail closed). */
+    fun currentVersion(installationId: String): Long?
+
+    /** Record that the installation version advanced by one. */
+    fun bump(installationId: String): Long
+
+    /** Seed a newly acquired installation at version 0. */
+    fun seed(installationId: String)
+
+    /** Forget the installation after a committed delete. */
+    fun remove(installationId: String)
+}
+
+/** In-memory counter (single-process scaffold; resets on restart — see COR-18). */
+class InMemoryInstallationResourceVersionPort : InstallationResourceVersionPort {
+    private val versions = linkedMapOf<String, Long>()
+
+    override fun currentVersion(installationId: String): Long? = versions[installationId]
+
+    override fun bump(installationId: String): Long {
+        val next = (versions[installationId] ?: 0L) + 1L
+        versions[installationId] = next
+        return next
+    }
+
+    override fun seed(installationId: String) {
+        versions.putIfAbsent(installationId, 0L)
+    }
+
+    override fun remove(installationId: String) {
+        versions.remove(installationId)
+    }
+}
+
+/**
  * Engine load coordination surface for LOAD/UNLOAD commands (M4).
  * Wired by the runtime control plane — the feature never loads native engines
  * itself (INV-001). Returns null when no engine is attached (fail closed).

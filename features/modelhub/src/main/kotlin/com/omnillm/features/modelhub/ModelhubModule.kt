@@ -8,13 +8,17 @@ import com.omnillm.features.modelhub.catalog.OfflineFixtureCatalog
 import com.omnillm.features.modelhub.ports.AcquisitionLinkStore
 import com.omnillm.features.modelhub.ports.EmptySuggestedCatalogPort
 import com.omnillm.features.modelhub.ports.InMemoryAcquisitionLinkStore
+import com.omnillm.features.modelhub.ports.InMemoryInstallationResourceVersionPort
 import com.omnillm.features.modelhub.ports.InMemoryModelDisplayMetadataPort
+import com.omnillm.features.modelhub.ports.InstallationResourceVersionPort
 import com.omnillm.features.modelhub.ports.LiveReferenceQueryPort
+import com.omnillm.features.modelhub.ports.LoadedModelLifecyclePort
 import com.omnillm.features.modelhub.ports.LoadedModelQueryPort
 import com.omnillm.features.modelhub.ports.LicenseAcceptancePort
 import com.omnillm.features.modelhub.ports.ModelDisplayMetadataPort
 import com.omnillm.features.modelhub.ports.ModelLoadRuntimePort
 import com.omnillm.features.modelhub.ports.NoLicenseAcceptanceLedger
+import com.omnillm.features.modelhub.ports.NoOpLoadedModelLifecyclePort
 import com.omnillm.features.modelhub.ports.SuggestedCatalogPort
 import com.omnillm.features.modelhub.ports.UnavailableModelLoadRuntimePort
 import com.omnillm.features.modelhub.usecase.ModelHubService
@@ -72,6 +76,8 @@ object ModelhubModule {
         },
         loadRuntime: ModelLoadRuntimePort = UnavailableModelLoadRuntimePort,
         licenseAcceptance: LicenseAcceptancePort = NoLicenseAcceptanceLedger,
+        lifecycle: LoadedModelLifecyclePort = NoOpLoadedModelLifecyclePort,
+        resourceVersions: InstallationResourceVersionPort = InMemoryInstallationResourceVersionPort(),
         clockMs: () -> Long = { System.currentTimeMillis() },
     ): ModelHubApi =
         ModelHubService(
@@ -84,6 +90,8 @@ object ModelhubModule {
             references = references,
             loadRuntime = loadRuntime,
             licenseAcceptance = licenseAcceptance,
+            lifecycle = lifecycle,
+            resourceVersions = resourceVersions,
             clockMs = clockMs,
         )
 

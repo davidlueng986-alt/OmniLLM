@@ -4,9 +4,12 @@ import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.errors.generated.OmniError
 import com.omnillm.runtime.policy.download.DownloadTransferLimits
 import com.omnillm.runtime.policy.download.DownloadUrlPolicy
+import com.omnillm.runtime.policy.download.ResolvedAddressPolicy
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.InputStream
+import java.net.InetAddress
 import java.net.URI
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -16,6 +19,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * - Every hop (initial URL + each redirect Location) is re-admitted through
  *   [DownloadUrlPolicy] (scheme/host/port allowlist, loopback deny, hop cap).
+ * - Every DNS resolution is re-checked against [ResolvedAddressPolicy]
+ *   (SEC-05): DNS-rebinding / private-IP SSRF defense on each resolved address.
  * - Bounded stream: byte cap + read deadline + cooperative cancel via the
  *   acquisition pipeline's [AtomicBoolean].
  * - No automatic OkHttp redirect following — redirects are manual so each hop
@@ -27,7 +32,8 @@ class OkHttpArtifactByteSource(
     private val url: String,
     private val urlPolicy: DownloadUrlPolicy.Policy = DownloadUrlPolicy.Policy.DEFAULT,
     private val limits: DownloadTransferLimits = DownloadTransferLimits.DEFAULT,
-    private val client: OkHttpClient = defaultClient(),
+    private val addressPolicy: ResolvedAddressPolicy.Policy = ResolvedAddressPolicy.Policy.DEFAULT,
+    private val client: OkHttpClient = defaultClient(addressPolicy),
 ) : ArtifactByteSource {
 
     override fun open(role: String, cancel: AtomicBoolean): OmniResult<InputStream> {
@@ -51,8 +57,17 @@ class OkHttpArtifactByteSource(
             val response = try {
                 client.newCall(request).execute()
             } catch (e: Exception) {
-                // Catalog error mapping (no invented codes): interrupted byte stream
-                // is STREAM_INTERRUPTED (retryable); timeouts are DEADLINE_EXCEEDED.
+                // SEC-05: resolved-address policy denial maps to INVALID_REQUEST
+                // (same catalog family as URL policy); transport failures map to
+                // STREAM_INTERRUPTED / DEADLINE_EXCEEDED (no invented codes).
+                if (e is ResolvedAddressDeniedException) {
+                    return OmniResult.err(
+                        OmniError.INVALID_REQUEST(
+                            message = e.message ?: "resolved address denied",
+                            details = mapOf("host" to accepted.normalizedUrl),
+                        ),
+                    )
+                }
                 val deadline = e is okhttp3.internal.http2.StreamResetException ||
                     e is java.net.SocketTimeoutException
                 return OmniResult.err(
@@ -191,8 +206,11 @@ class OkHttpArtifactByteSource(
     }
 
     companion object {
-        fun defaultClient(): OkHttpClient =
+        fun defaultClient(
+            addressPolicy: ResolvedAddressPolicy.Policy = ResolvedAddressPolicy.Policy.DEFAULT,
+        ): OkHttpClient =
             OkHttpClient.Builder()
+                .dns(PolicyCheckingDns(addressPolicy))
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
                 .followRedirects(false)
@@ -200,4 +218,28 @@ class OkHttpArtifactByteSource(
                 .retryOnConnectionFailure(true)
                 .build()
     }
+
+    /**
+     * SEC-05: OkHttp [Dns] that resolves then re-checks EVERY address against
+     * [ResolvedAddressPolicy] (applied on every hop since redirects re-resolve).
+     * Denied resolutions throw [ResolvedAddressDeniedException] which the
+     * caller maps to INVALID_REQUEST (fail closed on DNS rebinding / SSRF).
+     */
+    class PolicyCheckingDns(
+        private val policy: ResolvedAddressPolicy.Policy = ResolvedAddressPolicy.Policy.DEFAULT,
+    ) : Dns {
+        override fun lookup(hostname: String): List<InetAddress> {
+            val resolved = Dns.SYSTEM.lookup(hostname)
+            when (val outcome = ResolvedAddressPolicy.admitAll(resolved, policy)) {
+                is ResolvedAddressPolicy.Outcome.Rejected ->
+                    throw ResolvedAddressDeniedException(outcome.reason)
+                is ResolvedAddressPolicy.Outcome.Accepted -> Unit
+            }
+            return resolved
+        }
+    }
+
+    /** Marker exception for resolved-address policy denials (SEC-05). */
+    class ResolvedAddressDeniedException(reason: String) :
+        Exception("resolved address denied: $reason")
 }

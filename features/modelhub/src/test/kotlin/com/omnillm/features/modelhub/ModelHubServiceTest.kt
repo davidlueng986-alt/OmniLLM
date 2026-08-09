@@ -562,6 +562,173 @@ class ModelHubServiceTest {
         assertEquals("LOADED", loaded.state)
     }
 
+    @Test
+    fun COR02_listInstalled_acceptsAuthenticatedAidlPrincipal() = runBlocking {
+        // Flagship model-enumeration API: authenticated AIDL principal must get
+        // a clean projection — never an IllegalArgumentException.
+        promoteToReady("11111111-2222-4333-8444-5555555555aa", "job-cor02-aidl")
+        val aidlPrincipal = com.omnillm.core.contracts.PrincipalId.parse("aidl:uid=10001:user=0")
+        val listed = api.listInstalled(aidlPrincipal)
+        assertTrue("AIDL principal must receive a clean list: $listed", listed is OmniResult.Ok)
+        assertEquals(1, (listed as OmniResult.Ok).value.size)
+    }
+
+    @Test
+    fun COR02_manageOpsStillFailClosedForNonLocalUi() = runBlocking {
+        promoteToReady("11111111-2222-4333-8444-5555555555bb", "job-cor02-manage")
+        val aidlPrincipal = com.omnillm.core.contracts.PrincipalId.parse("aidl:uid=10001:user=0")
+        // startDelete (manage) must not be reachable for exported AIDL principals
+        // (fail closed — manage surface stays LOCAL_UI only).
+        val thrown = try {
+            api.startDelete(
+                aidlPrincipal,
+                StartDeleteSpec(
+                    jobId = "33333333-3333-4333-8333-333333333301",
+                    installationId = "11111111-2222-4333-8444-5555555555bb",
+                    expectedResourceVersion = 2L,
+                    command = cmd("del-cor02"),
+                ),
+            )
+            null
+        } catch (t: Throwable) {
+            t
+        }
+        assertTrue(
+            "manage ops must fail closed for AIDL principal",
+            thrown is IllegalArgumentException,
+        )
+    }
+
+    @Test
+    fun COR18_deleteAfterRestart_unknownVersionFailsClosed() = runBlocking {
+        val installationId = "11111111-2222-4333-8444-5555555555cc"
+        promoteToReady(installationId, "job-cor18-restart")
+        // Simulate process restart: a fresh ModelHubService with a fresh
+        // (in-memory) version authority knows no version for this installation.
+        val restarted = ModelHubService(
+            jobManager = jobManager,
+            modelManager = modelManager,
+            catalog = FixedSuggestedCatalogPort(listOf(catalogEntry)),
+            references = object : LiveReferenceQueryPort {
+                override suspend fun installationReferences(installationId: String): LiveReferences =
+                    refs.installationRefs
+            },
+        )
+        val attempt = restarted.startDelete(
+            LocalUiPrincipal.ID,
+            StartDeleteSpec(
+                jobId = "33333333-3333-4333-8333-333333333302",
+                installationId = installationId,
+                expectedResourceVersion = 0L,
+                command = cmd("del-cor18"),
+            ),
+        )
+        assertTrue("stale version must fail closed (COR-18)", attempt is OmniResult.Err)
+        assertEquals(
+            com.omnillm.core.errors.generated.OmniErrorCode.STATE_CONFLICT,
+            (attempt as OmniResult.Err).error.code,
+        )
+    }
+
+    @Test
+    fun COR08_commitFailure_recoversToFailedState() = runBlocking {
+        val installationId = "11111111-2222-4333-8444-5555555555dd"
+        promoteToReady(installationId, "job-cor08-commit")
+        val ledger = com.omnillm.features.modelhub.ports.InMemoryLicenseAcceptanceLedger()
+        ledger.accept(LocalUiPrincipal.ID.value, catalogEntry.licenseDigest!!, installationId)
+        // Engine commitLoad fails after admission → LoadCoordinator must recover
+        // the LoadedModel (LOADING → FAILED), never leave it stuck in RESERVED.
+        val failingEngine = FailingCommitEngine()
+        val failingManager = ModelManager.create(
+            installationRepository = installations,
+            loadedModelRepository = loadedModels,
+            revisionLeaseRepository = leases,
+            modelStore = modelStore,
+            trustEvaluation = FixedTrust(),
+            references = refs,
+            engine = failingEngine,
+            privilegedReverify = OkReverify(),
+        )
+        val loadApi = ModelHubService(
+            jobManager = jobManager,
+            modelManager = failingManager,
+            catalog = FixedSuggestedCatalogPort(listOf(catalogEntry)),
+            loadedModels = object : LoadedModelQueryPort {
+                override suspend fun findByInstallation(installationId: String): List<LoadedModelSnapshot> =
+                    loadedModels.findByInstallation(InstallationId(installationId))
+            },
+            references = object : LiveReferenceQueryPort {
+                override suspend fun installationReferences(installationId: String): LiveReferences =
+                    refs.installationRefs
+            },
+            loadRuntime = object : ModelLoadRuntimePort {
+                override fun primaryEngineBuildId(): String = "engine-test"
+                override fun deviceExecutionFingerprint(): DeviceExecutionFingerprint =
+                    DeviceExecutionFingerprint.parse("device-fp-cor08")
+            },
+            licenseAcceptance = ledger,
+        )
+        val result = loadApi.startLoad(
+            LocalUiPrincipal.ID,
+            StartLoadSpec(installationId = installationId, command = cmd("load-cor08")),
+        )
+        assertTrue("commit failure must surface as Err", result is OmniResult.Err)
+        val after = loadedModels.findByInstallation(InstallationId(installationId))
+        assertTrue("loaded model rows must exist after failed commit", after.isNotEmpty())
+        assertTrue(
+            "commit failure must recover state to FAILED, got ${after[0].state}",
+            after.all { it.state == "FAILED" },
+        )
+    }
+
+    @Test
+    fun COR08_gateFailure_leavesNoReservedRow() = runBlocking {
+        val installationId = "11111111-2222-4333-8444-5555555555ee"
+        promoteToReady(installationId, "job-cor08-gate")
+        val ledger = com.omnillm.features.modelhub.ports.InMemoryLicenseAcceptanceLedger()
+        ledger.accept(LocalUiPrincipal.ID.value, catalogEntry.licenseDigest!!, installationId)
+        // Privileged re-verify fails closed → pre-admission ticket gate must
+        // reject BEFORE any RESERVED LoadedModel row is created.
+        val gatedManager = ModelManager.create(
+            installationRepository = installations,
+            loadedModelRepository = loadedModels,
+            revisionLeaseRepository = leases,
+            modelStore = modelStore,
+            trustEvaluation = FixedTrust(),
+            references = refs,
+            engine = NoopEngine(),
+            privilegedReverify = FailingReverify(),
+        )
+        val loadApi = ModelHubService(
+            jobManager = jobManager,
+            modelManager = gatedManager,
+            catalog = FixedSuggestedCatalogPort(listOf(catalogEntry)),
+            loadedModels = object : LoadedModelQueryPort {
+                override suspend fun findByInstallation(installationId: String): List<LoadedModelSnapshot> =
+                    loadedModels.findByInstallation(InstallationId(installationId))
+            },
+            references = object : LiveReferenceQueryPort {
+                override suspend fun installationReferences(installationId: String): LiveReferences =
+                    refs.installationRefs
+            },
+            loadRuntime = object : ModelLoadRuntimePort {
+                override fun primaryEngineBuildId(): String = "engine-test"
+                override fun deviceExecutionFingerprint(): DeviceExecutionFingerprint =
+                    DeviceExecutionFingerprint.parse("device-fp-cor08-gate")
+            },
+            licenseAcceptance = ledger,
+        )
+        val result = loadApi.startLoad(
+            LocalUiPrincipal.ID,
+            StartLoadSpec(installationId = installationId, command = cmd("load-gate")),
+        )
+        assertTrue("gate failure must surface as Err", result is OmniResult.Err)
+        assertTrue(
+            "no LoadedModel row may be left behind when gate rejects (COR-08)",
+            loadedModels.findByInstallation(InstallationId(installationId)).isEmpty(),
+        )
+    }
+
     private suspend fun promoteToReady(installationId: String, jobId: String) {
         assertOk(
             api.startDownload(
@@ -779,6 +946,58 @@ class ModelHubServiceTest {
             )
         override suspend fun queryCommit(commitId: com.omnillm.core.contracts.CommitId): OmniResult<CommitQueryState> =
             OmniResult.ok(CommitQueryState(commitId, "COMMITTED"))
+    }
+
+    /** Engine whose commitLoad fails after admission (COR-08 recovery fixture). */
+    private class FailingCommitEngine : EngineLoadPort {
+        override val engineBuildId: EngineBuildId = EngineBuildId.parse("engine-test")
+
+        override suspend fun planLoad(input: LoadInput): OmniResult<LoadPlan> {
+            val d = Sha256Digest.parse("b".repeat(64))
+            return OmniResult.ok(
+                LoadPlan(
+                    planId = PlanId.parse("plan-1"),
+                    requestId = input.requestId,
+                    principalId = input.principalId,
+                    engineBuildId = engineBuildId,
+                    loadKey = input.loadKey,
+                    installationId = input.installationId,
+                    modelRevisionId = input.modelRevisionId,
+                    resourceEnvelope = ResourceEnvelope(
+                        steady = ResourceVector(cpuAnonBytes = 1),
+                        peak = ResourceVector(cpuAnonBytes = 2),
+                    ),
+                    proposedPlacementClass = PlacementClassLabels.PRIVILEGED_TRUSTED,
+                    phaseCapabilityDigest = d,
+                    canonicalInputDigest = d,
+                    expiryMonotonic = 1L,
+                    runtimeEpoch = input.runtimeEpoch,
+                ),
+            )
+        }
+
+        override suspend fun commitLoad(
+            plan: LoadPlan,
+            reservation: Reservation,
+            commit: CommitContext,
+        ): OmniResult<LoadedModelHandle> =
+            OmniResult.err(
+                com.omnillm.core.errors.generated.OmniError.INTERNAL(
+                    message = "engine commitLoad failed (COR-08 fixture)",
+                ),
+            )
+
+        override suspend fun queryCommit(commitId: com.omnillm.core.contracts.CommitId): OmniResult<CommitQueryState> =
+            OmniResult.ok(CommitQueryState(commitId, "COMMITTED"))
+    }
+
+    private class FailingReverify : PrivilegedLoadReverifyPort {
+        override suspend fun reverify(request: PrivilegedReverifyRequest): OmniResult<PrivilegedLoadTicket> =
+            OmniResult.err(
+                com.omnillm.core.errors.generated.OmniError.MODEL_REVOKED(
+                    message = "supply chain not wired (COR-08 fixture)",
+                ),
+            )
     }
 
     private class OkReverify : PrivilegedLoadReverifyPort {
