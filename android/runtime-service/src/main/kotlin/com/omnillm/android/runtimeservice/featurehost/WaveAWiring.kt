@@ -138,6 +138,12 @@ object WaveAWiring {
         val streamSessions: () -> StreamSessionRegistry = {
             RuntimeControlPlane.get()?.streamSessions ?: StreamSessionRegistry()
         },
+        /**
+         * Effective policy settings snapshot for governor capacities (ARC-10).
+         * Null (default) resolves catalog defaults, which equal the historical
+         * hardcoded capacities (512MiB anon / 8GiB file / 64 threads / 1024 FDs).
+         */
+        val settings: () -> com.omnillm.runtime.policy.SettingsSnapshot? = { null },
     )
 
     fun bootstrapForTest(
@@ -173,15 +179,21 @@ object WaveAWiring {
     )
 
     fun wire(deps: Deps): WaveAFeaturePacks {
+        // Governor capacities come from the configuration catalog (ARC-10):
+        // effective settings when provided, catalog defaults otherwise. Defaults
+        // preserve the historical hardcoded values exactly (512MiB anon / 8GiB
+        // file / 64 threads / 1024 FDs), so admission math is unchanged.
+        val caps = com.omnillm.runtime.policy.ConfigurationCatalog
+            .governorCapacities(deps.settings?.invoke())
         val governor = ResourceGovernor(
             // Include FDs / file dimensions so inference envelopes can admit
             // (ResourceVector.dominates is multi-dimensional).
             capacity = ResourceVector(
-                cpuAnonBytes = 512L * 1024L * 1024L,
-                cpuFileBytes = 8L * 1024L * 1024L * 1024L,
-                nativeThreads = 64L,
-                fileDescriptors = 1024L,
-                temporaryDiskBytes = 512L * 1024L * 1024L,
+                cpuAnonBytes = caps.anonMemoryBytes,
+                cpuFileBytes = caps.fileCacheBytes,
+                nativeThreads = caps.threads,
+                fileDescriptors = caps.fileDescriptors,
+                temporaryDiskBytes = caps.temporaryDiskBytes,
             ),
             safetyMargin = ResourceVector(
                 cpuAnonBytes = 16L * 1024L * 1024L,
@@ -282,7 +294,10 @@ object WaveAWiring {
                     clockMs = deps.clockMs,
                     runtimeEpoch = deps.runtimeEpoch,
                 ),
-                capabilities = ControlPlaneFeaturePorts.playgroundCapabilities(binding),
+                capabilities = ControlPlaneFeaturePorts.playgroundCapabilities(
+                    binding,
+                    runBlocking { deps.modelManager.listInstallations() },
+                ),
                 models = object : PlaygroundModelCatalogPort {
                     override fun listModels(): List<PlaygroundModelRow> = runBlocking {
                         deps.modelManager.listInstallations().map {

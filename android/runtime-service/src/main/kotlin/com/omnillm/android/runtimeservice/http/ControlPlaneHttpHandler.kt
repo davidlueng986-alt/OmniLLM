@@ -726,7 +726,13 @@ class ControlPlaneHttpHandler(
             )
         }
         val installation = com.omnillm.android.runtimeservice.featurehost.ControlPlaneFeaturePorts
-            .resolveInstallation(source.modelManager, revision)
+            .resolveInstallationOrNull(source.modelManager, revision)
+            ?: return HttpHandlerResult.Err(
+                OmniError.CAPABILITY_UNSUPPORTED(
+                    message = "no installed model for requested revision (fail closed, ARC-06)",
+                    details = mapOf("modelRevisionId" to revision.hex),
+                ),
+            )
         val candidate = com.omnillm.android.runtimeservice.featurehost.ControlPlaneFeaturePorts
             .buildCandidate(
                 binding = source.binding,

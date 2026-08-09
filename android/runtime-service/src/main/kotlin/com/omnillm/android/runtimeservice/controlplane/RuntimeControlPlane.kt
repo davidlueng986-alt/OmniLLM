@@ -475,6 +475,9 @@ class RuntimeControlPlane private constructor(
                         },
                         isGatewayRunning = { GatewayLifecycle.isRunning() },
                         engineExecute = engineExecuteBinding,
+                        // ARC-10: governor capacities follow the effective
+                        // configuration catalog (defaults match historical values).
+                        settings = { policy.settingsSnapshot() },
                     ),
                 )
 

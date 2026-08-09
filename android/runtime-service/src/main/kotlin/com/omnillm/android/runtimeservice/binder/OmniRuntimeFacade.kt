@@ -307,7 +307,15 @@ class OmniRuntimeFacade(
             )
         }
 
-        val installation = ControlPlaneFeaturePorts.resolveInstallation(plane.modelManager, revision)
+        val installation = ControlPlaneFeaturePorts.resolveInstallationOrNull(plane.modelManager, revision)
+            ?: return listOf(
+                metaEvent("accepted", model = request.model),
+                terminalFailedEvent(
+                    code = OmniErrorCode.CAPABILITY_UNSUPPORTED,
+                    message = "no installed model for requested revision (fail closed, ARC-06)",
+                    details = mapOf("requestId" to requestId.value, "model" to modelRaw),
+                ),
+            )
         val device = DeviceExecutionFingerprint.parse("device-fp-aidl-runtime")
         val candidate = when (
             val c = ControlPlaneFeaturePorts.buildCandidate(binding, revision, installation, device)

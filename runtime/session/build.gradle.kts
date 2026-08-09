@@ -26,6 +26,9 @@ dependencies {
     api(project(":core:errors"))
     // Durable SessionLedgerPorts (ADR-010 sole writer; SQLDelight via control plane).
     api(project(":data:persistence"))
+    // Shared ledger ports (ControlPlaneWriter / ClaimLedgerTransaction) in
+    // :core:ports (ARC-01).
+    implementation(project(":core:ports"))
     testImplementation(libs.junit)
 }
 

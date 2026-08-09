@@ -89,6 +89,9 @@ dependencies {
 
     // ADR-010 single-writer marker + claim ledgers (control plane sole writer).
     implementation(project(":data:persistence"))
+    // Shared ledger/security port types (ARC-01/02): SingleWriterPolicy,
+    // ControlPlaneWriter, IdempotentCommandClaimRow, store interfaces.
+    implementation(project(":core:ports"))
     // Android SQLite driver for ControlPlaneDatabase (SQLDelight; opened only in :runtime).
     implementation(libs.sqldelight.android.driver)
     // Control-plane storage layout + quarantine (ANDROID-STORAGE).

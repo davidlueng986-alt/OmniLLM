@@ -291,9 +291,31 @@ class LaunchCriticalHttpSurfaceTest {
             tokenService = LoopbackTokenService(),
             orchestrator = harness.orchestrator,
             exploratorySource = {
+                // ARC-06: durable paths fail closed unless the requested revision
+                // maps to a REAL installation — seed one for the fixture model
+                // ("fixture" → sha256("model|fixture")).
+                val installs = com.omnillm.runtime.modelmanager.memory
+                    .InMemoryInstallationRepository()
+                val rev = com.omnillm.core.canonical.generated.ModelRevisionId.parse(
+                    com.omnillm.core.canonical.IdentityHashing.sha256Hex("model|fixture"),
+                )
+                runBlocking {
+                    installs.save(
+                        com.omnillm.runtime.modelmanager.domain.InstallationSnapshot.discovered(
+                            installationId = com.omnillm.core.state.domain.InstallationId(
+                                "550e8400-e29b-41d4-a716-446655440000",
+                            ),
+                            modelRevisionId = rev,
+                            artifactPackageId = com.omnillm.core.canonical.generated
+                                .ArtifactPackageId.parse("d".repeat(64)),
+                        ),
+                    )
+                }
                 ExploratoryInferenceSource(
                     binding = binding,
-                    modelManager = ModelManagerModule.createInMemoryControlPlane(),
+                    modelManager = ModelManagerModule.createInMemoryControlPlane(
+                        installations = installs,
+                    ),
                 )
             },
         )

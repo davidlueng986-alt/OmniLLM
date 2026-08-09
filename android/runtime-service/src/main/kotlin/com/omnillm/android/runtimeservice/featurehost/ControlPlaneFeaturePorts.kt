@@ -77,10 +77,14 @@ object ControlPlaneFeaturePorts {
             deviceFingerprint = deviceFingerprint,
         )
 
-    fun playgroundCapabilities(binding: EngineExecuteBinding): PlaygroundCapabilityPort =
+    fun playgroundCapabilities(
+        binding: EngineExecuteBinding,
+        installations: List<com.omnillm.runtime.modelmanager.domain.InstallationSnapshot>,
+    ): PlaygroundCapabilityPort =
         object : PlaygroundCapabilityPort {
             override fun state(capability: CapabilityId, modelRevisionId: String): CapabilityState {
-                val cand = binding.probeCandidate(modelRevisionId) ?: return CapabilityState.UNKNOWN
+                val cand = binding.probeCandidate(modelRevisionId, installations)
+                    ?: return CapabilityState.UNKNOWN
                 return binding.resolveCapability(capability, cand)
             }
 
@@ -132,8 +136,10 @@ object ControlPlaneFeaturePorts {
                 return OmniResult.ok(
                     installations.map { inst ->
                         val rev = inst.modelRevisionId.hex
-                        val textState = playgroundCapabilities(binding).state(CapabilityId.TEXT_GENERATION, rev)
-                        val conditions = playgroundCapabilities(binding).conditions(CapabilityId.TEXT_GENERATION, rev)
+                        val textState = playgroundCapabilities(binding, installations)
+                            .state(CapabilityId.TEXT_GENERATION, rev)
+                        val conditions = playgroundCapabilities(binding, installations)
+                            .conditions(CapabilityId.TEXT_GENERATION, rev)
                         ModelCapabilityView(
                             modelId = inst.installationId.value,
                             modelRevisionId = rev,
@@ -208,23 +214,53 @@ object ControlPlaneFeaturePorts {
 
     // ---- helpers ----
 
-    internal fun EngineExecuteBinding.probeCandidate(modelRevisionId: String): RoutingCandidate? {
-        val revHex = modelRevisionId.lowercase().let {
-            if (it.matches(Regex("^[0-9a-f]{64}$"))) it else "0".repeat(64)
+    /**
+     * Probe candidate for capability-state computation (ARC-06).
+     *
+     * Routes the probe through **real** installation resolution: when a real
+     * installation exists for [modelRevisionId], the candidate carries the real
+     * installation identity + a real loadKeyDigest + the caller's real device
+     * fingerprint. When no real installation exists the probe FAILS CLOSED and
+     * returns null (capability UNKNOWN).
+     *
+     * The returned candidate is **ephemeral** — it is only used for capability
+     * state/condition projections and must never be submitted to the
+     * claim/commit ledgers as a real identity (no fabricated InstallationId /
+     * loadKeyDigest / device fingerprints in production paths).
+     */
+    internal fun EngineExecuteBinding.probeCandidate(
+        modelRevisionId: String,
+        installations: List<com.omnillm.runtime.modelmanager.domain.InstallationSnapshot>,
+        deviceFingerprint: () -> DeviceExecutionFingerprint =
+            { DeviceExecutionFingerprint.parse("device-fp-probe") },
+    ): RoutingCandidate? {
+        val revision = try {
+            ModelRevisionId.parse(modelRevisionId.lowercase())
+        } catch (_: Exception) {
+            return null
         }
+        val realInstallation = installations.firstOrNull {
+            it.modelRevisionId.hex == revision.hex
+        } ?: return null
         val build = attachment?.llamaCppEngine?.engineBuildId
             ?: attachment?.llamaCppRegistration?.engineBuildId
             ?: return null
         return RoutingCandidate(
             candidateId = "probe-primary",
-            modelRevisionId = ModelRevisionId.parse(revHex),
-            installationId = InstallationId.parse("550e8400-e29b-41d4-a716-446655440000"),
+            modelRevisionId = revision,
+            installationId = com.omnillm.core.identity.InstallationId.parse(
+                realInstallation.installationId.value,
+            ),
             engineBuildId = build,
             backend = "cpu",
             placementClass = EngineExecuteBinding.EXPLORATORY_PLACEMENT,
-            loadKeyDigest = Sha256Digest.parse("b".repeat(64)),
+            loadKeyDigest = Sha256Digest.parse(
+                com.omnillm.core.canonical.IdentityHashing.sha256Hex(
+                    "loadkey|${revision.hex}|${build.value}|cpu",
+                ),
+            ),
             isPrimary = true,
-            deviceExecutionFingerprint = DeviceExecutionFingerprint.parse("device-fp-probe"),
+            deviceExecutionFingerprint = deviceFingerprint(),
         )
     }
 
@@ -275,31 +311,20 @@ object ControlPlaneFeaturePorts {
             minimumPlacementClass = PlacementClassLabels.CRASH_CONTAINED_TRUSTED,
         )
 
-    internal suspend fun resolveInstallation(
+    /**
+     * Resolve the REAL installation for [revision] (ARC-06).
+     *
+     * Returns null when no real installation exists — callers must fail closed
+     * (never fabricate a synthetic installation identity for durable paths).
+     * Synthetic identities must not reach the claim/commit ledgers.
+     */
+    internal suspend fun resolveInstallationOrNull(
         modelManager: ModelManager,
         revision: ModelRevisionId,
-    ): InstallationId {
-        val match = modelManager.listInstallations().firstOrNull {
+    ): com.omnillm.core.identity.InstallationId? =
+        modelManager.listInstallations().firstOrNull {
             it.modelRevisionId.hex == revision.hex
-        }
-        if (match != null) {
-            return InstallationId.parse(match.installationId.value)
-        }
-        // Exploratory synthetic installation when catalog empty (fixture path).
-        val hex = revision.hex
-        val uuid = buildString {
-            append(hex.take(8)); append('-')
-            append(hex.substring(8, 12)); append('-')
-            append('4'); append(hex.substring(13, 16)); append('-')
-            append('a'); append(hex.substring(17, 20)); append('-')
-            append(hex.substring(20, 32))
-        }
-        return try {
-            InstallationId.parse(uuid)
-        } catch (_: Exception) {
-            InstallationId.parse("550e8400-e29b-41d4-a716-4466554400ef")
-        }
-    }
+        }?.installationId?.let { com.omnillm.core.identity.InstallationId.parse(it.value) }
 }
 
 // ---------------------------------------------------------------------------
@@ -352,7 +377,13 @@ private class OrchestratorPlaygroundInferencePort(
         } catch (_: Exception) {
             return OmniResult.err(OmniError.INVALID_REQUEST(message = "invalid canonicalInputDigest"))
         }
-        val installation = ControlPlaneFeaturePorts.resolveInstallation(modelManager, revision)
+        val installation = ControlPlaneFeaturePorts.resolveInstallationOrNull(modelManager, revision)
+            ?: return OmniResult.err(
+                OmniError.CAPABILITY_UNSUPPORTED(
+                    message = "no installed model for requested revision (fail closed, ARC-06)",
+                    details = mapOf("modelRevisionId" to revision.hex),
+                ),
+            )
         val candidate = when (
             val c = ControlPlaneFeaturePorts.buildCandidate(
                 binding, revision, installation, deviceFingerprint(),
@@ -608,7 +639,14 @@ private class OrchestratorServerInferencePort(
                     OmniError.INVALID_REQUEST(message = "no valid requiredCapabilities"), now),
             )
         }
-        val installation = ControlPlaneFeaturePorts.resolveInstallation(modelManager, revision)
+        val installation = ControlPlaneFeaturePorts.resolveInstallationOrNull(modelManager, revision)
+            ?: return OmniResult.ok(
+                SmokeTestResult("PLAN", false, claim.requestId, null,
+                    OmniError.CAPABILITY_UNSUPPORTED(
+                        message = "no installed model for requested revision (fail closed, ARC-06)",
+                        details = mapOf("modelRevisionId" to revision.hex),
+                    ), now),
+            )
         val candidate = when (
             val c = ControlPlaneFeaturePorts.buildCandidate(
                 binding, revision, installation, deviceFingerprint(),

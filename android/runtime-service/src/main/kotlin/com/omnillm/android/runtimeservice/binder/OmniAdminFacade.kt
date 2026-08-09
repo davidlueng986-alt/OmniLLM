@@ -588,7 +588,12 @@ class OmniAdminFacade(
             return "UNKNOWN"
         }
         val cand = with(com.omnillm.android.runtimeservice.featurehost.ControlPlaneFeaturePorts) {
-            binding.probeCandidate(model)
+            // ARC-06: probe routes through real installation resolution; fails
+            // closed (UNKNOWN) when the revision is not actually installed.
+            binding.probeCandidate(
+                model,
+                kotlinx.coroutines.runBlocking { plane.modelManager.listInstallations() },
+            )
         } ?: return "UNKNOWN"
         return binding.resolveCapability(cap, cand).name
     }

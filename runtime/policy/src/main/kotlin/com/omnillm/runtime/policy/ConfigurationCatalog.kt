@@ -245,7 +245,174 @@ object ConfigurationCatalog {
             requiresPlanReservationCommit = false,
             defaultValue = SettingValue.EnumValue("LOCAL_ONLY"),
         ),
+
+        // ----- Product modes (FTR-03) ----------------------------------------
+        // Both modes are FAIL-CLOSED by default (OFF). Spec entries for
+        // specs/configuration-catalog.yaml are coordinated with Stage 4a.
+        SettingDefinition(
+            key = "product.researchModeEnabled",
+            type = SettingType.BOOLEAN,
+            min = null,
+            max = null,
+            enumValues = null,
+            settingClass = SettingClass.LOCAL_ADMIN,
+            allowedSources = setOf("administrator-policy", "product-default"),
+            clampAllowed = false,
+            admissionBound = false,
+            requiresPlanReservationCommit = false,
+            // Research Mode: raw diagnostics + backend selection options.
+            // Off by default — honest capability projection (FTR-03).
+            defaultValue = SettingValue.BoolValue(false),
+        ),
+        SettingDefinition(
+            key = "product.riskyPerformanceModeEnabled",
+            type = SettingType.BOOLEAN,
+            min = null,
+            max = null,
+            enumValues = null,
+            settingClass = SettingClass.LOCAL_ADMIN,
+            allowedSources = setOf("administrator-policy", "product-default"),
+            clampAllowed = false,
+            admissionBound = false,
+            requiresPlanReservationCommit = false,
+            // Risky Performance Mode: requires explicit per-use risk
+            // acknowledgment (RiskAck) and enables the performance path.
+            // Off by default (FTR-03).
+            defaultValue = SettingValue.BoolValue(false),
+        ),
+
+        // ----- Governor capacities (ARC-10) ----------------------------------
+        // Hardcoded WaveAWiring / ControlPlaneFeaturePorts values moved into the
+        // configuration catalog; code reads them via
+        // ConfigurationCatalog.governorCapacities(snapshot). Spec entries for
+        // specs/configuration-catalog.yaml are coordinated with Stage 4a.
+        SettingDefinition(
+            key = "resource.governorAnonMemoryCapBytes",
+            type = SettingType.INTEGER,
+            min = 1.0,
+            max = null,
+            enumValues = null,
+            settingClass = SettingClass.LOCAL_ADMIN,
+            allowedSources = setOf("administrator-policy", "product-default"),
+            clampAllowed = true,
+            admissionBound = true,
+            requiresPlanReservationCommit = false,
+            defaultValue = SettingValue.IntValue(DEFAULT_ANON_MEMORY_CAP_BYTES),
+        ),
+        SettingDefinition(
+            key = "resource.governorFileCacheCapBytes",
+            type = SettingType.INTEGER,
+            min = 1.0,
+            max = null,
+            enumValues = null,
+            settingClass = SettingClass.LOCAL_ADMIN,
+            allowedSources = setOf("administrator-policy", "product-default"),
+            clampAllowed = true,
+            admissionBound = true,
+            requiresPlanReservationCommit = false,
+            defaultValue = SettingValue.IntValue(DEFAULT_FILE_CACHE_CAP_BYTES),
+        ),
+        SettingDefinition(
+            key = "resource.governorThreadCap",
+            type = SettingType.INTEGER,
+            min = 1.0,
+            max = null,
+            enumValues = null,
+            settingClass = SettingClass.LOCAL_ADMIN,
+            allowedSources = setOf("administrator-policy", "product-default"),
+            clampAllowed = true,
+            admissionBound = true,
+            requiresPlanReservationCommit = false,
+            defaultValue = SettingValue.IntValue(DEFAULT_THREAD_CAP),
+        ),
+        SettingDefinition(
+            key = "resource.governorFdCap",
+            type = SettingType.INTEGER,
+            min = 1.0,
+            max = null,
+            enumValues = null,
+            settingClass = SettingClass.LOCAL_ADMIN,
+            allowedSources = setOf("administrator-policy", "product-default"),
+            clampAllowed = true,
+            admissionBound = true,
+            requiresPlanReservationCommit = false,
+            defaultValue = SettingValue.IntValue(DEFAULT_FD_CAP),
+        ),
+        SettingDefinition(
+            key = "resource.probeDeadlineMs",
+            type = SettingType.INTEGER,
+            min = 1.0,
+            max = null,
+            enumValues = null,
+            settingClass = SettingClass.LOCAL_ADMIN,
+            allowedSources = setOf("administrator-policy", "product-default"),
+            clampAllowed = true,
+            admissionBound = false,
+            requiresPlanReservationCommit = false,
+            defaultValue = SettingValue.IntValue(DEFAULT_PROBE_DEADLINE_MS),
+        ),
     ).associateBy { it.key }
+
+    // ----- Catalog defaults (must match the values the control plane used
+    // before config-driven wiring; changing defaults changes admission math) ---
+
+    const val DEFAULT_ANON_MEMORY_CAP_BYTES: Long = 512L * 1024L * 1024L
+    const val DEFAULT_FILE_CACHE_CAP_BYTES: Long = 8L * 1024L * 1024L * 1024L
+    const val DEFAULT_THREAD_CAP: Long = 64L
+    const val DEFAULT_FD_CAP: Long = 1024L
+    const val DEFAULT_PROBE_DEADLINE_MS: Long = 30_000L
+
+    /** Effective multi-dimensional governor capacity (ARC-10). */
+    data class GovernorCapacities(
+        val anonMemoryBytes: Long,
+        val fileCacheBytes: Long,
+        val threads: Long,
+        val fileDescriptors: Long,
+        val temporaryDiskBytes: Long = 512L * 1024L * 1024L,
+        val probeDeadlineMs: Long = DEFAULT_PROBE_DEADLINE_MS,
+    )
+
+    /** Effective product-mode flags (FTR-03). Both fail closed by default. */
+    data class ProductModes(
+        val researchModeEnabled: Boolean = false,
+        val riskyPerformanceModeEnabled: Boolean = false,
+    )
+
+    /**
+     * Resolve governor capacities from the effective settings snapshot.
+     * Unknown/absent keys fall back to catalog defaults (fail closed, never 0).
+     */
+    fun governorCapacities(snapshot: SettingsSnapshot?): GovernorCapacities {
+        if (snapshot == null) return GovernorCapacities(
+            anonMemoryBytes = DEFAULT_ANON_MEMORY_CAP_BYTES,
+            fileCacheBytes = DEFAULT_FILE_CACHE_CAP_BYTES,
+            threads = DEFAULT_THREAD_CAP,
+            fileDescriptors = DEFAULT_FD_CAP,
+        )
+        return GovernorCapacities(
+            anonMemoryBytes = snapshot.values["resource.governorAnonMemoryCapBytes"]
+                ?.asLongOrNull()?.coerceAtLeast(1L) ?: DEFAULT_ANON_MEMORY_CAP_BYTES,
+            fileCacheBytes = snapshot.values["resource.governorFileCacheCapBytes"]
+                ?.asLongOrNull()?.coerceAtLeast(1L) ?: DEFAULT_FILE_CACHE_CAP_BYTES,
+            threads = snapshot.values["resource.governorThreadCap"]
+                ?.asLongOrNull()?.coerceAtLeast(1L) ?: DEFAULT_THREAD_CAP,
+            fileDescriptors = snapshot.values["resource.governorFdCap"]
+                ?.asLongOrNull()?.coerceAtLeast(1L) ?: DEFAULT_FD_CAP,
+            probeDeadlineMs = snapshot.values["resource.probeDeadlineMs"]
+                ?.asLongOrNull()?.coerceAtLeast(1L) ?: DEFAULT_PROBE_DEADLINE_MS,
+        )
+    }
+
+    /** Resolve product-mode flags; absent keys stay OFF (fail closed, FTR-03). */
+    fun productModes(snapshot: SettingsSnapshot?): ProductModes {
+        if (snapshot == null) return ProductModes()
+        return ProductModes(
+            researchModeEnabled =
+                snapshot.values["product.researchModeEnabled"]?.asBoolOrNull() ?: false,
+            riskyPerformanceModeEnabled =
+                snapshot.values["product.riskyPerformanceModeEnabled"]?.asBoolOrNull() ?: false,
+        )
+    }
 
     fun definition(key: String): SettingDefinition? = SETTINGS[key]
 

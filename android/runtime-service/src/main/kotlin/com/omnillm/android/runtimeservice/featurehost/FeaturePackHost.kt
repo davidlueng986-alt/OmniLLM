@@ -107,7 +107,7 @@ data class FeaturePackHost(
              * content-report store (production). Hermetic tests omit both and get
              * [com.omnillm.features.contentreport.ports.InMemoryContentReportStore].
              */
-            contentReportLedger: com.omnillm.data.persistence.ContentReportLedgerPorts? = null,
+            contentReportLedger: com.omnillm.core.ports.ledger.ContentReportLedgerPorts? = null,
             /**
              * When non-null, wires SQLite-backed tool proposal ledger (production).
              * Hermetic tests omit and get [InMemoryToolProposalLedger].
