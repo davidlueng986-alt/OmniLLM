@@ -448,13 +448,31 @@ private class OrchestratorPlaygroundInferencePort(
                 CancelPortResult(spec.requestId, CancelPhase.TERMINAL, "CANCELLED"),
             )
         }
+        // COR-12: phases advance ONLY on an actually-applied orchestrator cancel.
+        // When the orchestrator rejects cancel (STATE_CONFLICT during STREAMING —
+        // no in-stream cancel channel), report the conflict honestly and never
+        // climb the ladder toward a fabricated CANCELLED.
         when (val r = orchestrator.cancel(rid)) {
             is OmniResult.Err -> {
-                // Already terminal / not found — surface honestly.
                 if (r.error.code == com.omnillm.core.errors.generated.OmniErrorCode.NOT_FOUND) {
                     return OmniResult.err(r.error)
                 }
-                // Idempotent cancel on already-cancelled may still advance UI phases.
+                if (r.error.code == com.omnillm.core.errors.generated.OmniErrorCode.STATE_CONFLICT) {
+                    return OmniResult.err(
+                        OmniError.STATE_CONFLICT(
+                            message = "cancel not applied in current state: " +
+                                (r.error.message ?: r.error.code.code),
+                            details = mapOf(
+                                "requestId" to spec.requestId,
+                                "cause" to r.error.code.code,
+                                "phase" to (prior?.name ?: "none"),
+                            ),
+                        ),
+                    )
+                }
+                // Other errors (e.g. already terminal with different disposition):
+                // surface honestly without advancing the phase ladder.
+                return OmniResult.err(r.error)
             }
             is OmniResult.Ok -> Unit
         }
