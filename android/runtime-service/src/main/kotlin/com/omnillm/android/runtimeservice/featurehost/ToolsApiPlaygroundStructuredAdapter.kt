@@ -146,7 +146,14 @@ class ToolsApiPlaygroundStructuredAdapter(
     }
 }
 
-/** Process-local late binding for ToolsApi → playground structured adapter. */
+/**
+ * Process-local late binding for ToolsApi → playground structured adapter.
+ *
+ * ARC-04 documented debt: kept because toolsApi is constructed by
+ * FeaturePackHost.bootstrap AFTER WaveAWiring.wire() (bootstrap cycle —
+ * see featurehost/README.md Wave-A vs Wave-B). @Volatile + fail-closed
+ * (null ⇒ empty projection). Removal requires bootstrap reordering.
+ */
 class ToolsApiHolder {
     @Volatile
     var toolsApi: ToolsApi? = null

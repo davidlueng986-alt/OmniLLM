@@ -57,6 +57,14 @@ class BenchmarkDashboardMeasurementPort(
     }
 }
 
+/**
+ * Process-local late binding for BenchmarkApi → dashboard measurements.
+ *
+ * ARC-04 documented debt: kept because benchmarkApi is constructed by
+ * FeaturePackHost.bootstrap AFTER WaveAWiring.wire() (bootstrap cycle —
+ * see featurehost/README.md Wave-A vs Wave-B). @Volatile + fail-closed
+ * (null ⇒ empty projection). Removal requires bootstrap reordering.
+ */
 class BenchmarkApiHolder {
     @Volatile
     var benchmarkApi: BenchmarkApi? = null

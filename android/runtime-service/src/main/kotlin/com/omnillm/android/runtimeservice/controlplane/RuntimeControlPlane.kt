@@ -208,6 +208,14 @@ class RuntimeControlPlane private constructor(
      * Peer engines register as stub/UNKNOWN. Idempotent.
      * Never elevates qualification to SUPPORTED without evidence
      * ([EngineSelectionPolicy]).
+     *
+     * COR-14: this is the single synchronization point for engine-pack attach.
+     * It is safe to call concurrently from transport threads (HTTP handler /
+     * AIDL facades call it before probing): the double-checked
+     * `enginePacksRef` guard + `synchronized(this)` make it idempotent, and
+     * attach only happens once per plane (lifecycle-triggered on READY/DEGRADED).
+     * The residual transport-side call-site cleanup is tracked for the
+     * orchestrator (ADR-011); no further control-plane change is required.
      */
     fun ensureEnginePacksAttached(): EnginePackAttachment? {
         enginePacksRef.get()?.let { return it }
@@ -298,10 +306,30 @@ class RuntimeControlPlane private constructor(
         /** Whether the control plane is live in this process. */
         fun isAttached(): Boolean = attached.get() && instance.get() != null
 
+        /**
+         * Process-global service locator (ARC-05 documented debt).
+         *
+         * Kept **only** for the FGS/service bootstrap lifecycle: the plane is
+         * attached synchronously in [RuntimeForegroundService] start, which runs
+         * after bind/HTTP facades are constructed (they cannot receive the plane
+         * via constructor at onCreate time).
+         *
+         * New call sites MUST prefer constructor / method injection of the plane
+         * (or a provider lambda). Binder/HTTP facade conversions are tracked in
+         * ARC-05; WaveAWiring and the facades still route through this locator
+         * until the plane-bootstrap refactor lands.
+         */
+        @Deprecated(
+            message = "Prefer constructor injection of RuntimeControlPlane; locator is FGS-lifecycle only (ARC-05)",
+        )
         fun require(): RuntimeControlPlane =
             instance.get()
                 ?: error("RuntimeControlPlane not attached (must run in :runtime process)")
 
+        /** See [require]. Returns null when the plane is not attached. */
+        @Deprecated(
+            message = "Prefer constructor injection of RuntimeControlPlane; locator is FGS-lifecycle only (ARC-05)",
+        )
         fun get(): RuntimeControlPlane? = instance.get()
 
         /**
@@ -478,6 +506,9 @@ class RuntimeControlPlane private constructor(
                         // ARC-10: governor capacities follow the effective
                         // configuration catalog (defaults match historical values).
                         settings = { policy.settingsSnapshot() },
+                        // ARC-05: inject the plane's own registry instead of the
+                        // process-global locator.
+                        streamSessions = { streamSessions },
                     ),
                 )
 
