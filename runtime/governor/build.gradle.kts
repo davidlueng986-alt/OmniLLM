@@ -18,6 +18,9 @@ dependencies {
     api(project(":core:resource"))
     // OmniResult / catalog types (transitive via resource, declared for clarity).
     api(project(":core:canonical"))
+    // RESERVATION / ALLOCATION FSM definitions from specs/state-machines.yaml
+    // (ARC-03: governor transitions run through the generated StateMachines).
+    api(project(":core:state"))
     testImplementation(libs.junit)
 }
 

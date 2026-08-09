@@ -11,6 +11,10 @@ import com.omnillm.core.resource.OperatingConstraint
 import com.omnillm.core.resource.Reservation
 import com.omnillm.core.resource.ReservationId
 import com.omnillm.core.resource.ResourceArithmetic
+import com.omnillm.core.state.GuardEvaluator
+import com.omnillm.core.state.StateMachineDriver
+import com.omnillm.core.state.TransitionOutcome
+import com.omnillm.core.state.generated.StateMachines
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -187,9 +191,9 @@ class ResourceGovernor(
             )
         }
 
-        if (tracked.reservation.runtimeEpoch != runtimeEpoch ||
-            tracked.reservation.issuerBootId != issuerBootId
-        ) {
+        val epochValid = tracked.reservation.runtimeEpoch == runtimeEpoch &&
+            tracked.reservation.issuerBootId == issuerBootId
+        if (!epochValid) {
             return OmniResult.err(
                 OmniError.STATE_CONFLICT(
                     message = "reservation issuer boot/runtime epoch mismatch",
@@ -215,6 +219,32 @@ class ResourceGovernor(
             is OmniResult.Err -> return split
             is OmniResult.Ok -> split.value
         }
+
+        // ARC-03: run the catalog RESERVATION FSM (generated StateMachines).
+        // Guards are pre-evaluated above so error codes stay identical; the
+        // driver owns structural validity (state known / edge legal / terminal).
+        val guard = GuardEvaluator.of(
+            "issuerEpochValid" to epochValid,
+            "beforeDeadline" to (nowMonotonic <= tracked.reservation.deadlineMonotonic),
+            "vectorWithinReservation" to true,
+        )
+        val commitStep = reservationStep(tracked.state, ReservationFsm.EVENT_COMMIT, guard)
+            ?: return OmniResult.err(
+                OmniError.STATE_CONFLICT(
+                    message = "reservation COMMIT rejected by catalog FSM",
+                    details = mapOf("state" to tracked.state),
+                ),
+            )
+        val durableStep = reservationStep(
+            commitStep,
+            ReservationFsm.EVENT_CONVERSION_DURABLE,
+            GuardEvaluator.of("vectorWithinReservation" to true),
+        ) ?: return OmniResult.err(
+            OmniError.STATE_CONFLICT(
+                message = "reservation CONVERSION_DURABLE rejected by catalog FSM",
+                details = mapOf("state" to commitStep),
+            ),
+        )
 
         val nextLedger =
             ledger.convertReservation(
@@ -246,7 +276,7 @@ class ResourceGovernor(
             )
         reservations[reservationId.value] =
             tracked.copy(
-                state = ReservationFsm.COMMITTED,
+                state = durableStep,
                 remainingCharge = ResourceVector.ZERO,
                 convertedAllocationId = handleId,
             )
@@ -280,9 +310,9 @@ class ResourceGovernor(
             ReservationFsm.HELD,
             ReservationFsm.RELEASING,
             -> {
-                if (tracked.reservation.runtimeEpoch != runtimeEpoch ||
-                    tracked.reservation.issuerBootId != issuerBootId
-                ) {
+                val epochValid = tracked.reservation.runtimeEpoch == runtimeEpoch &&
+                    tracked.reservation.issuerBootId == issuerBootId
+                if (!epochValid) {
                     return OmniResult.err(
                         OmniError.STATE_CONFLICT(
                             message = "reservation issuer boot/runtime epoch mismatch",
@@ -290,13 +320,54 @@ class ResourceGovernor(
                         ),
                     )
                 }
-                // Optional: treat past deadline as EXPIRED path (same free credit).
-                val terminalState =
-                    if (nowMonotonic > tracked.reservation.deadlineMonotonic) {
-                        ReservationFsm.EXPIRED
-                    } else {
-                        ReservationFsm.RELEASED
+                // ARC-03: catalog RESERVATION FSM — deadline passed ⇒ EXPIRED
+                // (RES-005), otherwise RELEASE → RELEASING → RELEASE_BARRIER
+                // → RELEASED (RES-003 / RES-004). RELEASING completes directly
+                // via RELEASE_BARRIER (RELEASE has no edge from RELEASING).
+                val terminalState: String = when {
+                    tracked.state == ReservationFsm.RELEASING -> reservationStep(
+                        tracked.state,
+                        ReservationFsm.EVENT_RELEASE_BARRIER,
+                        GuardEvaluator.ALWAYS_TRUE,
+                    ) ?: return OmniResult.err(
+                        OmniError.STATE_CONFLICT(
+                            message = "reservation RELEASE_BARRIER rejected by catalog FSM",
+                            details = mapOf("state" to tracked.state),
+                        ),
+                    )
+                    nowMonotonic > tracked.reservation.deadlineMonotonic -> reservationStep(
+                        tracked.state,
+                        ReservationFsm.EVENT_DEADLINE_PASSED,
+                        GuardEvaluator.ALWAYS_TRUE,
+                    ) ?: return OmniResult.err(
+                        OmniError.STATE_CONFLICT(
+                            message = "reservation DEADLINE_PASSED rejected by catalog FSM",
+                            details = mapOf("state" to tracked.state),
+                        ),
+                    )
+                    else -> {
+                        val releasing = reservationStep(
+                            tracked.state,
+                            ReservationFsm.EVENT_RELEASE,
+                            GuardEvaluator.of("issuerEpochValid" to epochValid),
+                        ) ?: return OmniResult.err(
+                            OmniError.STATE_CONFLICT(
+                                message = "reservation RELEASE rejected by catalog FSM",
+                                details = mapOf("state" to tracked.state),
+                            ),
+                        )
+                        reservationStep(
+                            releasing,
+                            ReservationFsm.EVENT_RELEASE_BARRIER,
+                            GuardEvaluator.ALWAYS_TRUE,
+                        ) ?: return OmniResult.err(
+                            OmniError.STATE_CONFLICT(
+                                message = "reservation RELEASE_BARRIER rejected by catalog FSM",
+                                details = mapOf("state" to releasing),
+                            ),
+                        )
                     }
+                }
                 val charge = tracked.remainingCharge
                 if (charge != ResourceVector.ZERO) {
                     val released = ledger.releaseReservationCharge(charge)
@@ -380,8 +451,19 @@ class ResourceGovernor(
                         ),
                     )
                 AllocationFsm.ACTIVE -> {
+                    // ARC-03: catalog ALLOCATION FSM (ALL-001: ACTIVE --DRAIN_REQUESTED--> DRAINING).
+                    val next = allocationStep(
+                        tracked.state,
+                        AllocationFsm.EVENT_DRAIN_REQUESTED,
+                        GuardEvaluator.ALWAYS_TRUE,
+                    ) ?: return OmniResult.err(
+                        OmniError.STATE_CONFLICT(
+                            message = "allocation DRAIN_REQUESTED rejected by catalog FSM",
+                            details = mapOf("state" to tracked.state),
+                        ),
+                    )
                     allocations[allocationHandleId.value] =
-                        tracked.copy(state = AllocationFsm.DRAINING, ownerFenced = true)
+                        tracked.copy(state = next, ownerFenced = true)
                     return OmniResult.ok(Unit)
                 }
                 else ->
@@ -425,8 +507,20 @@ class ResourceGovernor(
                             ),
                         )
                     }
+                    // ARC-03: catalog ALLOCATION FSM (ALL-002: DRAINING
+                    // --OWNER_QUIESCENT--> RELEASING, guard ownerFenced).
+                    val next = allocationStep(
+                        tracked.state,
+                        AllocationFsm.EVENT_OWNER_QUIESCENT,
+                        GuardEvaluator.of("ownerFenced" to tracked.ownerFenced),
+                    ) ?: return OmniResult.err(
+                        OmniError.STATE_CONFLICT(
+                            message = "OWNER_QUIESCENT rejected by catalog FSM",
+                            details = mapOf("state" to tracked.state),
+                        ),
+                    )
                     allocations[allocationHandleId.value] =
-                        tracked.copy(state = AllocationFsm.RELEASING)
+                        tracked.copy(state = next)
                     return OmniResult.ok(Unit)
                 }
                 else ->
@@ -481,6 +575,19 @@ class ResourceGovernor(
             )
         }
 
+        // ARC-03: catalog ALLOCATION FSM (ALL-003: RELEASING
+        // --RELEASE_BARRIER--> RELEASED, guard nativeBarrierObserved).
+        val next = allocationStep(
+            tracked.state,
+            AllocationFsm.EVENT_RELEASE_BARRIER,
+            GuardEvaluator.of("nativeBarrierObserved" to nativeBarrierObserved),
+        ) ?: return OmniResult.err(
+            OmniError.STATE_CONFLICT(
+                message = "RELEASE_BARRIER rejected by catalog FSM",
+                details = mapOf("state" to tracked.state),
+            ),
+        )
+
         val credited = ledger.creditAllocationRelease(tracked.handle.resident)
         when (credited) {
             is OmniResult.Err -> return credited
@@ -488,7 +595,7 @@ class ResourceGovernor(
         }
         allocations[allocationHandleId.value] =
             tracked.copy(
-                state = AllocationFsm.RELEASED,
+                state = next,
                 nativeBarrierObserved = true,
             )
         return OmniResult.ok(Unit)
@@ -512,6 +619,12 @@ class ResourceGovernor(
 
     private fun expireHeldLocked(tracked: TrackedReservation) {
         if (tracked.state != ReservationFsm.HELD) return
+        // ARC-03: catalog RESERVATION FSM (RES-005: HELD --DEADLINE_PASSED--> EXPIRED).
+        val next = reservationStep(
+            tracked.state,
+            ReservationFsm.EVENT_DEADLINE_PASSED,
+            GuardEvaluator.ALWAYS_TRUE,
+        ) ?: return
         val charge = tracked.remainingCharge
         if (charge != ResourceVector.ZERO) {
             when (val released = ledger.releaseReservationCharge(charge)) {
@@ -524,10 +637,52 @@ class ResourceGovernor(
         }
         reservations[tracked.reservation.reservationId.value] =
             tracked.copy(
-                state = ReservationFsm.EXPIRED,
+                state = next,
                 remainingCharge = ResourceVector.ZERO,
             )
     }
+
+    /**
+     * ARC-03: run one catalog RESERVATION step via the generated StateMachines.
+     * Returns the new state on acceptance, null when rejected.
+     */
+    private fun reservationStep(
+        from: String,
+        event: String,
+        guards: GuardEvaluator,
+    ): String? =
+        when (
+            val outcome = StateMachineDriver.transition(
+                StateMachines.RESERVATION,
+                from,
+                event,
+                guards,
+            )
+        ) {
+            is TransitionOutcome.Accepted -> outcome.to
+            is TransitionOutcome.Rejected -> null
+        }
+
+    /**
+     * ARC-03: run one catalog ALLOCATION step via the generated StateMachines.
+     * Returns the new state on acceptance, null when rejected.
+     */
+    private fun allocationStep(
+        from: String,
+        event: String,
+        guards: GuardEvaluator,
+    ): String? =
+        when (
+            val outcome = StateMachineDriver.transition(
+                StateMachines.ALLOCATION,
+                from,
+                event,
+                guards,
+            )
+        ) {
+            is TransitionOutcome.Accepted -> outcome.to
+            is TransitionOutcome.Rejected -> null
+        }
 
     private data class TrackedReservation(
         val reservation: Reservation,

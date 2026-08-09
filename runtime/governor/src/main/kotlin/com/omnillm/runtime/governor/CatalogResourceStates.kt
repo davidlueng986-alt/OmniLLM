@@ -1,8 +1,14 @@
 package com.omnillm.runtime.governor
 
+import com.omnillm.core.state.generated.StateMachines
+
 /**
  * Catalog state / event labels for RESERVATION and ALLOCATION FSMs
  * (`specs/state-machines.yaml`). Do not invent additional labels.
+ *
+ * ARC-03: transitions are executed through the generated [StateMachines];
+ * these label objects are the human-readable constants mirrored from the
+ * catalog. Conformance is pinned by GovernorStateMachineConformanceTest.
  */
 object ReservationFsm {
     const val MACHINE_ID: String = "RESERVATION"
@@ -21,6 +27,12 @@ object ReservationFsm {
     const val EVENT_DEADLINE_PASSED: String = "DEADLINE_PASSED"
 
     val TERMINAL: Set<String> = setOf(COMMITTED, RELEASED, EXPIRED)
+
+    /** All catalog states for the machine (conformance mirror). */
+    fun states(): Set<String> = StateMachines.RESERVATION.states
+
+    /** All catalog event labels for the machine (conformance mirror). */
+    fun events(): Set<String> = StateMachines.RESERVATION.transitions.map { it.event }.toSet()
 }
 
 /**
@@ -39,4 +51,10 @@ object AllocationFsm {
     const val EVENT_RELEASE_BARRIER: String = "RELEASE_BARRIER"
 
     val TERMINAL: Set<String> = setOf(RELEASED)
+
+    /** All catalog states for the machine (conformance mirror). */
+    fun states(): Set<String> = StateMachines.ALLOCATION.states
+
+    /** All catalog event labels for the machine (conformance mirror). */
+    fun events(): Set<String> = StateMachines.ALLOCATION.transitions.map { it.event }.toSet()
 }
