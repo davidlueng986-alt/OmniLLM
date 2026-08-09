@@ -1,4 +1,4 @@
-# OmniLLM Engine Pack — mllm UPSTREAM.lock (template)
+# OmniLLM Engine Pack — mllm UPSTREAM.lock
 # Authority: ENGINE-MLLM §1, ENGINE-STANDARD §4
 #
 # Rules:
@@ -10,50 +10,53 @@
 # - Updating any lock field ⇒ new EngineBuildId; old evidence does not auto-carry.
 # - Design status BASELINE ≠ runtime SUPPORTED (ENGINE-QUALIFICATION-STATUS).
 #
-# Status of this file in-tree: NOT_LOCKED (template placeholders).
-# Product lock state: NOT_QUALIFIED_UNTIL_UPSTREAM_LOCK
-#
-# Human pin checklist (fill every empty field before qualification):
-#   [ ] upstream.tag and/or upstream.commit (full SHA preferred)
-#   [ ] upstream.sourceDigest = SHA-256 of git archive / release tarball
-#   [ ] upstream.patchDigest present (empty string OK if no OmniLLM patches)
-#   [ ] upstream.observedAt = ISO-8601 UTC when digests were captured
-#   [ ] license.spdx + license.licenseDigest (+ notice / dependency report)
-#   [ ] toolchain.goVersion (exact; required for mllm_server.aar)
-#   [ ] toolchain.ndkVersion (match product ANDROID-NATIVE lock)
-#   [ ] toolchain.toolchainDigest = fingerprint(Go+NDK+host+flags)
-#   [ ] build.abis non-empty (e.g. arm64-v8a, x86_64)
-#   [ ] build.pageSizeEvidence pointer (16 KB packaging)
-#   [ ] artifact.engineBuildId (opaque new id for this pin)
-#   [ ] artifact.artifactDigest = SHA-256 of mllm_server.aar + jni
-#   [ ] artifact.serverProtocolDigest = SHA-256 of frozen private-channel schema
-#       (see PrivateChannelProtocol.protocolCatalogFingerprint())
-#   [ ] testedProfile.backends / formats only after measured evidence packs
+# Pin note (2026-08-09):
+# - Upstream runtime: UbiquitousLearning/mllm tag 2.0.0 /
+#   commit c67485a3f1e19e39654a88011aaa0a007bd6446e (2026-02-16).
+# - Android distribution: UbiquitousLearning/mllm-chat (Android demo repo)
+#   commit 6e18a4cbc8cd77a1e86bc261622169006fb258c6 — prebuilt `mllm_server.aar`
+#   (Go in-app server, GoMobile binding `gomllm.Gomllm.startServer` +
+#   jni/arm64-v8a/libgojni.so) tracked at engines/mllm/libs/mllm_server.aar.
+# - Native CPU runtime libs (libMllmRT.so, libMllmCPUBackend.so,
+#   libMllmSdkC.so, libomp.so) ship only as release asset jniLibs.zip (v2.0);
+#   fetched at build time (engines/mllm/build.gradle.kts) and verified against
+#   the zip SHA-256 below. NOT vendored: libMllmRT.so (146 MB) exceeds GitHub's
+#   100 MB per-file limit.
+# - LOCKED 2026-08-09: sourceDigest = SHA-256 of `git archive --format=tar 2.0.0`;
+#   toolchainDigest = SHA-256 of the recorded toolchain identifiers
+#   (ndk=28.2.13676358|cmake=3.22.1|go=1.24.11|host=windows|arch=x86_64|stl=
+#   c++_shared|std=c++17|flags=-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON);
+#   goVersion = upstream mllm-cli/go.mod toolchain directive (1.24.11);
+#   serverProtocolDigest = SHA-256 of PrivateChannelProtocol catalog fingerprint.
+# - 16 KB page evidence: CPU runtime .so + libgojni.so PASS the repo ELF
+#   LOAD-segment alignment check (16384). QNN NPU libs in the same release are
+#   4 KB only → intentionally NOT packaged; NPU stays UNKNOWN/unsupported.
+# - Qualification cells remain UNQUALIFIED until device evidence; a complete
+#   lock is a supply-chain requirement, not a SUPPORTED claim.
 
 schemaVersion: 1
 engineId: mllm
-lockState: NOT_LOCKED
+lockState: LOCKED
 
 upstream:
   # Official repository (discovery / license source) — ENGINE-MLLM §1
   repository: "https://github.com/UbiquitousLearning/mllm"
-  # Exact tag and/or full commit SHA (both preferred when available)
-  tag: ""
-  commit: ""
-  # SHA-256 of the pinned source tree (tarball or git archive)
-  sourceDigest: ""
-  # SHA-256 of OmniLLM patch set applied on top of upstream (empty if none)
+  tag: "2.0.0"
+  commit: "c67485a3f1e19e39654a88011aaa0a007bd6446e"
+  # SHA-256 of `git archive --format=tar 2.0.0` — captured 2026-08-09
+  sourceDigest: "00EA95AED7E3E376FA3EE78A2C34BEA446BE70506D5DA0974CFD7D1DE9739FC6"
+  # SHA-256 of OmniLLM patch set; empty string = no patches (field present)
   patchDigest: ""
-  # When the lock fields above were observed (ISO-8601 UTC). Empty until locked.
-  observedAt: ""
+  # When the lock pin fields above were observed (ISO-8601 UTC)
+  observedAt: "2026-08-09T00:00:00Z"
 
 license:
-  # SPDX or short name recorded at qualification time (capture from pinned tree)
-  spdx: ""
+  # SPDX recorded for upstream
+  spdx: "MIT"
   # Path relative to pinned source for LICENSE / NOTICE capture
-  licensePath: ""
-  # SHA-256 of license bytes captured at lock time
-  licenseDigest: ""
+  licensePath: "LICENSE"
+  # SHA-256 of LICENSE bytes at pin (tag 2.0.0 tree) — captured 2026-08-09
+  licenseDigest: "3E4D6C4374685BC48E96812FCACEB3E907F262E4EC9E1610D1DDCC6C26B314B0"
   # Optional notice / third-party / Go module report digests
   noticeDigest: ""
   dependencyReportDigest: ""
@@ -61,37 +64,48 @@ license:
 toolchain:
   # Must match product ANDROID-NATIVE / platform-policy locks when building for Android
   ndkVersion: "28.2.13676358"
-  # Go toolchain version used to build mllm_server.aar (required for this family)
-  goVersion: ""
-  cmakeVersion: ""
-  # Opaque digest of the full toolchain fingerprint (Go+NDK+host+flags template)
-  toolchainDigest: ""
-  hostOs: ""
-  hostArch: ""
+  # Upstream mllm-cli go.mod toolchain directive (the AAR is upstream-prebuilt)
+  goVersion: "1.24.11"
+  cmakeVersion: "3.22.1"
+  # SHA-256 of the recorded toolchain fingerprint
+  # (ndk+cmake+go+host+stl+std+buildFlags subset) — captured 2026-08-09
+  toolchainDigest: "8C7146BF0B750F430A32FE79EB95FEC829EBC1CF0DAF7332AFCCAEB6638FC201"
+  hostOs: "windows"
+  hostArch: "x86_64"
 
 build:
-  # Canonical build flag set for this EngineBuildId
-  buildFlags: ""
-  # ABIs included in this build (Android: arm64-v8a, x86_64, …)
-  abis: []
-  # Page-size / 16 KB packaging evidence pointer
-  pageSizeEvidence: ""
+  # Canonical build flag set for this EngineBuildId (CPU path; QNN excluded)
+  buildFlags: "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON -DANDROID_STL=c++_shared -std=c++17"
+  # ABIs packaged by upstream release v2.0 (arm64-only prebuilt; x86_64 unsupported upstream)
+  abis: ["arm64-v8a"]
+  # 16 KB page-size / packaging evidence pointer — upstream CPU runtime libs
+  # (libMllmRT.so, libMllmCPUBackend.so, libMllmSdkC.so, libomp.so) and
+  # libgojni.so PASS tools/ci/check_elf_16kb_alignment.py (min-align 16384,
+  # checked 2026-08-09). QNN NPU libs in the same zip FAIL (p_align=4096) and
+  # are therefore NOT packaged — NPU remains UNKNOWN/unsupported-by-default.
+  pageSizeEvidence: "tools/ci/check_elf_16kb_alignment.py on upstream v2.0 artifacts (CPU PASS, QNN FAIL-excluded)"
   features:
     # Server lifecycle owned by Adapter; never expose external Gateway binding
     embeddedServer: true
-    # Prefer private IPC / UDS; localhost TCP only with isolation + credential
+    # Loopback-only private channel (127.0.0.1:8080 fixed upstream) + credential
     privateChannel: true
-    # Accelerator backends unknown until cell evidence
+    # Accelerator backends unknown until cell evidence; QNN not 16KB-ready
     npu: false
     gpu: false
 
 artifact:
   # EngineBuildId string published with this lock (opaque; not a native pointer)
-  engineBuildId: ""
-  # SHA-256 of packaged AAR / native artifact(s) (mllm_server.aar + jni)
-  artifactDigest: ""
-  # SHA-256 of frozen private-channel RPC schema (PrivateChannelProtocol catalog)
-  serverProtocolDigest: ""
+  engineBuildId: "mllm-2.0.0-gomllm-aar-arm64"
+  # SHA-256 of packaged native artifact(s):
+  #   artifactDigest  = SHA-256 of the released jniLibs.zip (v2.0) — the native
+  #     CPU runtime set this build consumes (verified at build time).
+  #   AAR digest      = engines/mllm/libs/mllm_server.aar =
+  #     5159068241D7F9A0AAFA28CB8FBAF4C97DD3677825D584A0F402AF1571A2C0DD
+  #   sources jar     = mllm_server-sources.jar =
+  #     C6882233122E4C24A2C03655F3E994834644EBA2AFB8E581024650CCE69718AB
+  artifactDigest: "E239C3202FE1B9F4172B1CBD8521619046A2243D93860B01101E9E10C8F87B13"
+  # SHA-256 of frozen private-channel schema (PrivateChannelProtocol catalog)
+  serverProtocolDigest: "DE9517937B70EAEFE19BFD197AA08E3E2A31C7862C77EA6CC20631B41EC4D4FB"
   symbolIndexDigest: ""
   # Optional model format / package identity digest once pinned
   modelFormatDigest: ""
@@ -99,15 +113,19 @@ artifact:
 testedProfile:
   # Labels only — evidence lives in EngineRegistry cells, not this lock alone
   platform: "android"
-  backends: []
-  formats: []
+  backends: ["cpu"]
+  formats: ["mllm"]
   # Qualification profile id once defined; empty until first evidence pack
   profileId: ""
 
 notes:
-  integrationShape: "Device-local client-server via Go mllm_server.aar; Adapter owns lifecycle, private channel, runtime credential, canonical translation"
-  placementHint: "Server/native inference in independent worker; trusted same-UID crash-contained; untrusted accelerated → different-UID companion (ADR-007)"
+  integrationShape: "Device-local client-server via upstream Go mllm_server.aar (gomllm.Gomllm.startServer) + OpenAI-compatible HTTP/SSE on 127.0.0.1:8080; Adapter owns lifecycle, private channel, runtime credential, canonical translation"
+  androidDistribution: "UbiquitousLearning/mllm-chat commit 6e18a4cbc8cd77a1e86bc261622169006fb258c6 (app/libs/mllm_server.aar) + release v2.0 jniLibs.zip"
+  jniLibsFetch: "engines/mllm/build.gradle.kts task fetchMllmJniLibs downloads the pinned release zip and verifies SHA-256 (fail closed); CPU libs only"
+  upstreamLimitations: "Single chat-model slot per process (server start = model load); no stop API; no unload API; no embedding API; no server-side auth (credential is adapter-enforced); server binds fixed 127.0.0.1:8080; prompt content resolution from canonicalInputDigest is control-plane Stage-5 work"
+  placementHint: "Go server + native inference in independent worker; trusted same-UID crash-contained; untrusted accelerated → different-UID companion (ADR-007)"
   networkBoundary: "Embedded server must not bind LAN; no CORS wildcard; no unauthenticated management; Host alone is insufficient"
-  failClosed: "Incomplete lock ⇒ Registry exposure UNKNOWN; dry-load never elevates trust; unproven ops ⇒ CAPABILITY_UNKNOWN; missing AAR never loads as success"
+  failClosed: "Incomplete lock ⇒ Registry exposure UNKNOWN; dry-load never elevates trust; unproven ops ⇒ CAPABILITY_UNKNOWN; missing AAR/jniLibs never loads as success"
   protocolId: "omnillm.mllm.private-channel"
   protocolVersion: "1"
+  qualificationStatus: "UNQUALIFIED — do not mark QUALIFIED_WITH_ENVELOPE / SUPPORTED without device evidence"

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Engine pack: mllm — Android library module manifest.
+  The engine module itself declares no components/activities; it only packages
+  the upstream Go in-app server AAR + jniLibs for consumer modules
+  (:android:runtime-service). INTERNET is required for the loopback-only
+  private channel to the embedded server (127.0.0.1:8080) — never a LAN bind.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

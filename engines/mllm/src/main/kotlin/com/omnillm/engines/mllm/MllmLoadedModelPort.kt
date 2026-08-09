@@ -299,6 +299,11 @@ class MllmLoadedModelPort(
             operationToken = op.operationId,
             canonicalInputDigest = prepared.canonicalInputDigest.hex,
             maxTokens = 16,
+            // Real backend requires the resolved prompt content (the upstream
+            // server cannot synthesize from a digest). The control plane must
+            // resolve canonicalInputDigest → content (Stage-5 work item); the
+            // backend fails closed with INVALID_ARGUMENT until then.
+            promptUtf8 = null,
         )
         val genResult = engine.server.generate(
             session = session.serverToken,

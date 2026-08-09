@@ -77,6 +77,9 @@ class MllmEngine(
     private val commits = ConcurrentHashMap<String, CommitRecord>()
     private val loaded = ConcurrentHashMap<String, BoundLoadedModel>()
 
+    /** Captured at planLoad for commitLoad — not durable domain state (sideband only). */
+    private val pendingLoads = ConcurrentHashMap<String, PendingLoad>()
+
     override suspend fun describe(device: DeviceDescriptor): OmniResult<EngineDescriptor> {
         // Backends/formats empty or design-candidate only until locked evidence.
         val backends = lock.testedBackends.ifEmpty { listOf("cpu") }
@@ -208,6 +211,11 @@ class MllmEngine(
         val dig = digestOf(
             "load|${input.requestId.value}|${input.installationId.value}|${input.loadKey.backend}|$n",
         )
+        // Sideband only — no weight open / DB write (ADR-002).
+        pendingLoads[PlanId.parse("mllm-load-plan-$n").value] = PendingLoad(
+            storageRootKey = input.storageRootKey,
+            resolvedModelPath = input.resolvedModelPath,
+        )
         return OmniResult.ok(
             LoadPlan(
                 planId = PlanId.parse("mllm-load-plan-$n"),
@@ -284,11 +292,13 @@ class MllmEngine(
             return err
         }
 
+        val pending = pendingLoads.remove(plan.planId.value)
         val loadReq = ServerLoadRequest(
-            storageRootKey = "broker:${plan.installationId.value}",
+            storageRootKey = pending?.storageRootKey ?: "broker:${plan.installationId.value}",
             installationKey = plan.installationId.value,
             backend = plan.loadKey.backend,
             privilegedLoadTicketId = commit.privilegedLoadTicketId,
+            resolvedModelPath = pending?.resolvedModelPath,
         )
 
         when (val nativeLoad = server.loadModel(loadReq)) {
@@ -427,6 +437,11 @@ class MllmEngine(
         val payloadDigest: String,
         val result: OmniResult<*>,
         val loadedModelId: LoadedModelId?,
+    )
+
+    internal data class PendingLoad(
+        val storageRootKey: String,
+        val resolvedModelPath: String?,
     )
 
     data class BoundLoadedModel(

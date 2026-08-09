@@ -7,13 +7,21 @@ import com.omnillm.engines.api.EngineRegistry
 import com.omnillm.engines.mllm.lock.UpstreamLock
 import com.omnillm.engines.mllm.lock.UpstreamLockLoader
 import com.omnillm.engines.mllm.qualification.QualificationCells
+import com.omnillm.engines.mllm.server.GomllmServerBridge
+import com.omnillm.engines.mllm.server.MllmServerBackend
+import com.omnillm.engines.mllm.server.OkHttpMllmTransport
 import com.omnillm.engines.mllm.server.ServerBackend
 import com.omnillm.engines.mllm.server.StubServerBackend
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 /**
  * Module `:engines:mllm` — Engine Pack (ENGINE-MLLM).
  *
- * Integration shape: device-local client-server / Go `mllm_server.aar` adapter.
+ * Integration shape: device-local client-server via the upstream Go
+ * `mllm_server.aar` (UbiquitousLearning/mllm v2.0.0 / mllm-chat v2.0.0).
+ * [MllmServerBackend] starts the Go server (`gomllm.Gomllm.startServer`) and
+ * speaks its OpenAI-compatible HTTP/SSE protocol on 127.0.0.1:8080.
  * Embedded server is private; Adapter owns lifecycle, private channel, runtime
  * credential, and canonical translation (ENGINE-MLLM §2).
  *
@@ -30,7 +38,7 @@ object MllmModule {
     const val MODULE_PATH: String = ":engines:mllm"
     const val ENGINE_ID: String = "mllm"
 
-    /** Placeholder build id until a complete lock produces a real artifact digest. */
+    /** Build id until a complete lock produces a real artifact digest. */
     const val DEFAULT_ENGINE_BUILD_ID: String = "mllm-not-locked"
 
     const val DESIGN_STATUS: String = "BASELINE"
@@ -41,23 +49,43 @@ object MllmModule {
         EngineBuildId.parse(DEFAULT_ENGINE_BUILD_ID)
 
     /**
-     * Factory for the Kotlin adapter. Default [ServerBackend] is [StubServerBackend]
-     * with exploratory dry-run **off** (unproven ops → CAPABILITY_UNKNOWN).
+     * Production [ServerBackend]: real mllm Go in-app server bridge +
+     * loopback HTTP/SSE transport. Constructing it is host-safe; the GoMobile
+     * binding loads only on Android arm64 at first use.
+     */
+    fun createRealServer(): MllmServerBackend =
+        MllmServerBackend(
+            bridge = GomllmServerBridge,
+            transport = OkHttpMllmTransport(sharedOkHttpClient()),
+        )
+
+    /** Shared loopback transport client (connection pool across operations). */
+    internal fun sharedOkHttpClient(): OkHttpClient =
+        SharedHttpClientHolder.client
+
+    private object SharedHttpClientHolder {
+        val client: OkHttpClient = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.MILLISECONDS) // SSE stream: no read deadline
+            .build()
+    }
+
+    /**
+     * Factory for the Kotlin adapter. Default [ServerBackend] is the real
+     * [MllmServerBackend]; [StubServerBackend] remains available for host unit
+     * tests only (never a silent production fallback — INV-018 style).
+     *
+     * [allowUnprovenExecution] defaults to lock completeness: with a complete
+     * supply-chain lock the real execute paths run (qualification cells still
+     * stay UNQUALIFIED — Registry exposure is a separate axis); with an
+     * incomplete lock everything fails closed CAPABILITY_UNKNOWN.
      */
     fun createEngine(
         lock: UpstreamLock = UpstreamLockLoader.loadFromClasspathOrTemplate(),
-        server: ServerBackend = StubServerBackend(
-            lockComplete = lock.isComplete(),
-            exploratoryDryRun = false,
-        ),
+        server: ServerBackend = createRealServer(),
         engineBuildId: EngineBuildId = lock.resolvedEngineBuildId()
             ?: defaultEngineBuildId(),
-        /**
-         * When false (default), commit/execute paths map unproven operations to
-         * CAPABILITY_UNKNOWN even if a backend would otherwise succeed.
-         * Tests that need dry-run plumbing set this true **and** use exploratory stub.
-         */
-        allowUnprovenExecution: Boolean = false,
+        allowUnprovenExecution: Boolean = lock.isComplete(),
     ): MllmEngine =
         MllmEngine(
             engineBuildId = engineBuildId,

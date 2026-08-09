@@ -143,6 +143,13 @@ data class ServerLoadRequest(
     val installationKey: String,
     val backend: String,
     val privilegedLoadTicketId: String,
+    /**
+     * Runtime-resolved read-only model directory after privileged re-verify
+     * (INV-010). The upstream Go server loads a model directory at startup
+     * (`Gomllm.startServer(modelPath, ...)`), so this is the only real load input.
+     * Null ⇒ fail closed (MODEL_OPEN_FAILED) — no silent synthetic load.
+     */
+    val resolvedModelPath: String? = null,
     val attributes: Map<String, String> = emptyMap(),
 ) {
     init {
@@ -167,6 +174,13 @@ data class ServerGenerateRequest(
     val operationToken: String,
     val canonicalInputDigest: String,
     val maxTokens: Int = 16,
+    /**
+     * Optional UTF-8 prompt body for the OpenAI-compatible chat request. The
+     * upstream server requires actual message content; when null the backend
+     * fails closed with INVALID_ARGUMENT (never fabricate from the digest).
+     * The control plane resolves canonicalInputDigest → content (Stage-5 work).
+     */
+    val promptUtf8: String? = null,
     val attributes: Map<String, String> = emptyMap(),
 ) {
     init {

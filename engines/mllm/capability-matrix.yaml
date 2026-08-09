@@ -2,7 +2,9 @@
 # Runtime exposure is projected by EngineRegistry from qualification cells.
 # Design baseline ≠ SUPPORTED. Default runtime capability: UNKNOWN.
 #
-# Integration family: device-local client-server / Go mllm_server.aar
+# Integration family: device-local client-server via upstream Go mllm_server.aar
+# (gomllm.Gomllm.startServer) + OpenAI-compatible HTTP/SSE on 127.0.0.1:8080.
+# UPSTREAM.lock: LOCKED (mllm 2.0.0 + mllm-chat v2.0 artifacts, 2026-08-09).
 # Cancellation modes: COOPERATIVE | INTERRUPTIBLE | WORKER_KILL_ONLY | NOT_SUPPORTED | UNKNOWN
 # Cell status: UNQUALIFIED | STATIC_REVIEWED | SPIKE_REQUIRED | QUALIFIED_WITH_ENVELOPE | SUSPENDED
 #
@@ -11,27 +13,33 @@
 schemaVersion: 1
 engineId: mllm
 designStatus: BASELINE
-upstreamLockStatus: NOT_LOCKED
+upstreamLockStatus: LOCKED
 qualificationStatus: UNQUALIFIED
 registryExposure: UNKNOWN
 runtimeCapabilityDefault: UNKNOWN
 
-# Formats/backends remain empty-candidate until pinned server/API + device evidence.
+# Formats/backends remain UNKNOWN runtime until pinned server/API + device evidence.
+# Upstream model format is `.mllm` (converted from HF via mllm-convertor; GGUF
+# data types exist but the Android Go server path is built around .mllm dirs).
 formats:
-  - id: upstream-pinned
+  - id: mllm
+    design: upstream_native_format
+    runtimeDefault: UNKNOWN
+    notes: "Model directory with .mllm weights + tokenizer/config; server registers the session under the directory name (e.g. qwen3)"
+  - id: gguf
     design: candidate_after_lock
     runtimeDefault: UNKNOWN
-    notes: "Package identity = server build + model files + tokenizer/template/config + backend target"
+    notes: "GGUF quantization types exist in upstream data types; not the Android server packaging path — no evidence"
 
 backends:
   - id: cpu
-    design: portable_candidate
+    design: real_artifact_packaged
     runtimeDefault: UNKNOWN
-    notes: "Mobile CPU path candidate; requires measured resource envelope including Go/server overhead"
+    notes: "Upstream CPU runtime packaged (libMllmRT.so, libMllmCPUBackend.so, libMllmSdkC.so, libomp.so, arm64-v8a); 16 KB aligned; envelope requires Go server fixed overhead measurement"
   - id: npu
     design: accelerator_candidate
     runtimeDefault: UNKNOWN
-    notes: "Per backend/device/driver/model/workload cell; never inherit CPU evidence"
+    notes: "QNN libs NOT packaged: upstream v2.0 QNN .so are 4 KB page aligned only (16 KB gate FAIL) — no NPU claim"
   - id: gpu
     design: accelerator_candidate
     runtimeDefault: UNKNOWN
@@ -39,49 +47,55 @@ backends:
 
 operations:
   - id: PROBE
-    design: map_to_server_rpc_when_locked
+    design: server_reachability_probe
     runtimeDefault: UNKNOWN
+    notes: "Real: loopback TCP reachability + started-state after Gomllm.startServer"
   - id: LOAD
-    design: map_to_server_rpc_when_locked
+    design: server_start_is_model_load
     runtimeDefault: UNKNOWN
+    notes: "Real: Gomllm.startServer(modelPath,...) — single-model slot per process; resolvedModelPath required (INV-010 broker)"
   - id: PLAN_INFERENCE
     design: conservative_envelope_if_no_separate_plan
     runtimeDefault: UNKNOWN
-    notes: "If server has no separate plan, Adapter uses conservative envelope; plan must not mutate"
+    notes: "Server has no separate plan; Adapter uses conservative envelope; plan must not mutate"
   - id: COMMIT_INFERENCE
-    design: map_to_server_rpc_when_locked
+    design: session_create_and_journal
     runtimeDefault: UNKNOWN
   - id: START
     design: map_to_server_rpc_when_locked
     runtimeDefault: UNKNOWN
   - id: GENERATE
-    design: map_to_server_rpc_when_locked
+    design: openai_chat_completions_sse
     runtimeDefault: UNKNOWN
+    notes: "Real: POST /v1/chat/completions (stream=true) on 127.0.0.1:8080; SSE delta.content → canonical deltas; promptUtf8 resolution from digest is control-plane Stage-5 work"
   - id: EMBED
     design: unknown_until_api_evidence
     runtimeDefault: UNKNOWN
-    notes: "Requires tokenizer/pooling API evidence"
+    notes: "Upstream Go server exposes no embedding API — UNSUPPORTED_OPERATION, not a stub"
   - id: CLOSE
-    design: map_to_server_rpc_when_locked
+    design: local_handle_release
     runtimeDefault: UNKNOWN
+    notes: "Server has no close RPC; server-side KV session persists until process death (honest noop note)"
   - id: UNLOAD
-    design: map_to_server_rpc_when_locked
+    design: unsupported_by_upstream
     runtimeDefault: UNKNOWN
+    notes: "Upstream has no unload API — UNSUPPORTED_OPERATION; model stays resident until process death"
 
 # Phase cancellation — design expectation vs measured mode (ENGINE-MLLM §6).
-# HTTP socket close does NOT prove native/server stop.
+# HTTP socket close breaks the server's r.Context() poll loop but does NOT
+# prove native decode halt (measurement required before COOPERATIVE claim).
 # UNKNOWN cancellation ⇒ full lifecycle on killable worker only.
 phaseCancellation:
   - phase: PROBE
     expectedMode: COOPERATIVE
     measuredMode: UNKNOWN
     maxNonPreemptibleMs: null
-    notes: "Bounded server/backend presence check; no blind model load in privileged process"
+    notes: "Bounded reachability check; no blind model load in privileged process"
   - phase: LOAD
     expectedMode: WORKER_KILL_ONLY
     measuredMode: UNKNOWN
     maxNonPreemptibleMs: null
-    notes: "Server start + model load; measure non-preemptible window including Go overhead"
+    notes: "Gomllm.startServer = process start + model load; measure non-preemptible window including Go overhead"
   - phase: CREATE_SESSION
     expectedMode: COOPERATIVE
     measuredMode: UNKNOWN
@@ -90,12 +104,12 @@ phaseCancellation:
     expectedMode: COOPERATIVE
     measuredMode: UNKNOWN
     maxNonPreemptibleMs: null
-    notes: "Plan has no KV/server mutation (ADR-002); if server forces mutation, cannot claim core contract"
+    notes: "Plan has no KV/server mutation (ADR-002)"
   - phase: COMMIT
     expectedMode: COOPERATIVE
     measuredMode: UNKNOWN
     maxNonPreemptibleMs: null
-    notes: "Server-side mutation bound to CommitId; must be queryable on reply loss"
+    notes: "Server-side mutation bound to CommitId; local journal queryable on reply loss (no server commit query)"
   - phase: START
     expectedMode: INTERRUPTIBLE
     measuredMode: UNKNOWN
@@ -104,7 +118,7 @@ phaseCancellation:
     expectedMode: COOPERATIVE
     measuredMode: UNKNOWN
     maxNonPreemptibleMs: null
-    notes: "Cancellation needs upstream RPC ack or worker termination"
+    notes: "Cancellation = connection close (server breaks r.Context() poll); no cancel RPC upstream; native halt unproven"
   - phase: CLOSE
     expectedMode: WORKER_KILL_ONLY
     measuredMode: UNKNOWN
@@ -114,10 +128,12 @@ phaseCancellation:
     expectedMode: WORKER_KILL_ONLY
     measuredMode: UNKNOWN
     maxNonPreemptibleMs: null
+    notes: "No unload API — process death is the only reclaim"
 
 prefixCapabilities:
   - id: EXACT_SAME_SESSION
     runtimeDefault: UNKNOWN
+    notes: "Server session_id exists; exact token/KV proof required"
   - id: EXACT_CROSS_SESSION
     runtimeDefault: UNKNOWN
     notes: "Do not publish without exact token/KV proof from server"
@@ -235,17 +251,22 @@ cells:
     evidenceStatus: NOT_EXECUTED
     cancellationMode: UNKNOWN
 
-# Known limitations / unsupported-by-default (ENGINE-MLLM §9)
+# Known limitations / unsupported-by-default (ENGINE-MLLM §9, upstream-verified)
 unsupportedByDefault:
-  - "Exactly-once semantics when server protocol lacks idempotent commit/query"
+  - "Exactly-once semantics when server protocol lacks idempotent commit/query (no server-side commit ledger)"
   - "Localhost TCP without private channel + strong runtime credential (Host/CORS alone insufficient)"
+  - "Server-side authentication: upstream Go server has none — credential is adapter-enforced at the boundary"
+  - "Unload / shutdown of the Go server: upstream exposes no stop/unload API; process death is the only reclaim"
+  - "Embedding: upstream Go server exposes no embedding API"
+  - "Multimodal / OCR: DeepSeek-OCR path exists upstream but is single-turn + image-mandatory; unsupported-by-default here"
   - "Tokenizer / KV / prefix EXACT_CROSS_SESSION / TRUNCATE / FORK without server proof"
-  - "Embedding / structured / multimodal without API + cell evidence"
-  - "Go/server fixed overhead and shutdown latency assumed from JNI numbers"
+  - "QNN NPU path: upstream v2.0 QNN libs are 4 KB page aligned only (16 KB gate FAIL) — not packaged"
+  - "Go/server fixed overhead and shutdown latency assumed until measured (do not copy JNI envelopes)"
   - "External exposure of embedded mllm server (Gateway remains sole HTTP/AIDL entry)"
   - "CORS wildcard, unauthenticated management, or LAN binding on embedded server"
   - "Orphan server / port collision recovery without measured cleanup path"
   - "Silent ignore of unsupported sampling / template / multimodal parameters"
+  - "Prompt content resolution from canonicalInputDigest (control plane Stage-5 work; backend fails closed until then)"
 
 resourceEnvelopeDimensions:
   - cpuFileBytes
