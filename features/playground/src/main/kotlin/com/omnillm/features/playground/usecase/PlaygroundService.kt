@@ -407,7 +407,17 @@ class PlaygroundService(
         requestId: String,
         afterSeq: Long,
     ): OmniResult<com.omnillm.features.playground.api.PlaygroundStreamBatch> {
-        requireLocalUi(principal)
+        // COR-03: HTTP/SSE transports poll this method with non-LOCAL_UI principals.
+        // A `require()` here would throw inside the caller's stream flow and break the
+        // SSE connection mid-stream — return an honest error instead (never throw).
+        if (principal.value != LocalUiPrincipal.ID.value) {
+            return OmniResult.err(
+                OmniError.FORBIDDEN(
+                    message = "Playground stream projection accepts LOCAL_UI principal only (INV-011)",
+                    details = mapOf("principal" to principal.value),
+                ),
+            )
+        }
         if (!allowsInferenceRead()) return forbiddenRead()
         if (requestId.isBlank()) {
             return OmniResult.err(OmniError.INVALID_REQUEST(message = "requestId required"))
