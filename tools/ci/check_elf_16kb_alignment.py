@@ -9,8 +9,9 @@ Usage:
   python tools/ci/check_elf_16kb_alignment.py [--min-align 16384] [paths...]
 
 If no paths are given, scans common monorepo locations for *.so.
-Exit 0 when no .so found (skeleton stage) or all pass.
-Exit 1 when any LOAD segment p_align < min-align.
+FAIL CLOSED: no .so found is an error (missing packaged natives), not a pass.
+Exit 0 when all found .so pass.
+Exit 1 when no .so found or any LOAD segment p_align < min-align.
 """
 
 from __future__ import annotations
@@ -123,8 +124,13 @@ def main(argv: List[str]) -> int:
 
     so_files = find_so_files(roots)
     if not so_files:
-        print("check_elf_16kb_alignment: no .so files found — pass (skeleton stage)")
-        return 0
+        print(
+            "check_elf_16kb_alignment: FAIL — no .so files found under "
+            f"{[str(r) for r in roots]} (fail closed: packaged natives missing). "
+            "Run :android:native:assembleDebug (NDK required) before this gate.",
+            file=sys.stderr,
+        )
+        return 1
 
     min_align = args.min_align
     failures: List[str] = []

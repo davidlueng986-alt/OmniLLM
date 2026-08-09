@@ -61,13 +61,13 @@ dependencies {
 }
 
 // ---------------------------------------------------------------------------
-// Packaging gates (ANDROID-16KB) — no-op success when no .so present.
-// Wired from root `checkNative16kb` as well.
+// Packaging gates (ANDROID-16KB) — fail closed: missing .so is a build break.
+// Wired from root `checkNative16kb` as well (BLD-13).
 // ---------------------------------------------------------------------------
 tasks.register<Exec>("checkElf16kbAlignment") {
     group = "verification"
     description =
-        "Scan packaged/prebuilt .so ELF LOAD segment alignment for 16 KB (ANDROID-NATIVE)"
+        "Scan packaged/prebuilt .so ELF LOAD segment alignment for 16 KB (ANDROID-NATIVE; fails when no .so found)"
     workingDir = rootProject.projectDir
     val script = rootProject.file("tools/ci/check_elf_16kb_alignment.py")
     val searchRoots = listOf(
@@ -76,13 +76,6 @@ tasks.register<Exec>("checkElf16kbAlignment") {
         file("src/main/cpp"),
     )
     val existing = searchRoots.filter { it.exists() }
-    onlyIf {
-        script.exists() && (
-            existing.any { root ->
-                root.walkTopDown().any { f -> f.isFile && f.extension == "so" }
-            }
-            )
-    }
     commandLine(
         listOf(
             (project.findProperty("omnillm.python") as String?) ?: "python",

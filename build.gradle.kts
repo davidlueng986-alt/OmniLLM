@@ -99,12 +99,13 @@ tasks.register("toolsCodegen") {
 
 // ---------------------------------------------------------------------------
 // Native 16 KB packaging gates (ANDROID-NATIVE / ANDROID-16KB)
-// Pass when no .so present (skeleton). Fail when misaligned .so appear.
+// Fail closed: no .so at all is a build break (missing packaged natives), and
+// misaligned .so also fail (see tools/ci/check_elf_16kb_alignment.py).
 // ---------------------------------------------------------------------------
 val checkNative16kb by tasks.registering(Exec::class) {
     group = "verification"
     description =
-        "Scan monorepo *.so for ELF 16 KB LOAD alignment (ANDROID-NATIVE)"
+        "Scan monorepo *.so for ELF 16 KB LOAD alignment (ANDROID-NATIVE; fails when no .so found)"
     workingDir = rootDir
     commandLine(
         pythonExecutable(),
@@ -138,10 +139,14 @@ val checkDependencyEdges by tasks.registering(Exec::class) {
 
 tasks.register("check") {
     group = "verification"
-    description = "Root verification (includes contract drift + native 16 KB + dep edges)"
+    description =
+        "Root verification (contract drift + native 16 KB + packaged .so + dep edges)"
     dependsOn(checkContractDrift)
     dependsOn(checkNative16kb)
     dependsOn(checkDependencyEdges)
+    // BLD-13: aggregate the native packaging proof (libomnillm_llama.so for
+    // arm64-v8a + x86_64) so root `check` fails closed when natives are missing.
+    dependsOn(":android:native:verifyNativeLibsPresent")
 }
 
 // ---------------------------------------------------------------------------
