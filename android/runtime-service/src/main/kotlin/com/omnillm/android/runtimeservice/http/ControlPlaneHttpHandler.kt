@@ -1,5 +1,6 @@
 package com.omnillm.android.runtimeservice.http
 
+import com.omnillm.core.canonical.generated.ModelRevisionId
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.canonical.generated.Sha256Digest
 import com.omnillm.core.contracts.CommandId
@@ -26,6 +27,7 @@ import com.omnillm.interfaces.http.DiagnosticExportRequestDto
 import com.omnillm.interfaces.http.EmbeddingResponseDto
 import com.omnillm.interfaces.http.HealthDto
 import com.omnillm.interfaces.http.HttpHandlerResult
+import com.omnillm.interfaces.http.HttpJson
 import com.omnillm.interfaces.http.JobInfoDto
 import com.omnillm.interfaces.http.JobPageDto
 import com.omnillm.interfaces.http.JobSpecDto
@@ -35,6 +37,8 @@ import com.omnillm.interfaces.http.LanPairingChallengeCreateRequestDto
 import com.omnillm.interfaces.http.MetricSummaryDto
 import com.omnillm.interfaces.http.ModelInfoDto
 import com.omnillm.interfaces.http.ModelPageDto
+import com.omnillm.interfaces.http.NativeChatPayloadDto
+import com.omnillm.interfaces.http.NativeEmbeddingPayloadDto
 import com.omnillm.interfaces.http.OmniHttpHandlerPort
 import com.omnillm.interfaces.http.OpenAIChatRequestDto
 import com.omnillm.interfaces.http.OpenAIEmbeddingRequestDto
@@ -43,9 +47,9 @@ import com.omnillm.interfaces.http.SettingsPatchDto
 import com.omnillm.interfaces.http.SettingsSnapshotDto
 import com.omnillm.interfaces.http.SseEvent
 import com.omnillm.interfaces.http.SseHandlerResult
+import com.omnillm.interfaces.http.TokenInfoDto
 import com.omnillm.interfaces.http.TokenIssueRequestDto
 import com.omnillm.interfaces.http.TokenIssueResultDto
-import com.omnillm.interfaces.http.TokenMetaDto
 import com.omnillm.interfaces.http.TokenPageDto
 import com.omnillm.interfaces.http.auth.HttpPrincipal
 import com.omnillm.interfaces.http.sse.SseFraming
@@ -78,7 +82,12 @@ import com.omnillm.runtime.policy.SettingValue
 import com.omnillm.runtime.requestregistry.ClaimOutcome
 import com.omnillm.runtime.requestregistry.CommandLedger
 import com.omnillm.runtime.requestregistry.RequestRegistry
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -125,17 +134,48 @@ class ControlPlaneHttpHandler(
     private val routingApi: RoutingApi? = null,
     private val toolsApi: ToolsApi? = null,
     private val benchmarkApi: BenchmarkApi? = null,
+    /**
+     * Exploratory engine access (engine execute binding + model manager).
+     * Production default resolves the attached RuntimeControlPlane; tests inject
+     * a hermetic source. Fail-closed null when the plane is not attached.
+     */
+    private val exploratorySource: () -> ExploratoryInferenceSource? = {
+        val plane = com.omnillm.android.runtimeservice.controlplane.RuntimeControlPlane.get()
+        if (plane == null) {
+            null
+        } else {
+            try {
+                plane.ensureEnginePacksAttached()
+                ExploratoryInferenceSource(
+                    binding = plane.engineExecute,
+                    modelManager = plane.modelManager,
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
+    },
 ) : OmniHttpHandlerPort {
 
     private val assets = ConcurrentHashMap<String, AssetRecord>()
     private val clients = ConcurrentHashMap<String, ClientSummaryDto>()
 
+    /**
+     * API-16: background pump coroutines drive durable-request execution through
+     * the existing Orchestrator pump API (no Orchestrator changes needed).
+     */
+    private val pumpScope: CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     private data class AssetRecord(
         val info: AssetInfoDto,
         val ownerPrincipalId: String,
         val maxBytes: Long,
+        val expiresAtEpochMs: Long,
         var content: ByteArray? = null,
-    )
+    ) {
+        fun isExpired(nowEpochMs: Long): Boolean = expiresAtEpochMs <= nowEpochMs
+    }
 
     // ----- Health ------------------------------------------------------------
 
@@ -186,26 +226,25 @@ class ControlPlaneHttpHandler(
         val idem = idempotencyKeyHeader?.takeIf { it.isNotBlank() } ?: "sync-chat-$requestId"
         // Exploratory path when plane engine bound + flag; otherwise honest fail-closed.
         // Never invents SUPPORTED cells. Prefer durable /omni/v1/requests for production clients.
-        val plane = com.omnillm.android.runtimeservice.controlplane.RuntimeControlPlane.get()
-        if (plane != null) {
-            plane.ensureEnginePacksAttached()
-            val binding = try {
-                plane.engineExecute
-            } catch (_: Exception) {
-                null
-            }
-            if (binding != null && binding.isEngineBound() && binding.isExploratoryExecuteEnabled()) {
-                val userText = request.messages
-                    .lastOrNull { it.role.equals("user", ignoreCase = true) }?.content
-                    ?: request.messages.lastOrNull()?.content
+        val source = exploratorySource()
+        if (source != null) {
+            val binding = source.binding
+            if (binding.isEngineBound() && binding.isExploratoryExecuteEnabled()) {
+                val messages = request.messages.filter { it.role.isNotBlank() }
+                val userText = messages.lastOrNull { it.role.equals("user", ignoreCase = true) }?.content
+                    ?: messages.lastOrNull()?.content
                     ?: ""
-                if (userText.isBlank()) {
+                if (messages.isEmpty() || userText.isBlank()) {
                     return HttpHandlerResult.Err(
-                        OmniError.INVALID_REQUEST(message = "chat messages must include content"),
+                        OmniError.INVALID_REQUEST(
+                            message = "chat messages must include non-blank user content",
+                        ),
                     )
                 }
+                // COR-13: idempotency digest covers the FULL message content (same-length
+                // different-content must conflict, not return Existing).
                 val digest = com.omnillm.core.canonical.IdentityHashing.sha256Hex(
-                    "http-sync-chat|$requestId|$idem|${request.model}|${userText.length}",
+                    "http-sync-chat|$requestId|$idem|${request.model}|${chatMessageDigest(messages)}",
                 )
                 val revisionHex = request.model.lowercase().let {
                     if (it.matches(Regex("^[0-9a-f]{64}$"))) it
@@ -215,7 +254,7 @@ class ControlPlaneHttpHandler(
                     .playgroundInference(
                         orchestrator = orchestrator,
                         binding = binding,
-                        modelManager = plane.modelManager,
+                        modelManager = source.modelManager,
                         clockMs = { clock().toEpochMilli() },
                         runtimeEpoch = { resourceVersion() },
                     )
@@ -226,12 +265,13 @@ class ControlPlaneHttpHandler(
                         canonicalInputDigest = digest,
                     ),
                     modelRevisionId = revisionHex,
-                    messages = listOf(
+                    // Multi-turn: forward the full conversation, not just the last user turn.
+                    messages = messages.map {
                         com.omnillm.features.playground.api.ChatMessage(
-                            role = "user",
-                            content = userText,
-                        ),
-                    ),
+                            role = it.role,
+                            content = it.content,
+                        )
+                    },
                     stream = false,
                 )
                 return when (
@@ -246,25 +286,41 @@ class ControlPlaneHttpHandler(
                         if (handle.error != null) {
                             HttpHandlerResult.Err(handle.error!!)
                         } else {
-                            HttpHandlerResult.Ok(
-                                ChatCompletionResponseDto(
-                                    id = "chatcmpl-$requestId",
-                                    created = clock().epochSecond,
-                                    model = handle.actualModelRevisionId ?: request.model,
-                                    choices = listOf(
-                                        ChatCompletionChoiceDto(
-                                            index = 0,
-                                            message = ChatMessageDto(
-                                                role = "assistant",
-                                                content = handle.assistantText
-                                                    ?: "[CONDITIONAL exploratory execute; no token text]",
-                                            ),
-                                            finishReason = "stop",
+                            val text = handle.assistantText
+                            if (text.isNullOrBlank()) {
+                                // COR-09: never return a fake placeholder success. Token deltas
+                                // are not surfaced by the control-plane stream API (digests only),
+                                // so honest fail-closed beats invented "stop" text.
+                                HttpHandlerResult.Err(
+                                    OmniError.CAPABILITY_UNSUPPORTED(
+                                        message = "sync chat executed without aggregated token text; " +
+                                            "engine token deltas are not exposed on the control-plane API — " +
+                                            "use the SSE chat stream or durable /omni/v1/requests events",
+                                        details = mapOf(
+                                            "requestId" to requestId,
+                                            "state" to handle.state,
                                         ),
                                     ),
-                                    // Degraded exploratory path — not device-qualified SUPPORTED.
-                                ),
-                            )
+                                )
+                            } else {
+                                HttpHandlerResult.Ok(
+                                    ChatCompletionResponseDto(
+                                        id = "chatcmpl-$requestId",
+                                        created = clock().epochSecond,
+                                        model = handle.actualModelRevisionId ?: request.model,
+                                        choices = listOf(
+                                            ChatCompletionChoiceDto(
+                                                index = 0,
+                                                message = ChatMessageDto(
+                                                    role = "assistant",
+                                                    content = text,
+                                                ),
+                                                finishReason = "stop",
+                                            ),
+                                        ),
+                                    ),
+                                )
+                            }
                         }
                     }
                 }
@@ -297,30 +353,28 @@ class ControlPlaneHttpHandler(
                 OmniError.CAPABILITY_UNSUPPORTED(message = "inference orchestrator not attached"),
             )
         }
-        val plane = com.omnillm.android.runtimeservice.controlplane.RuntimeControlPlane.get()
-        if (plane != null) {
-            plane.ensureEnginePacksAttached()
-            val binding = try {
-                plane.engineExecute
-            } catch (_: Exception) {
-                null
-            }
-            if (binding != null && binding.isEngineBound() && binding.isExploratoryExecuteEnabled()) {
-                val userText = request.messages
-                    .lastOrNull { it.role.equals("user", ignoreCase = true) }?.content
-                    ?: request.messages.lastOrNull()?.content
+        val source = exploratorySource()
+        if (source != null) {
+            val binding = source.binding
+            if (binding.isEngineBound() && binding.isExploratoryExecuteEnabled()) {
+                val messages = request.messages.filter { it.role.isNotBlank() }
+                val userText = messages.lastOrNull { it.role.equals("user", ignoreCase = true) }?.content
+                    ?: messages.lastOrNull()?.content
                     ?: ""
-                if (userText.isBlank()) {
+                if (messages.isEmpty() || userText.isBlank()) {
                     return SseHandlerResult.PreStreamError(
-                        OmniError.INVALID_REQUEST(message = "chat messages must include content"),
+                        OmniError.INVALID_REQUEST(
+                            message = "chat messages must include non-blank user content",
+                        ),
                     )
                 }
                 val requestId = requestIdHeader?.takeIf { it.isNotBlank() }
                     ?: UUID.randomUUID().toString()
                 val idem = idempotencyKeyHeader?.takeIf { it.isNotBlank() }
                     ?: "stream-chat-$requestId"
+                // COR-13: digest covers the FULL message content, not the length.
                 val digest = com.omnillm.core.canonical.IdentityHashing.sha256Hex(
-                    "http-stream-chat|$requestId|$idem|${request.model}|${userText.length}",
+                    "http-stream-chat|$requestId|$idem|${request.model}|${chatMessageDigest(messages)}",
                 )
                 val revisionHex = request.model.lowercase().let {
                     if (it.matches(Regex("^[0-9a-f]{64}$"))) it
@@ -330,7 +384,7 @@ class ControlPlaneHttpHandler(
                     .playgroundInference(
                         orchestrator = orchestrator,
                         binding = binding,
-                        modelManager = plane.modelManager,
+                        modelManager = source.modelManager,
                         clockMs = { clock().toEpochMilli() },
                         runtimeEpoch = { resourceVersion() },
                     )
@@ -341,12 +395,12 @@ class ControlPlaneHttpHandler(
                         canonicalInputDigest = digest,
                     ),
                     modelRevisionId = revisionHex,
-                    messages = listOf(
+                    messages = messages.map {
                         com.omnillm.features.playground.api.ChatMessage(
-                            role = "user",
-                            content = userText,
-                        ),
-                    ),
+                            role = it.role,
+                            content = it.content,
+                        )
+                    },
                     stream = true,
                 )
                 return when (
@@ -361,12 +415,27 @@ class ControlPlaneHttpHandler(
                         if (handle.error != null) {
                             SseHandlerResult.PreStreamError(handle.error!!)
                         } else {
-                            streamOpenAiChatChunks(
-                                requestId = handle.requestId,
-                                model = request.model,
-                                principal = principal,
-                                port = plane.playgroundApi,
-                            )
+                            // COR-03: authorize BEFORE committing the SSE stream. Owner-only
+                            // by default (inference.read-own); jobs.read-all is the explicit
+                            // cross-owner read exception (same semantics as getRequest).
+                            val owned = requestRegistry
+                                .queryRequest(RequestId.parse(handle.requestId))
+                                ?.let {
+                                    it.principalId == principal.principalId ||
+                                        principal.hasScope("jobs.read-all")
+                                } ?: false
+                            if (!owned) {
+                                SseHandlerResult.PreStreamError(
+                                    OmniError.FORBIDDEN(message = "not owner of request"),
+                                )
+                            } else {
+                                streamOpenAiChatChunks(
+                                    requestId = handle.requestId,
+                                    model = request.model,
+                                    principal = principal,
+                                    port = port,
+                                )
+                            }
                         }
                     }
                 }
@@ -386,16 +455,22 @@ class ControlPlaneHttpHandler(
     }
 
     /**
-     * OpenAI SSE chunk framing over the durable playground stream projection
+     * OpenAI SSE chunk framing over the durable inference-port projection
      * (CORE-INTERFACE §4: post-commit errors are terminal events, never late HTTP).
      * Stateless Session default: disconnect does not auto-continue.
+     *
+     * COR-03: polls the [PlaygroundInferencePort] (never the LOCAL_UI-gated
+     * PlaygroundService) and NEVER throws inside the flow — any poll failure is
+     * routed through the terminal event channel so the SSE connection closes
+     * gracefully instead of crashing mid-stream.
      */
-    private fun streamOpenAiChatChunks(
+    internal fun streamOpenAiChatChunks(
         requestId: String,
         model: String,
         principal: HttpPrincipal,
-        port: com.omnillm.features.playground.api.PlaygroundApi,
-    ): SseHandlerResult.Stream {        val created = clock().epochSecond
+        port: com.omnillm.features.playground.ports.PlaygroundInferencePort,
+    ): SseHandlerResult.Stream {
+        val created = clock().epochSecond
         val events = flow {
             // Role preamble chunk (OpenAI convention).
             emit(
@@ -406,21 +481,60 @@ class ControlPlaneHttpHandler(
                     isTerminal = false,
                 ),
             )
-            var afterSeq = 0L
             var seqId = 1L
             var done = false
             var attempts = 0
             while (!done && attempts < MAX_STREAM_POLLS) {
                 attempts++
-                when (val batch = port.streamEvents(
-                    PrincipalId.parse(principal.principalId),
-                    requestId,
-                    afterSeq,
-                )) {
+                val batch: OmniResult<com.omnillm.features.playground.ports.InferenceHandle>? = try {
+                    port.query(
+                        PrincipalId.parse(principal.principalId),
+                        requestId,
+                    )
+                } catch (t: Throwable) {
+                    // Never throw inside the flow — terminal error event (COR-03).
+                    val errorJson = HttpJson.codec.encodeToString(
+                        JsonElement.serializer(),
+                        JsonObject(
+                            mapOf(
+                                "error" to JsonObject(
+                                    mapOf(
+                                        "message" to JsonPrimitive(t.message ?: "stream projection failed"),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    )
+                    emit(
+                        SseEvent(
+                            data = errorJson,
+                            event = SseFraming.EVENT_TERMINAL,
+                            id = (seqId++).toString(),
+                            isTerminal = true,
+                        ),
+                    )
+                    done = true
+                    null
+                }
+                if (done) continue
+                when (batch) {
+                    null -> Unit // unreachable: done==false implies non-null
                     is OmniResult.Err -> {
+                        val errorJson = HttpJson.codec.encodeToString(
+                            JsonElement.serializer(),
+                            JsonObject(
+                                mapOf(
+                                    "error" to JsonObject(
+                                        mapOf(
+                                            "message" to JsonPrimitive(batch.error.message ?: "stream error"),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        )
                         emit(
                             SseEvent(
-                                data = """{"error":{"message":${jsonEscape(batch.error.message ?: "stream error")}}}""",
+                                data = errorJson,
                                 event = SseFraming.EVENT_TERMINAL,
                                 id = (seqId++).toString(),
                                 isTerminal = true,
@@ -429,31 +543,24 @@ class ControlPlaneHttpHandler(
                         done = true
                     }
                     is OmniResult.Ok -> {
-                        val b = batch.value
-                        for (ev in b.events) {
-                            afterSeq = maxOf(afterSeq, ev.seq + 1L)
-                            if (ev.kind == "delta") {
-                                ev.textDelta?.takeIf { it.isNotEmpty() }?.let { text ->
-                                    emit(
-                                        SseEvent(
-                                            data = openAiChunkJson(
-                                                requestId,
-                                                created,
-                                                model,
-                                                contentDelta = text,
-                                            ),
-                                            event = null,
-                                            id = (seqId++).toString(),
-                                            isTerminal = false,
-                                        ),
-                                    )
-                                }
-                            }
-                            if (ev.isTerminal || ev.kind == "terminal") {
-                                done = true
-                            }
+                        val handle = batch.value
+                        handle.assistantText?.takeIf { it.isNotEmpty() }?.let { text ->
+                            emit(
+                                SseEvent(
+                                    data = openAiChunkJson(
+                                        requestId,
+                                        created,
+                                        model,
+                                        contentDelta = text,
+                                    ),
+                                    event = null,
+                                    id = (seqId++).toString(),
+                                    isTerminal = false,
+                                ),
+                            )
                         }
-                        if (b.isTerminal || done) {
+                        val terminal = handle.state in STREAM_TERMINAL_STATES || handle.error != null
+                        if (terminal) {
                             // Final chunk with finish_reason + usage summary, then [DONE].
                             emit(
                                 SseEvent(
@@ -558,39 +665,133 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         request: AsyncInferenceRequestDto,
     ): HttpHandlerResult<AcceptedRequestDto> {
+        // API-16: durable requests are claim + EXECUTE. Without an orchestrator the
+        // claim could never run — fail closed honestly instead of 202-never-execute.
+        val orch = orchestrator
+            ?: return HttpHandlerResult.Err(
+                OmniError.CAPABILITY_UNSUPPORTED(
+                    message = "durable request execution unavailable: orchestrator not attached",
+                    details = mapOf("requestId" to request.requestId),
+                ),
+            )
+        if (request.operation == "EMBEDDING") {
+            return HttpHandlerResult.Err(
+                OmniError.CAPABILITY_UNKNOWN(
+                    message = "durable EMBEDDING execution is not qualified on the " +
+                        "llama-cpp exploratory path",
+                    details = mapOf(
+                        "capability" to com.omnillm.core.canonical.generated.CapabilityId.EMBEDDING.id,
+                    ),
+                ),
+            )
+        }
+        val payload = request.chat
+            ?: return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "operation CHAT requires a chat payload",
+                    details = mapOf("requestId" to request.requestId),
+                ),
+            )
+        val source = exploratorySource()
+            ?: return HttpHandlerResult.Err(
+                OmniError.CAPABILITY_UNSUPPORTED(
+                    message = "durable request execution requires engine binding on the control plane",
+                    details = mapOf("requestId" to request.requestId),
+                ),
+            )
+        if (!source.binding.isEngineBound()) {
+            return HttpHandlerResult.Err(
+                OmniError.CAPABILITY_UNSUPPORTED(
+                    message = "durable request execution requires an attached engine",
+                    details = mapOf("requestId" to request.requestId),
+                ),
+            )
+        }
+        // API-01: the canonical digest covers the FULL wire payload (chat/embedding)
+        // and is persisted durably in the registry claim row — identical content
+        // replays as Existing; changed content conflicts (IDEMPOTENCY_CONFLICT).
+        val canonicalPayload = canonicalPayloadJson(request)
         val digest = sha256Hex(
-            "${request.requestId}|${request.idempotencyKey}|${request.operation}|${request.model}|${request.payload}",
+            "${request.requestId}|${request.idempotencyKey}|${request.operation}|$canonicalPayload",
         )
-        val claim = requestRegistry.claim(
-            principal = PrincipalId.parse(principal.principalId),
-            operationKind = request.operation,
-            idempotencyKey = IdempotencyKey.parse(request.idempotencyKey),
-            canonicalHash = Sha256Digest.parse(digest),
+        val revisionHex = payload.model.lowercase().let {
+            if (it.matches(Regex("^[0-9a-f]{64}$"))) it
+            else com.omnillm.core.canonical.IdentityHashing.sha256Hex("model|${payload.model}")
+        }
+        val revision = try {
+            ModelRevisionId.parse(revisionHex)
+        } catch (_: Exception) {
+            return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(message = "invalid model in chat payload"),
+            )
+        }
+        val installation = com.omnillm.android.runtimeservice.featurehost.ControlPlaneFeaturePorts
+            .resolveInstallation(source.modelManager, revision)
+        val candidate = com.omnillm.android.runtimeservice.featurehost.ControlPlaneFeaturePorts
+            .buildCandidate(
+                binding = source.binding,
+                revision = revision,
+                installationId = installation,
+                device = com.omnillm.core.contracts.DeviceExecutionFingerprint
+                    .parse("device-fp-http-durable"),
+            )
+        if (candidate is OmniResult.Err) return HttpHandlerResult.Err(candidate.error)
+        val candidateValue = (candidate as OmniResult.Ok).value
+        val orchestrationRequest = com.omnillm.runtime.orchestrator.OrchestrationRequest(
             requestId = RequestId.parse(request.requestId),
-            revisionId = null,
+            principalId = PrincipalId.parse(principal.principalId),
+            idempotencyKey = IdempotencyKey.parse(request.idempotencyKey),
+            operationKind = "CHAT",
+            canonicalRequestDigest = Sha256Digest.parse(digest),
+            requiredCapabilities = setOf(
+                com.omnillm.core.canonical.generated.CapabilityId.TEXT_GENERATION,
+            ),
+            requestedRevisionId = revision,
+            candidates = listOf(candidateValue),
+            routing = com.omnillm.android.runtimeservice.featurehost.ControlPlaneFeaturePorts
+                .exploratoryRouting(),
+            costClass = com.omnillm.runtime.orchestrator.CostClassLabels.GENERATION,
+            runtimeEpoch = resourceVersion(),
+            revocationEpoch = principal.revocationEpoch,
+            deadlineMonotonic = Long.MAX_VALUE / 8,
         )
-        return when (claim) {
-            is ClaimOutcome.Conflict -> HttpHandlerResult.Err(claim.error)
-            is ClaimOutcome.Existing, is ClaimOutcome.New -> {
-                val row = when (claim) {
-                    is ClaimOutcome.Existing -> claim.value
-                    is ClaimOutcome.New -> claim.value
-                    else -> error("unreachable")
+        return when (val submitted = orch.submit(orchestrationRequest)) {
+            is OmniResult.Err -> HttpHandlerResult.Err(submitted.error)
+            is OmniResult.Ok -> {
+                // Drive execution through the EXISTING public orchestrator pump API.
+                pumpScope.launch {
+                    runCatching { orch.pumpAll(64) }
                 }
-                // Orchestrator full planning needs candidates — accept claim only when
-                // no orchestrator, or leave QUEUED for pump when wired with candidates later.
                 HttpHandlerResult.Ok(
                     body = AcceptedRequestDto(
-                        requestId = row.requestId,
-                        state = row.state,
-                        queryUrl = "/omni/v1/requests/${row.requestId}",
-                        eventsUrl = "/omni/v1/requests/${row.requestId}/events",
+                        requestId = submitted.value.requestId.value,
+                        state = submitted.value.state,
+                        queryUrl = "/omni/v1/requests/${submitted.value.requestId.value}",
+                        eventsUrl = "/omni/v1/requests/${submitted.value.requestId.value}/events",
                     ),
                     status = 202,
                 )
             }
         }
     }
+
+    /** Canonical JSON of the wire payload for durable digesting (API-01). */
+    private fun canonicalPayloadJson(request: AsyncInferenceRequestDto): String =
+        try {
+            when (request.operation) {
+                "CHAT" -> HttpJson.codec.encodeToString(
+                    NativeChatPayloadDto.serializer(),
+                    request.chat ?: NativeChatPayloadDto(model = "", messages = emptyList()),
+                )
+                "EMBEDDING" -> HttpJson.codec.encodeToString(
+                    NativeEmbeddingPayloadDto.serializer(),
+                    request.embedding ?: NativeEmbeddingPayloadDto(model = "", input = JsonNull),
+                )
+                else -> request.operation
+            }
+        } catch (_: Exception) {
+            request.operation
+        }
 
     override suspend fun getRequest(
         principal: HttpPrincipal,
@@ -646,8 +847,35 @@ class ControlPlaneHttpHandler(
                 ),
             )
         }
-        val claim = claimCommand(principal, "CANCEL_REQUEST", command) ?: return commandConflict()
+        val claim = claimCommand(principal, "CANCEL_REQUEST", command)
         if (claim is HttpHandlerResult.Err) return claim
+        // COR-05: look up the request + verify ownership BEFORE any cancel side-effect.
+        // Own-only by default; jobs.read-all is the explicit cross-owner exception
+        // (same semantics as getRequest).
+        val row = requestRegistry.queryRequest(RequestId.parse(requestId))
+            ?: run {
+                commandLedger.recordResult(
+                    CommandId.parse(command.commandId),
+                    state = "FAILED",
+                    errorCode = OmniError.NOT_FOUND().code.code,
+                    affectedResourceId = requestId,
+                )
+                return HttpHandlerResult.Err(
+                    OmniError.NOT_FOUND(
+                        message = "request not found",
+                        details = mapOf("requestId" to requestId),
+                    ),
+                )
+            }
+        if (row.principalId != principal.principalId && !principal.hasScope("jobs.read-all")) {
+            commandLedger.recordResult(
+                CommandId.parse(command.commandId),
+                state = "FAILED",
+                errorCode = OmniError.FORBIDDEN().code.code,
+                affectedResourceId = requestId,
+            )
+            return HttpHandlerResult.Err(OmniError.FORBIDDEN(message = "not owner of request"))
+        }
         val orch = orchestrator
         val result = if (orch != null) {
             when (val c = orch.cancel(RequestId.parse(requestId))) {
@@ -658,6 +886,8 @@ class ControlPlaneHttpHandler(
                     affectedResourceId = requestId,
                 )
                 is OmniResult.Err -> {
+                    // Honest failure (STATE_CONFLICT when STREAMING etc.) — never
+                    // invent a SUCCEEDED cancellation.
                     commandLedger.recordResult(
                         CommandId.parse(command.commandId),
                         state = "FAILED",
@@ -668,6 +898,30 @@ class ControlPlaneHttpHandler(
                 }
             }
         } else {
+            // COR-22: no orchestrator ⇒ registry-level cancel (mirrors the binder
+            // path OmniRuntimeFacade) instead of a fabricated SUCCEEDED.
+            val terminal = requestRegistry.queryRequestTerminal(RequestId.parse(requestId))
+            if (terminal == null) {
+                when (
+                    val t = requestRegistry.recordTerminal(
+                        requestId = RequestId.parse(requestId),
+                        terminalState = "CANCELLED",
+                        terminalSeq = System.nanoTime(),
+                        errorCode = OmniError.CANCELLED().code.code,
+                    )
+                ) {
+                    is OmniResult.Err -> {
+                        commandLedger.recordResult(
+                            CommandId.parse(command.commandId),
+                            state = "FAILED",
+                            errorCode = t.error.code.code,
+                            affectedResourceId = requestId,
+                        )
+                        return HttpHandlerResult.Err(t.error)
+                    }
+                    is OmniResult.Ok -> Unit
+                }
+            }
             CommandResultDto(
                 commandId = command.commandId,
                 state = "SUCCEEDED",
@@ -698,25 +952,54 @@ class ControlPlaneHttpHandler(
                 OmniError.FORBIDDEN(message = "not owner of request"),
             )
         }
-        // Stateless Session default: one-shot snapshot stream + terminal (CORE-INTERFACE §4).
-        val state = orchestrator?.query(RequestId.parse(requestId))?.state ?: row.state
+        // API-16: events reflect REAL orchestrator state, and each poll itself
+        // drives queued execution through the existing pump API (no Orchestrator
+        // changes needed — REPORTED for follow-up if a dedicated worker is wanted).
+        val orch = orchestrator
+            ?: return SseHandlerResult.PreStreamError(
+                OmniError.CAPABILITY_UNSUPPORTED(
+                    message = "request events require an orchestrator",
+                    details = mapOf("requestId" to requestId),
+                ),
+            )
+        runCatching { orch.pumpOnce() }
+        val view = orch.query(RequestId.parse(requestId))
+        val state = view?.terminalState ?: view?.state ?: row.state
+        val errorCode = view?.errorCode
+        val start = afterSeq ?: 0L
+        val terminal = state in DURABLE_TERMINAL_STATES
         val events = flow {
-            emit(
-                SseEvent(
-                    data = """{"request_id":"$requestId","state":"$state","seq":${afterSeq ?: 0}}""",
-                    event = "state",
-                    id = "0",
-                    isTerminal = false,
-                ),
-            )
-            emit(
-                SseEvent(
-                    data = """{"request_id":"$requestId","state":"$state","terminal":true}""",
-                    event = SseFraming.EVENT_TERMINAL,
-                    id = "1",
-                    isTerminal = true,
-                ),
-            )
+            if (start < 1L) {
+                emit(
+                    SseEvent(
+                        data = """{"request_id":"$requestId","state":"$state","seq":0}""",
+                        event = "state",
+                        id = "0",
+                        isTerminal = false,
+                    ),
+                )
+            }
+            if (terminal && start < 2L) {
+                val data = HttpJson.codec.encodeToString(
+                    JsonElement.serializer(),
+                    JsonObject(
+                        buildMap {
+                            put("request_id", JsonPrimitive(requestId))
+                            put("state", JsonPrimitive(state))
+                            put("terminal", JsonPrimitive(true))
+                            errorCode?.let { put("error", JsonPrimitive(it)) }
+                        },
+                    ),
+                )
+                emit(
+                    SseEvent(
+                        data = data,
+                        event = SseFraming.EVENT_TERMINAL,
+                        id = "1",
+                        isTerminal = true,
+                    ),
+                )
+            }
         }
         return SseHandlerResult.Stream(
             requestId = requestId,
@@ -763,12 +1046,24 @@ class ControlPlaneHttpHandler(
         val claim = claimCommand(principal, "CREATE_ASSET", request.command)
         if (claim is HttpHandlerResult.Err) return claim
 
+        // COR-17/SEC-06: evict expired entries and enforce the upper bound before
+        // admitting a new asset (the assets map must stay bounded).
+        evictExpiredAssets()
+        if (assets.size >= MAX_ASSETS) {
+            return HttpHandlerResult.Err(
+                OmniError.ADMISSION_REJECTED(
+                    message = "asset store at capacity",
+                    details = mapOf("max" to MAX_ASSETS.toString()),
+                ),
+            )
+        }
+        val now = clock().toEpochMilli()
         val assetId = UUID.randomUUID().toString()
-        val expires = clock().plusSeconds(request.ttlSeconds).toString()
+        val expiresAtEpochMs = now + request.ttlSeconds * 1000L
         val info = AssetInfoDto(
             assetId = assetId,
             state = "CREATED",
-            expiresAt = expires,
+            expiresAt = Instant.ofEpochMilli(expiresAtEpochMs).toString(),
             bytes = 0,
             uploadUrl = "/omni/v1/assets/$assetId/content",
         )
@@ -776,6 +1071,7 @@ class ControlPlaneHttpHandler(
             info = info,
             ownerPrincipalId = principal.principalId,
             maxBytes = request.maxBytes,
+            expiresAtEpochMs = expiresAtEpochMs,
         )
         commandLedger.recordResult(
             CommandId.parse(request.command.commandId),
@@ -790,16 +1086,60 @@ class ControlPlaneHttpHandler(
         assetId: String,
         body: ByteArray,
         contentLength: Long?,
-        commandJson: String?,
+        command: CommandRequestDto?,
+        expectedSha256: String?,
+        expectedBytes: Long?,
     ): HttpHandlerResult<CommandResultDto> {
+        // API-06: multipart uploads carry a CommandRequest (idempotency claim) and
+        // optional expected_bytes / expected_sha256 integrity assertions.
+        val claimedCommandId: String? = if (command != null) {
+            if (!ClaimShapeOk.command(command)) {
+                return HttpHandlerResult.Err(OmniError.INVALID_REQUEST(message = "invalid command claim"))
+            }
+            val claim = claimCommand(principal, "UPLOAD_ASSET", command)
+            if (claim is HttpHandlerResult.Err) return claim
+            command.commandId
+        } else {
+            null
+        }
         val rec = assets[assetId]
             ?: return HttpHandlerResult.Err(OmniError.NOT_FOUND(message = "asset not found"))
+        if (rec.isExpired(clock().toEpochMilli())) {
+            // Non-destructive: the record stays until admission-time eviction
+            // (evictExpiredAssets) so every op reports ASSET_EXPIRED, not NOT_FOUND.
+            return HttpHandlerResult.Err(
+                OmniError.ASSET_EXPIRED(
+                    message = "asset expired",
+                    details = mapOf("assetId" to assetId),
+                ),
+            )
+        }
         if (rec.ownerPrincipalId != principal.principalId) {
             return HttpHandlerResult.Err(OmniError.FORBIDDEN(message = "not owner of asset"))
         }
         if (body.size.toLong() > rec.maxBytes) {
             return HttpHandlerResult.Err(
                 OmniError.TRANSPORT_TOO_LARGE(message = "exceeds asset max_bytes"),
+            )
+        }
+        if (expectedBytes != null && body.size.toLong() != expectedBytes) {
+            return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "content size mismatch vs expected_bytes",
+                    details = mapOf(
+                        "actual" to body.size.toString(),
+                        "expected" to expectedBytes.toString(),
+                    ),
+                ),
+            )
+        }
+        if (expectedSha256 != null &&
+            sha256Hex(body) != expectedSha256.lowercase()
+        ) {
+            return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "content sha256 mismatch vs expected_sha256",
+                ),
             )
         }
         if (rec.info.state !in setOf("CREATED", "UPLOADING")) {
@@ -811,7 +1151,14 @@ class ControlPlaneHttpHandler(
         assets[assetId] = rec.copy(
             info = rec.info.copy(state = "UPLOADING", bytes = body.size.toLong()),
         )
-        val cmdId = UUID.randomUUID().toString()
+        val cmdId = claimedCommandId ?: UUID.randomUUID().toString()
+        if (claimedCommandId != null) {
+            commandLedger.recordResult(
+                CommandId.parse(claimedCommandId),
+                state = "SUCCEEDED",
+                affectedResourceId = assetId,
+            )
+        }
         return HttpHandlerResult.Ok(
             CommandResultDto(commandId = cmdId, state = "SUCCEEDED", resourceVersion = 1, affectedResourceId = assetId),
         )
@@ -826,6 +1173,16 @@ class ControlPlaneHttpHandler(
         if (claim is HttpHandlerResult.Err) return claim
         val rec = assets[assetId]
             ?: return HttpHandlerResult.Err(OmniError.NOT_FOUND(message = "asset not found"))
+        if (rec.isExpired(clock().toEpochMilli())) {
+            // Non-destructive: the record stays until admission-time eviction
+            // (evictExpiredAssets) so every op reports ASSET_EXPIRED, not NOT_FOUND.
+            return HttpHandlerResult.Err(
+                OmniError.ASSET_EXPIRED(
+                    message = "asset expired",
+                    details = mapOf("assetId" to assetId),
+                ),
+            )
+        }
         if (rec.ownerPrincipalId != principal.principalId) {
             return HttpHandlerResult.Err(OmniError.FORBIDDEN(message = "not owner of asset"))
         }
@@ -860,6 +1217,16 @@ class ControlPlaneHttpHandler(
     ): HttpHandlerResult<AssetInfoDto> {
         val rec = assets[assetId]
             ?: return HttpHandlerResult.Err(OmniError.NOT_FOUND(message = "asset not found"))
+        if (rec.isExpired(clock().toEpochMilli())) {
+            // Read-only probe: keep the record (eviction happens at admission via
+            // evictExpiredAssets) so every op reports ASSET_EXPIRED, not NOT_FOUND.
+            return HttpHandlerResult.Err(
+                OmniError.ASSET_EXPIRED(
+                    message = "asset expired",
+                    details = mapOf("assetId" to assetId),
+                ),
+            )
+        }
         if (rec.ownerPrincipalId != principal.principalId) {
             return HttpHandlerResult.Err(OmniError.FORBIDDEN(message = "not owner of asset"))
         }
@@ -870,22 +1237,81 @@ class ControlPlaneHttpHandler(
     override suspend fun deleteAsset(
         principal: HttpPrincipal,
         assetId: String,
+        command: CommandRequestDto,
     ): HttpHandlerResult<CommandResultDto> {
+        // API-05: DELETE routes through the CommandLedger idempotency claim like
+        // every other durable mutation (the OpenAPI body is mandatory).
+        val claim = claimCommand(principal, "DELETE_ASSET", command)
+        if (claim is HttpHandlerResult.Err) return claim
         val rec = assets[assetId]
-            ?: return HttpHandlerResult.Err(OmniError.NOT_FOUND(message = "asset not found"))
+            ?: run {
+                commandLedger.recordResult(
+                    CommandId.parse(command.commandId),
+                    state = "FAILED",
+                    errorCode = OmniError.NOT_FOUND().code.code,
+                    affectedResourceId = assetId,
+                )
+                return HttpHandlerResult.Err(OmniError.NOT_FOUND(message = "asset not found"))
+            }
+        if (rec.isExpired(clock().toEpochMilli())) {
+            // Non-destructive: the record stays until admission-time eviction
+            // (evictExpiredAssets) so every op reports ASSET_EXPIRED, not NOT_FOUND.
+            commandLedger.recordResult(
+                CommandId.parse(command.commandId),
+                state = "FAILED",
+                errorCode = OmniError.ASSET_EXPIRED().code.code,
+                affectedResourceId = assetId,
+            )
+            return HttpHandlerResult.Err(
+                OmniError.ASSET_EXPIRED(
+                    message = "asset expired",
+                    details = mapOf("assetId" to assetId),
+                ),
+            )
+        }
         if (rec.ownerPrincipalId != principal.principalId) {
+            commandLedger.recordResult(
+                CommandId.parse(command.commandId),
+                state = "FAILED",
+                errorCode = OmniError.FORBIDDEN().code.code,
+                affectedResourceId = assetId,
+            )
             return HttpHandlerResult.Err(OmniError.FORBIDDEN(message = "not owner of asset"))
         }
         if (rec.info.state == "PINNED") {
+            commandLedger.recordResult(
+                CommandId.parse(command.commandId),
+                state = "FAILED",
+                errorCode = OmniError.STATE_CONFLICT().code.code,
+                affectedResourceId = assetId,
+            )
             return HttpHandlerResult.Err(
                 OmniError.STATE_CONFLICT(message = "asset pinned by request"),
             )
         }
         assets[assetId] = rec.copy(info = rec.info.copy(state = "DELETED"), content = null)
-        val cmdId = UUID.randomUUID().toString()
-        return HttpHandlerResult.Ok(
-            CommandResultDto(commandId = cmdId, state = "SUCCEEDED", resourceVersion = 1, affectedResourceId = assetId),
+        commandLedger.recordResult(
+            CommandId.parse(command.commandId),
+            state = "SUCCEEDED",
+            affectedResourceId = assetId,
         )
+        return HttpHandlerResult.Ok(
+            CommandResultDto(
+                commandId = command.commandId,
+                state = "SUCCEEDED",
+                resourceVersion = 1,
+                affectedResourceId = assetId,
+            ),
+        )
+    }
+
+    /** COR-17/SEC-06: drop expired asset entries (bounded in-memory asset store). */
+    private fun evictExpiredAssets() {
+        val now = clock().toEpochMilli()
+        val expired = assets.entries.filter { it.value.isExpired(now) }.map { it.key }
+        for (key in expired) {
+            assets.remove(key)
+        }
     }
 
     // ----- Jobs --------------------------------------------------------------
@@ -956,11 +1382,31 @@ class ControlPlaneHttpHandler(
     ): HttpHandlerResult<CommandResultDto> {
         val claim = claimCommand(principal, "CANCEL_JOB", command)
         if (claim is HttpHandlerResult.Err) return claim
+        // COR-04: verify the job exists + ownership BEFORE the cancel side-effect,
+        // so a 403 can never cancel a job the caller does not own.
+        val job = when (val q = jobManager.query(JobId(jobId))) {
+            is OmniResult.Err -> {
+                commandLedger.recordResult(
+                    CommandId.parse(command.commandId),
+                    state = "FAILED",
+                    errorCode = q.error.code.code,
+                    affectedResourceId = jobId,
+                )
+                return HttpHandlerResult.Err(q.error)
+            }
+            is OmniResult.Ok -> q.value
+        }
+        if (job.identity.principalId.value != principal.principalId) {
+            commandLedger.recordResult(
+                CommandId.parse(command.commandId),
+                state = "FAILED",
+                errorCode = OmniError.FORBIDDEN().code.code,
+                affectedResourceId = jobId,
+            )
+            return HttpHandlerResult.Err(OmniError.FORBIDDEN(message = "not owner of job"))
+        }
         return when (val c = jobManager.cancel(JobId(jobId))) {
             is OmniResult.Ok -> {
-                if (c.value.identity.principalId.value != principal.principalId) {
-                    return HttpHandlerResult.Err(OmniError.FORBIDDEN(message = "not owner of job"))
-                }
                 commandLedger.recordResult(
                     CommandId.parse(command.commandId),
                     state = "SUCCEEDED",
@@ -975,7 +1421,15 @@ class ControlPlaneHttpHandler(
                     ),
                 )
             }
-            is OmniResult.Err -> HttpHandlerResult.Err(c.error)
+            is OmniResult.Err -> {
+                commandLedger.recordResult(
+                    CommandId.parse(command.commandId),
+                    state = "FAILED",
+                    errorCode = c.error.code.code,
+                    affectedResourceId = jobId,
+                )
+                HttpHandlerResult.Err(c.error)
+            }
         }
     }
 
@@ -1000,7 +1454,7 @@ class ControlPlaneHttpHandler(
     override suspend fun patchSettings(
         principal: HttpPrincipal,
         request: SettingsPatchDto,
-    ): HttpHandlerResult<SettingsSnapshotDto> {
+    ): HttpHandlerResult<CommandResultDto> {
         val claim = claimCommand(principal, "PATCH_SETTINGS", request.command)
         if (claim is HttpHandlerResult.Err) return claim
         val changes = request.changes.mapValues { (_, v) -> jsonToSettingValue(v) }
@@ -1019,10 +1473,14 @@ class ControlPlaneHttpHandler(
                     CommandId.parse(request.command.commandId),
                     state = "SUCCEEDED",
                 )
+                // API-04: the OpenAPI 200 response for PATCH /settings is CommandResult,
+                // not SettingsSnapshot — never return the snapshot shape on this route.
                 HttpHandlerResult.Ok(
-                    SettingsSnapshotDto(
+                    CommandResultDto(
+                        commandId = request.command.commandId,
+                        state = "SUCCEEDED",
                         resourceVersion = p.value.resourceVersion,
-                        values = p.value.values.mapValues { settingValueToJson(it.value) },
+                        affectedResourceId = "settings",
                     ),
                 )
             }
@@ -1159,12 +1617,30 @@ class ControlPlaneHttpHandler(
         ) {
             is OmniResult.Ok -> {
                 val v = r.value
-                val scopesJson = v.requestedScopes.sorted()
-                    .joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
-                val secretJson = v.pairingSecret?.let { "\"${jsonEscape(it)}\"" } ?: "null"
-                val qrJson = v.qrPayload?.let { "\"${jsonEscape(it)}\"" } ?: "null"
-                val body =
-                    """{"challenge_id":"${v.challengeId}","protocol_label":"${v.protocolLabel}","server_spki_sha256":"${v.serverSpkiSha256}","connection_epoch":${v.connectionEpoch},"pairing_secret":$secretJson,"requested_scopes":$scopesJson,"expires_at":"${java.time.Instant.ofEpochMilli(v.expiresAtEpochMs)}","qr_payload":$qrJson,"state":"${v.state}","attempts_remaining":${v.attemptsRemaining}}"""
+                // SEC-10: build the wire body through the JSON codec — every field
+                // escaped, key order preserved, null semantics explicit.
+                val body = HttpJson.codec.encodeToString(
+                    JsonElement.serializer(),
+                    JsonObject(
+                        mapOf(
+                            "challenge_id" to JsonPrimitive(v.challengeId),
+                            "protocol_label" to JsonPrimitive(v.protocolLabel),
+                            "server_spki_sha256" to JsonPrimitive(v.serverSpkiSha256),
+                            "connection_epoch" to JsonPrimitive(v.connectionEpoch),
+                            "pairing_secret" to
+                                (v.pairingSecret?.let { JsonPrimitive(it) } ?: JsonNull),
+                            "requested_scopes" to
+                                JsonArray(v.requestedScopes.sorted().map { JsonPrimitive(it) }),
+                            "expires_at" to JsonPrimitive(
+                                java.time.Instant.ofEpochMilli(v.expiresAtEpochMs).toString(),
+                            ),
+                            "qr_payload" to
+                                (v.qrPayload?.let { JsonPrimitive(it) } ?: JsonNull),
+                            "state" to JsonPrimitive(v.state),
+                            "attempts_remaining" to JsonPrimitive(v.attemptsRemaining),
+                        ),
+                    ),
+                )
                 HttpHandlerResult.Ok(JsonRawBody(body))
             }
             is OmniResult.Err -> HttpHandlerResult.Err(r.error)
@@ -1223,10 +1699,27 @@ class ControlPlaneHttpHandler(
             is OmniResult.Err -> HttpHandlerResult.Err(r.error)
             is OmniResult.Ok -> {
                 val t = r.value
-                val scopesJson = t.scopes.sorted()
-                    .joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
-                val bodyOut =
-                    """{"exchange_id":"${t.exchangeId}","state":"SUCCEEDED","client_id":"${t.clientId}","token_id":"${t.tokenId}","token":"${jsonEscape(t.tokenPlaintext)}","scopes":$scopesJson,"expires_at":"${java.time.Instant.ofEpochMilli(t.expiresAtEpochMs)}","receipt_expires_at":"${java.time.Instant.ofEpochMilli(t.receiptExpiresAtEpochMs)}","server_spki_sha256":"${t.serverSpkiSha256}"}"""
+                // SEC-10: codec-built body — plaintext token escaped, order preserved.
+                val bodyOut = HttpJson.codec.encodeToString(
+                    JsonElement.serializer(),
+                    JsonObject(
+                        mapOf(
+                            "exchange_id" to JsonPrimitive(t.exchangeId),
+                            "state" to JsonPrimitive("SUCCEEDED"),
+                            "client_id" to JsonPrimitive(t.clientId),
+                            "token_id" to JsonPrimitive(t.tokenId),
+                            "token" to JsonPrimitive(t.tokenPlaintext),
+                            "scopes" to JsonArray(t.scopes.sorted().map { JsonPrimitive(it) }),
+                            "expires_at" to JsonPrimitive(
+                                java.time.Instant.ofEpochMilli(t.expiresAtEpochMs).toString(),
+                            ),
+                            "receipt_expires_at" to JsonPrimitive(
+                                java.time.Instant.ofEpochMilli(t.receiptExpiresAtEpochMs).toString(),
+                            ),
+                            "server_spki_sha256" to JsonPrimitive(t.serverSpkiSha256),
+                        ),
+                    ),
+                )
                 HttpHandlerResult.Ok(JsonRawBody(bodyOut))
             }
         }
@@ -1273,20 +1766,6 @@ class ControlPlaneHttpHandler(
             null
         }
     }
-
-    private fun jsonEscape(s: String): String =
-        buildString(s.length + 8) {
-            for (c in s) {
-                when (c) {
-                    '\\' -> append("\\\\")
-                    '"' -> append("\\\"")
-                    '\n' -> append("\\n")
-                    '\r' -> append("\\r")
-                    '\t' -> append("\\t")
-                    else -> append(c)
-                }
-            }
-        }
 
     // ----- Diagnostics (features:diagnostics) --------------------------------
 
@@ -1555,14 +2034,14 @@ class ControlPlaneHttpHandler(
         val claim = claimCommand(principal, "ISSUE_TOKEN", request.command)
         if (claim is HttpHandlerResult.Err) return claim
         val scopes = request.scopes.ifEmpty { LoopbackTokenService.BOOTSTRAP_SCOPES.toList() }.toSet()
-        val ttl = request.ttlSeconds ?: 86_400L
+        val ttl = request.expiresInSeconds ?: 86_400L
         val issued = tokenService.issue(
             principalId = "http-issued:${principal.principalId}",
             scopes = scopes,
             ttlSeconds = ttl,
             loopbackOnly = true,
-            label = request.label,
-            clientId = principal.clientId,
+            label = request.displayName,
+            clientId = request.clientId,
         )
         commandLedger.recordResult(
             CommandId.parse(request.command.commandId),
@@ -1572,9 +2051,14 @@ class ControlPlaneHttpHandler(
         return HttpHandlerResult.Ok(
             body = TokenIssueResultDto(
                 tokenId = issued.tokenId,
+                // API-02: spec field names client_id / display_name / expires_in_seconds;
+                // internal naming (label/ttlSeconds) maps at this boundary.
+                clientId = request.clientId,
                 token = issued.plaintext,
                 scopes = issued.scopes.toList(),
                 expiresAt = issued.expiresAt.toString(),
+                revocationEpoch = issued.revocationEpoch,
+                receiptExpiresAt = clock().plusSeconds(300L).toString(),
                 loopbackOnly = true,
             ),
             status = 201,
@@ -1585,13 +2069,22 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         pageToken: String?,
     ): HttpHandlerResult<TokenPageDto> {
+        val now = clock()
         val items = tokenService.listMetadata().map {
-            TokenMetaDto(
+            val state = when {
+                it.revoked -> "REVOKED"
+                it.expiresAt.isBefore(now) -> "EXPIRED"
+                else -> "ACTIVE"
+            }
+            TokenInfoDto(
                 tokenId = it.tokenId,
+                clientId = it.clientId,
+                state = state,
                 scopes = it.scopes.toList(),
+                issuedAt = it.issuedAt.toString(),
                 expiresAt = it.expiresAt.toString(),
-                revoked = it.revoked,
-                label = it.label,
+                revocationEpoch = it.revocationEpoch,
+                lastSeenAt = it.lastSeenAt?.toString(),
             )
         }
         return HttpHandlerResult.Ok(TokenPageDto(items = items))
@@ -1741,6 +2234,13 @@ class ControlPlaneHttpHandler(
         return dig.joinToString("") { b -> "%02x".format(b) }
     }
 
+    /**
+     * Canonical digest of the full chat message list (COR-13): covers content,
+     * not length — same-length different-content must not collide.
+     */
+    private fun chatMessageDigest(messages: List<ChatMessageDto>): String =
+        sha256Hex(messages.joinToString(separator = "\u0000") { m -> "${m.role}\u0000${m.content}" })
+
     private fun JsonObject.string(key: String): String? =
         (this[key] as? JsonPrimitive)?.contentOrNull
 
@@ -1754,8 +2254,42 @@ class ControlPlaneHttpHandler(
         /** Bounded SSE stream polling (bounded poll × delay ≈ 5 min max). */
         const val MAX_STREAM_POLLS: Int = 15_000
         const val STREAM_POLL_MS: Long = 20L
+
+        /** COR-17/SEC-06: upper bound for the in-memory asset store. */
+        const val MAX_ASSETS: Int = 256
+
+        /** REQUEST states treated as stream-terminal for SSE projection. */
+        private val STREAM_TERMINAL_STATES: Set<String> = setOf(
+            "COMPLETED",
+            "SUCCEEDED",
+            "CANCELLED",
+            "FAILED",
+            "TERMINAL_SUCCESS",
+            "TERMINAL_FAILED",
+            "ABORTED_UNCERTAIN",
+        )
+
+        /** Durable-request terminal states for the events endpoint (API-16). */
+        private val DURABLE_TERMINAL_STATES: Set<String> = setOf(
+            "COMPLETED",
+            "SUCCEEDED",
+            "CANCELLED",
+            "FAILED",
+            "ABORTED_UNCERTAIN",
+            "TERMINAL_SUCCESS",
+            "TERMINAL_FAILED",
+        )
     }
 }
+
+/**
+ * Exploratory engine access resolved from the attached control plane.
+ * Fail-closed null when the plane (or engine binding) is unavailable.
+ */
+data class ExploratoryInferenceSource(
+    val binding: com.omnillm.android.runtimeservice.featurehost.EngineExecuteBinding,
+    val modelManager: com.omnillm.runtime.modelmanager.ModelManager,
+)
 
 private object ClaimShapeOk {
     private val UUID =

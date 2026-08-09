@@ -51,6 +51,7 @@ class LoopbackTokenService(
         val revoked: Boolean,
         val issuedAt: Instant,
         val revocationEpoch: Long,
+        val lastSeenAt: Instant? = null,
     )
 
     data class IssuedToken(
@@ -158,6 +159,7 @@ class LoopbackTokenService(
                 revoked = m.state == "REVOKED",
                 issuedAt = Instant.ofEpochMilli(m.issuedAtEpochMs),
                 revocationEpoch = m.revocationEpoch,
+                lastSeenAt = m.lastSeenAtEpochMs?.let { Instant.ofEpochMilli(it) },
             )
         }
 
@@ -189,6 +191,7 @@ class LoopbackTokenService(
             revoked = rec.state == "REVOKED",
             issuedAt = Instant.ofEpochMilli(rec.issuedAtEpochMs),
             revocationEpoch = rec.revocationEpoch,
+            lastSeenAt = rec.lastSeenAtEpochMs?.let { Instant.ofEpochMilli(it) },
         )
     }
 
