@@ -1,43 +1,56 @@
-# OmniLLM Engine Pack — LiteRT-LM UPSTREAM.lock (template)
+# OmniLLM Engine Pack — LiteRT-LM UPSTREAM.lock
 # Authority: ENGINE-LITERT §1, ENGINE-STANDARD §4
 #
 # Rules:
-# - Architecture docs never pin "latest". Empty digests ⇒ NOT_LOCKED.
-# - Registry must NOT publish QUALIFIED / SUPPORTED without a complete lock
-#   (repository, release/tag/commit, SDK/AAR digest, native libs, toolchain, ABI,
-#   model artifact schema, observedAt, license/notice/SBOM digests).
-# - Builds without a complete lock are exploratory evidence only.
+# - Architecture docs never pin "latest". A complete lock records repository,
+#   tag/commit, SDK/AAR digest, native libs, toolchain, ABI, model artifact schema,
+#   observedAt, license/notice/SBOM digests.
+# - Registry must NOT publish QUALIFIED / SUPPORTED without a complete lock AND
+#   device evidence. This lock is a supply-chain pin — NOT a SUPPORTED claim.
 # - Updating any lock field ⇒ new EngineBuildId; old evidence does not auto-carry.
-# - Design status BASELINE ≠ runtime SUPPORTED.
 #
-# Status of this file in-tree: NOT_LOCKED (template placeholders).
-# Lock eligibility label from design: NOT_QUALIFIED_UNTIL_UPSTREAM_LOCK
+# Lock pin note (2026-08-09):
+# - Official upstream: google-ai-edge/LiteRT-LM tag v0.15.0 /
+#   commit 2117fc4314670e00047bc8469783f02a68c33f0c
+# - Pinned artifact: com.google.ai.edge.litertlm:litertlm-android:0.15.0 (AAR).
+#   aarDigest = SHA-256 of litertlm-android-0.15.0.aar downloaded from Google Maven
+#   (maven.google.com/com/google/ai/edge/litertlm/litertlm-android/0.15.0/).
+# - Same API surface also published as litertlm-jvm:0.15.0 (desktop JVM jar, incl.
+#   Windows x86_64 litertlm_jni.dll) — host probes only, NOT packaged for Android.
+# - nativeLibsDigest: SHA-256 of each bundled .so (arm64-v8a / x86_64).
+# - 16 KB page-size evidence: tools/ci/check_elf_16kb_alignment.py run over both
+#   .so files ⇒ OK checked=2 min_align=16384 (2026-08-09).
+# - minSdkVersion of the AAR manifest: 24 (product minSdk 28 ≥ 24 — no conflict).
+# - Model artifact schema: .litertlm bundle (optimized .tflite + tokenizer + metadata).
+#   GGUF is NOT supported by upstream (no conversion path) — see capability-matrix.
+# - Qualification cells remain UNQUALIFIED until device evidence; a complete lock is
+#   a supply-chain requirement, not a SUPPORTED claim.
 
 schemaVersion: 1
 engineId: LiteRT-LM
-lockState: NOT_LOCKED
+lockState: LOCKED
 
 upstream:
   # Official repository (discovery / license source)
   repository: "https://github.com/google-ai-edge/LiteRT-LM"
-  # Exact tag and/or full commit SHA (both preferred when available)
-  tag: ""
-  commit: ""
-  # SHA-256 of the pinned source tree (tarball or git archive) when building from source
+  # Exact tag + full commit SHA (observed 2026-08-09)
+  tag: "v0.15.0"
+  commit: "2117fc4314670e00047bc8469783f02a68c33f0c"
+  # SHA-256 of the pinned source tree when building from source (empty — AAR form)
   sourceDigest: ""
-  # SHA-256 of OmniLLM patch / glue set applied on top of upstream (empty if none)
+  # SHA-256 of OmniLLM patch / glue set applied on top of upstream (empty = none)
   patchDigest: ""
-  # When the lock fields above were observed (ISO-8601 UTC). Empty until locked.
-  observedAt: ""
+  # When the lock pin fields above were observed (ISO-8601 UTC)
+  observedAt: "2026-08-09T00:00:00Z"
 
 license:
-  # SPDX or short name recorded at qualification time (fill from pinned artifact)
-  spdx: ""
-  # Path relative to pinned source / AAR metadata for LICENSE / NOTICE capture
-  licensePath: ""
-  # SHA-256 of license bytes captured at lock time
-  licenseDigest: ""
-  # Optional notice / third-party / SBOM digests (ENGINE-LITERT §1 / §11)
+  # SPDX recorded for the pinned artifact (AAR LICENSE file)
+  spdx: "Apache-2.0"
+  # LICENSE inside the AAR (captured from litertlm-android-0.15.0.aar)
+  licensePath: "LICENSE"
+  # SHA-256 of LICENSE bytes at pin (2026-08-09)
+  licenseDigest: "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+  # Optional notice / third-party report digests (THIRD_PARTY_NOTICE.txt in AAR)
   noticeDigest: ""
   dependencyReportDigest: ""
   sbomDigest: ""
@@ -45,45 +58,44 @@ license:
 toolchain:
   # Must match product ANDROID-NATIVE / platform-policy locks when building for Android
   ndkVersion: "28.2.13676358"
-  # Official SDK may ship prebuilt native libs; still record host toolchain for rebuilds
-  agpVersion: ""
-  # Opaque digest of the full toolchain fingerprint (SDK + NDK + host + flags template)
-  toolchainDigest: ""
-  hostOs: ""
-  hostArch: ""
+  # Official SDK ships prebuilt native libs; AGP recorded for rebuilds of the adapter
+  agpVersion: "9.3.0"
+  # SHA-256 of the recorded toolchain fingerprint
+  # (ndkVersion+agpVersion+hostOs+hostArch) — captured 2026-08-09
+  toolchainDigest: "94868f9f82e76d30cee3ebf6767e1cfa672d9305060af9b5fe913ca210fcf636"
+  hostOs: "windows"
+  hostArch: "x86_64"
 
 sdk:
-  # Official documented SDK / AAR identity (ENGINE-LITERT §2)
-  # Prefer release artifact coordinates over ad-hoc JNI assumptions.
-  # Android Maven (pin exact version — never latest.release for qualification):
-  #   com.google.ai.edge.litertlm:litertlm-android:<version>
-  # JVM host (optional for desktop probes only):
-  #   com.google.ai.edge.litertlm:litertlm-jvm:<version>
+  # Official documented SDK identity (ENGINE-LITERT §2) — Android AAR pinned exactly.
+  mavenCoordinate: "com.google.ai.edge.litertlm:litertlm-android:0.15.0"
+  # Host-only variant (same Kotlin API surface; desktop natives — NOT for Android):
+  #   com.google.ai.edge.litertlm:litertlm-jvm:0.15.0 (sha256
+  #   e9231340300c77fefa6e2fd8302561fca2ac9ec97d0079c7504b5a4ecdaa152e)
   # Docs: https://developers.google.com/edge/litert-lm/android
-  # Gradle enable for :engines:litert-lm compileOnly:
-  #   -Pomnillm.litertlm.sdkVersion=<version>
-  # Package AAR into :android:runtime-service (or companion) only — never app-ui (INV-001).
-  mavenCoordinate: ""
-  # Example once pinned: "com.google.ai.edge.litertlm:litertlm-android:0.0.0-REPLACE"
-  aarDigest: ""
-  # SHA-256 of the AAR file bytes (required for lock completeness via aarDigest or sourceDigest)
-  # SHA-256 of bundled native libs inside the AAR / jni packs (per ABI preferred)
-  nativeLibsDigest: ""
-  # Documented Engine / Conversation API surface version or schema id
-  # (Engine, EngineConfig, Conversation, Backend, Message / MessageCallback / Flow)
-  apiSurfaceVersion: ""
-  # Model artifact schema id for .litertlm / official packages
-  modelArtifactSchema: ""
-  # Optional: Google Maven URL or evidence id for the pinned version page
-  mavenIndexUrl: ""
+  # SHA-256 of the AAR file bytes — captured 2026-08-09
+  aarDigest: "b398c4745934a6035d192ffce5fdaf4f72a0009830a97b73c017c21f2a92b5bd"
+  # SHA-256 of bundled native libs inside the AAR (per ABI):
+  #   arm64-v8a: 5bb19fa9d9a39098c1f8bbbe58fa78ed08454fee5fd86f2964d9f8da95e5d52a
+  #   x86_64:    2e98e5cd30d0091a0277f9a9421659d779548518268eae27ea878cd629b9869e
+  # nativeLibsDigest records the primary ABI (arm64-v8a) digest; both ABIs above.
+  nativeLibsDigest: "5bb19fa9d9a39098c1f8bbbe58fa78ed08454fee5fd86f2964d9f8da95e5d52a"
+  # Documented Engine / Conversation API surface (Engine, EngineConfig, Conversation,
+  # ConversationConfig, Backend, Message / MessageCallback, cancelProcess, tokenCount)
+  apiSurfaceVersion: "v0.15.0 kotlin API"
+  # Model artifact schema id: .litertlm bundle (optimized tflite + tokenizer + metadata)
+  modelArtifactSchema: "litertlm-bundle (tflite + tokenizer + metadata); GGUF not supported"
+  # Google Maven index page for the pinned version
+  mavenIndexUrl: "https://maven.google.com/web/index.html#com.google.ai.edge.litertlm:litertlm-android:0.15.0"
 
 build:
   # Canonical build / packaging flags for this EngineBuildId
-  buildFlags: ""
-  # ABIs included in this build (Android: arm64-v8a, x86_64, …)
-  abis: []
-  # Page-size / 16 KB packaging evidence pointer (digest or evidence id)
-  pageSizeEvidence: ""
+  buildFlags: "aar-from-maven (prebuilt; no local NDK build for the SDK)"
+  # ABIs included in the pinned AAR
+  abis: ["arm64-v8a", "x86_64"]
+  # 16 KB page-size / packaging evidence — ELF LOAD-segment scan via
+  # tools/ci/check_elf_16kb_alignment.py on both .so ⇒ OK checked=2 min_align=16384
+  pageSizeEvidence: "tools/ci/check_elf_16kb_alignment.py PASS (2026-08-09, both ABIs)"
   features:
     # Design candidates only — runtime remains UNKNOWN until cell evidence
     cpu: true
@@ -96,9 +108,10 @@ build:
 
 artifact:
   # EngineBuildId string published with this lock (opaque; not a native / SDK pointer)
-  engineBuildId: ""
-  # SHA-256 of packaged engine adapter + SDK payload for this build
-  artifactDigest: ""
+  engineBuildId: "litert-lm-v0.15.0-android"
+  # SHA-256 of packaged engine adapter artifact — AAR bytes (classes.jar:
+  # 64c69d66fc4f5859adc1758b10090c13f17ded187d551078841f7282b786ff7a)
+  artifactDigest: "b398c4745934a6035d192ffce5fdaf4f72a0009830a97b73c017c21f2a92b5bd"
   symbolIndexDigest: ""
 
 testedProfile:
@@ -110,7 +123,11 @@ testedProfile:
   profileId: ""
 
 notes:
-  integrationShape: "Official SDK/AAR Engine/Conversation adapter; do not assume traditional JNI exposes all handles; never pass SDK objects across AIDL"
-  placementHint: "Verified SDK + catalog model may use privileged/crash-contained when all phases qualified; untrusted import → isolated CPU or different-UID companion only if SDK can operate under that boundary; privileged accelerator without isolation ⇒ policy unsupported for untrusted"
+  integrationShape: "Official SDK/AAR Engine/Conversation adapter via typed OfficialLitertLmSdkBridge (no reflection); stream via sendMessageAsync(MessageCallback); cancel via cancelProcess (best-effort)"
+  jvmHostArtifact: "litertlm-jvm:0.15.0 compileOnly for the JVM engine module — compile-time API surface only; Android runtime process must package litertlm-android AAR (INV-001)"
+  ggufUnsupported: "Upstream has NO GGUF conversion path — model formats are .litertlm/.tflite/.task only; catalog must not advertise GGUF for this engine"
+  cancelObservability: "conversation.cancelProcess() stops output; upstream state-rollback is open (b/450903294) ⇒ measured mode UNKNOWN ⇒ killable worker still required (ENGINE-LITERT §6)"
+  usageAccounting: "Conversation.getTokenCount() = KV-cache tokens (prefill+decode); usage events are kv-cache-approximate, not exact prompt/completion splits"
+  placementHint: "Verified SDK + catalog model may use privileged/crash-contained when all phases qualified; untrusted import → isolated CPU or different-UID companion only if SDK can operate under that boundary"
   failClosed: "Incomplete lock ⇒ Registry exposure UNKNOWN; dry-load never elevates trust; unlisted backend/NPU never SUPPORTED merely because device has NPU"
   lockEligibility: "NOT_QUALIFIED_UNTIL_UPSTREAM_LOCK"

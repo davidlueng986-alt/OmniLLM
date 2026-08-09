@@ -137,7 +137,10 @@ class RealSdkBackendTest {
             DeviceDescriptor(DeviceExecutionFingerprint.parse("fp-real-sdk")),
         ) as OmniResult.Ok).value
         assertEquals("RealSdkBackend", desc.notes["sdkBackendKind"])
-        assertEquals("false", desc.notes["sdkAvailable"]) // AAR absent on host JVM
+        // The pinned official SDK jar is intentionally on the host test classpath
+        // (testImplementation litertlm-jvm:0.15.0) — presence is NOT qualification.
+        assertEquals("true", desc.notes["sdkAvailable"])
+        assertEquals("true", desc.notes["officialSdkOnClasspath"])
         assertEquals(LitertLmModule.QUALIFICATION_STATUS, desc.notes["qualificationStatus"])
     }
 

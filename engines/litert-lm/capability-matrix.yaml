@@ -9,22 +9,33 @@
 schemaVersion: 1
 engineId: LiteRT-LM
 designStatus: BASELINE
-upstreamLockStatus: NOT_LOCKED
+# Supply-chain pin recorded 2026-08-09 (v0.15.0, commit 2117fc43, AAR digest in
+# UPSTREAM.lock). A complete lock is NOT a SUPPORTED claim — see qualificationStatus.
+upstreamLockStatus: LOCKED
+# Integration status of the adapter pack (Stage 2E): typed real SDK backend replaced
+# the reflection bridge; qualification evidence on-device is still pending (Stage 5).
+integrationStatus: INTEGRATED
 qualificationStatus: UNQUALIFIED
 registryExposure: UNKNOWN
 runtimeCapabilityDefault: UNKNOWN
 productDocId: ENGINE-LITERT
 
 # Format support follows pinned SDK schema — never by extension alone (ENGINE-LITERT §3).
+# Upstream (v0.15.0) has NO GGUF support / conversion path: model formats are
+# .litertlm / .tflite / legacy .task bundles only. GGUF must not be advertised.
 formats:
   - id: litertlm
     design: candidate
     runtimeDefault: UNKNOWN
-    notes: ".litertlm or official artifact; typedModelRevision / model envelope required"
+    notes: ".litertlm official bundle (optimized tflite + tokenizer + metadata); typedModelRevision / model envelope required"
   - id: official_sdk_package
     design: candidate
     runtimeDefault: UNKNOWN
-    notes: "Official documented package shape from pinned SDK"
+    notes: "Official documented package shape from pinned SDK (.tflite / .task legacy paths)"
+  - id: gguf
+    design: not_supported_by_upstream
+    runtimeDefault: UNKNOWN
+    notes: "Upstream v0.15.0 provides no GGUF loading or conversion path — do not advertise GGUF for this engine"
 
 backends:
   - id: cpu
@@ -259,13 +270,14 @@ cells:
     cancellationMode: UNKNOWN
 
 unsupportedByDefault:
+  - "GGUF model files (upstream has no GGUF loading/conversion path)"
   - "Prefix truncate / fork / cross-session reuse without SDK+model cell evidence (ENGINE-LITERT §10)"
   - "Embedding without SDK version / model cell evidence"
   - "Multimodal and structured output without cell evidence"
   - "GPU/NPU backends without per-device/driver/model/workload qualification"
   - "Claiming SUPPORTED because device has NPU (ENGINE-LITERT §3)"
   - "Untrusted accelerated inference when SDK cannot isolate under different UID (ADR-007)"
-  - "Treating SDK stream cancel as native execution stopped without measurement"
+  - "Treating SDK stream cancel (cancelProcess) as native execution stopped without measurement (b/450903294)"
   - "Silent ignore of unsupported sampling / template / backend parameters"
   - "Reusing Conversation / Engine objects after worker death"
   - "Cross-process durable KV restore after worker death"

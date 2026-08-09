@@ -2,6 +2,7 @@ package com.omnillm.engines.litertlm.lock
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -69,5 +70,18 @@ class UpstreamLockTest {
         assertEquals(listOf("cpu"), lock.testedBackends)
         assertEquals(listOf("litertlm"), lock.testedFormats)
         assertFalse(lock.isComplete())
+    }
+
+    @Test
+    fun packagedLock_parsesToCompleteLock() {
+        // Real engines/litert-lm/UPSTREAM.lock (packaged as classpath resource).
+        val lock = UpstreamLockLoader.loadFromClasspathOrTemplate()
+        assertEquals("LiteRT-LM", lock.engineId)
+        assertEquals("LOCKED", lock.lockState)
+        assertEquals("v0.15.0@2117fc4314670e00047bc8469783f02a68c33f0c", lock.upstreamCommitOrTag())
+        assertEquals("litert-lm-v0.15.0-android", lock.engineBuildIdRaw)
+        assertEquals(listOf("arm64-v8a", "x86_64"), lock.abis)
+        assertTrue("packaged lock must be complete", lock.isComplete())
+        assertNotNull(lock.resolvedEngineBuildId())
     }
 }

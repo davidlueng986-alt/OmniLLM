@@ -25,7 +25,7 @@ object SdkBackendFactory {
     fun forProduction(
         lock: UpstreamLock,
         forceExploratory: Boolean = false,
-        bridge: LitertLmSdkBridge = ReflectiveLitertLmSdkBridge.detect(),
+        bridge: LitertLmSdkBridge = LitertLmSdkBridge.detect(),
     ): RealSdkBackend {
         val allow = forceExploratory && lock.isComplete()
         return RealSdkBackend.create(
@@ -54,5 +54,6 @@ object SdkBackendFactory {
      * Does **not** imply SUPPORTED or lock completeness.
      */
     fun isOfficialSdkOnClasspath(): Boolean =
-        ReflectiveLitertLmSdkBridge.detect().isPresent()
+        LitertLmSdkBridge.detect().isPresent()
 }
+

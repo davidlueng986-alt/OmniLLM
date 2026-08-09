@@ -27,17 +27,23 @@ dependencies {
     api(project(":core:identity"))
     api(project(":core:state"))
 
-    // Optional official LiteRT-LM AAR (ENGINE-LITERT §2).
-    // Default: OFF — host CI/unit tests must not require Google Maven artifacts.
-    // Human pin: set -Pomnillm.litertlm.sdkVersion=<version> (and lock digests in UPSTREAM.lock).
-    // Never use "latest.release" for qualification. RealSdkBackend still fails closed until
-    // lock is complete + exploratory policy allows execute; AAR presence ≠ SUPPORTED.
-    val litertSdkVersion = (findProperty("omnillm.litertlm.sdkVersion") as String?)?.trim().orEmpty()
-    if (litertSdkVersion.isNotEmpty()) {
-        // compileOnly: adapter compiles against types only when human enables the property.
-        // Runtime packaging of the AAR belongs to :android:runtime-service / companion — not UI.
-        compileOnly("com.google.ai.edge.litertlm:litertlm-android:$litertSdkVersion")
-    }
+    // Official LiteRT-LM Kotlin API surface — pinned 0.15.0 (UPSTREAM.lock; NEVER drift
+    // to "latest.release" for qualification). The JVM artifact exposes the same
+    // com.google.ai.edge.litertlm.* Engine/EngineConfig/Conversation/Backend surface as
+    // the Android AAR (litertlm-android), with no android.* types — it is the compile-time
+    // type surface for this JVM engine module and is NOT packaged for Android.
+    //
+    // Packaging split (INV-001): the Android runtime process (runtime-service/companion)
+    // must package `com.google.ai.edge.litertlm:litertlm-android:0.15.0` (native libs
+    // inside the AAR) instead of this JVM jar. Host JVM probes may use litertlm-jvm.
+    // OfficialLitertLmSdkBridge fails closed (NOT_AVAILABLE) when the SDK is absent.
+    val litertLmSdkVersion = "0.15.0"
+    compileOnly("com.google.ai.edge.litertlm:litertlm-jvm:$litertLmSdkVersion")
+
+    // Real SDK classes on the host test classpath: mapping tests construct genuine
+    // EngineConfig/Backend/Contents/Message objects (no native calls — Engine/Conversation
+    // are never instantiated in host unit tests).
+    testImplementation("com.google.ai.edge.litertlm:litertlm-jvm:$litertLmSdkVersion")
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.core)
@@ -45,6 +51,17 @@ dependencies {
 
 tasks.named("compileKotlin").configure {
     dependsOn(rootProject.tasks.named("generateContracts"))
+}
+
+// litertlm-jvm 0.15.0 ships Java 21 bytecode (class file major 65) — host unit tests
+// must run on a JVM ≥ 21 while the module's compile toolchain stays at the product
+// default (libs.versions.jdk). Android packaging is unaffected (D8 consumes bytecode).
+tasks.named<Test>("test") {
+    javaLauncher.set(
+        javaToolchains.launcherFor {
+            languageVersion.set(JavaLanguageVersion.of(21))
+        },
+    )
 }
 
 // Package UPSTREAM.lock + capability matrix next to classes for registration helpers.

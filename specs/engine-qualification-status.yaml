@@ -9,10 +9,23 @@ engines:
   runtimeCapabilityDefault: UNKNOWN
 - engineId: LiteRT-LM
   designStatus: BASELINE
-  upstreamLockStatus: NOT_LOCKED
+  # Stage 2E (2026-08-09): UPSTREAM.lock pinned to v0.15.0 (commit 2117fc43,
+  # AAR digest b398c474…, 16 KB alignment PASS for both ABIs). A complete supply-chain
+  # lock is NOT a SUPPORTED claim — all runtime cells remain UNQUALIFIED.
+  upstreamLockStatus: LOCKED
+  # Stage 2E: typed official SDK backend (OfficialLitertLmSdkBridge) replaced the
+  # reflection stub bridge; compile-verified against com.google.ai.edge.litertlm 0.15.0.
+  integrationStatus: INTEGRATED_PENDING_QUALIFICATION
   qualificationStatus: UNQUALIFIED
   registryExposure: UNKNOWN
   runtimeCapabilityDefault: UNKNOWN
+  evidenceNotes:
+    - "Upstream: google-ai-edge/LiteRT-LM v0.15.0 @ 2117fc4314670e00047bc8469783f02a68c33f0c (Apache-2.0)"
+    - "Artifact: com.google.ai.edge.litertlm:litertlm-android:0.15.0, sha256 b398c4745934a6035d192ffce5fdaf4f72a0009830a97b73c017c21f2a92b5bd (minSdk 24, ABIs arm64-v8a+x86_64)"
+    - "16 KB page alignment: tools/ci/check_elf_16kb_alignment.py PASS on both AAR .so (2026-08-09)"
+    - "JVM host surface: litertlm-jvm:0.15.0 (compileOnly for :engines:litert-lm; host tests use real EngineConfig/Backend/Contents/Message classes)"
+    - "Real inference on device NOT yet executed — instrumented tests + evidence cells are Stage 5; do not mark QUALIFIED/SUPPORTED"
+    - "Model formats: .litertlm/.tflite only; GGUF unsupported upstream (doc gap flagged for Stage 4b)"
 - engineId: MLC-LLM
   designStatus: BASELINE
   upstreamLockStatus: NOT_LOCKED
@@ -21,16 +34,39 @@ engines:
   runtimeCapabilityDefault: UNKNOWN
 - engineId: mllm
   designStatus: BASELINE
-  upstreamLockStatus: NOT_LOCKED
+  # Stage 2E (2026-08-09): UPSTREAM.lock pinned to mllm 2.0.0 (commit c67485a3,
+  # sourceDigest 00EA95AE…) + mllm-chat v2.0 Android artifacts (mllm_server.aar
+  # sha256 51590682…, jniLibs.zip sha256 E239C320…, CPU libs 16 KB PASS, QNN
+  # excluded — 4 KB only). A complete supply-chain lock is NOT a SUPPORTED claim.
+  upstreamLockStatus: LOCKED
+  # Stage 2E: real backend (MllmServerBackend over gomllm.Gomllm.startServer +
+  # OpenAI-compatible HTTP/SSE on 127.0.0.1:8080) replaced StubServerBackend as
+  # the default; compile + JVM behavior tests green.
+  integrationStatus: INTEGRATED_PENDING_QUALIFICATION
   qualificationStatus: UNQUALIFIED
   registryExposure: UNKNOWN
   runtimeCapabilityDefault: UNKNOWN
+  evidenceNotes:
+    - "Upstream: UbiquitousLearning/mllm tag 2.0.0 @ c67485a3f1e19e39654a88011aaa0a007bd6446e (MIT); Android demo mllm-chat @ 6e18a4cbc8cd77a1e86bc261622169006fb258c6"
+    - "Artifacts: engines/mllm/libs/mllm_server.aar (Go in-app server, sha256 5159068241D7F9A0AAFA28CB8FBAF4C97DD3677825D584A0F402AF1571A2C0DD) + release v2.0 jniLibs.zip (sha256 E239C3202FE1B9F4172B1CBD8521619046A2243D93860B01101E9E10C8F87B13, CPU libs only, arm64-v8a)"
+    - "16 KB page alignment: CPU runtime libs + libgojni.so PASS tools/ci/check_elf_16kb_alignment.py; QNN NPU libs FAIL (p_align=4096) — intentionally not packaged (2026-08-09)"
+    - "Go toolchain: upstream mllm-cli go.mod toolchain go1.24.11 (AAR is upstream-prebuilt; not rebuilt here)"
+    - "Backend facts: single chat-model slot per process (server start = model load); no stop/unload/embedding APIs upstream (honest UNSUPPORTED_OPERATION/CAPABILITY_UNKNOWN, not stubs); credential is adapter-enforced (server has no auth)"
+    - "Real inference on device NOT yet executed — instrumented tests + evidence cells are Stage 5 (incl. control-plane prompt-content resolution from canonicalInputDigest); do not mark QUALIFIED/SUPPORTED"
+    - "Model format: .mllm (mllm-convertor); GGUF data types exist upstream but are not the Android server packaging path — doc gap flagged for Stage 4b"
 - engineId: ONNX-Runtime-GenAI
   designStatus: BASELINE
-  upstreamLockStatus: NOT_LOCKED
+  upstreamLockStatus: LOCKED
+  integrationStatus: INTEGRATED
   qualificationStatus: UNQUALIFIED
   registryExposure: UNKNOWN
   runtimeCapabilityDefault: UNKNOWN
+  notes:
+    - "Stage 2E (2026-08-09): real backend integrated (RealGenAiBackend over ai.onnxruntime.genai v0.14.0 AAR Java API, direct JVM access — no OmniLLM JNI bridge); module compile/test/assemble green"
+    - "UPSTREAM.lock LOCKED: onnxruntime-genai-android 0.14.0 AAR (GitHub release asset — NOT on Maven Central; sha256 c2e9b967...) + base com.microsoft.onnxruntime:onnxruntime-android 1.25.1 (Maven Central)"
+    - "Artifact facts verified: minSdk 24; ABIs arm64-v8a + x86_64; 16 KB ELF alignment PASS (4/4 genai AAR, 8/8 base AAR); MIT license"
+    - "UNQUALIFIED is honest: no device-verified inference. INTEGRATED ≠ SUPPORTED; all cells UNQUALIFIED/NOT_EXECUTED (build-log evidence only)"
+    - "Host JVM real-inference smoke not feasible with published artifacts (no JVM GenAI artifact); needs device/emulator instrumented tests (Stage 5) with smoke model provisioning (e.g. upstream test/test_models/hf-internal-testing/tiny-random-gpt2-fp32)"
 requiredCellDimensions:
 - engineBuildId
 - deviceExecutionFingerprint

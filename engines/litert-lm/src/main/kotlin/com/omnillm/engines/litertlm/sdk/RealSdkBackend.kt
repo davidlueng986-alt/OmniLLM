@@ -7,7 +7,8 @@ import java.util.concurrent.ConcurrentHashMap
  * (ENGINE-LITERT §2).
  *
  * - Optional dependency: does **not** require the AAR at compile time of this
- *   JVM module. Uses [LitertLmSdkBridge] (default [ReflectiveLitertLmSdkBridge.detect]).
+ *   JVM module. Uses [LitertLmSdkBridge] (default [LitertLmSdkBridge.detect],
+ *   binding [OfficialLitertLmSdkBridge] when the SDK is on the classpath).
  * - When the AAR is absent: [isAvailable] is false; probe/load/generate fail closed
  *   ([SdkErrorCode.NOT_AVAILABLE] / [SdkErrorCode.CAPABILITY_UNKNOWN]).
  *   **Missing natives / AAR are never reported as success.**
@@ -19,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap
  * substitute [StubSdkBackend] in production (INV-018).
  */
 class RealSdkBackend(
-    private val bridge: LitertLmSdkBridge = ReflectiveLitertLmSdkBridge.detect(),
+    private val bridge: LitertLmSdkBridge = LitertLmSdkBridge.detect(),
     /**
      * Optional lock completeness gate. When false (default for incomplete lock),
      * load/generate remain CAPABILITY_UNKNOWN even if the AAR is on the classpath,
@@ -220,7 +221,7 @@ class RealSdkBackend(
          */
         fun create(
             allowExploratoryExecute: Boolean = false,
-            bridge: LitertLmSdkBridge = ReflectiveLitertLmSdkBridge.detect(),
+            bridge: LitertLmSdkBridge = LitertLmSdkBridge.detect(),
         ): RealSdkBackend =
             RealSdkBackend(
                 bridge = bridge,
@@ -234,7 +235,7 @@ class RealSdkBackend(
          */
         fun createOrNull(
             allowExploratoryExecute: Boolean = false,
-            bridge: LitertLmSdkBridge = ReflectiveLitertLmSdkBridge.detect(),
+            bridge: LitertLmSdkBridge = LitertLmSdkBridge.detect(),
         ): RealSdkBackend? {
             if (!bridge.isPresent()) return null
             return RealSdkBackend(
@@ -244,3 +245,4 @@ class RealSdkBackend(
         }
     }
 }
+
