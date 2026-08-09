@@ -90,11 +90,12 @@ class RuntimeServiceInstrumentedSmokeTest {
             "BIND_RUNTIME discovery permission must be declared",
             permission != null,
         )
-        // protectionLevel normal = discovery filter, not auth boundary (ANDROID-SERVICE §2).
+        // SEC-01: signature-level permission — only same-signature APKs may
+        // attempt the exported RuntimeBindingService bind (raised from normal).
         val level = permission!!.protectionLevel and 0xF
         assertEquals(
-            "BIND_RUNTIME must remain normal (not signature/dangerous)",
-            android.content.pm.PermissionInfo.PROTECTION_NORMAL,
+            "BIND_RUNTIME must be signature (SEC-01, raised from normal in 1a29f41)",
+            android.content.pm.PermissionInfo.PROTECTION_SIGNATURE,
             level,
         )
     }
