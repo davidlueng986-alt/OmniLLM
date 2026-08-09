@@ -1,8 +1,12 @@
 # Engine Registry attachment (RuntimeControlPlane)
 
 **Owner:** `:android:runtime-service` control plane  
-**Authority:** ENGINE-STANDARD, ENGINE-QUALIFICATION-STATUS, ADR-010, INV-001, INV-018  
-**Code:** `EnginePackAttachment`, `EngineSelectionPolicy`, `RuntimeControlPlane.ensureEnginePacksAttached`
+**Authority (implementation):** `ProductBuildMode`, `EnginePackAttachment`, `EngineSelectionPolicy`, `EngineExecuteBinding`  
+**Code:** `RuntimeControlPlane.ensureEnginePacksAttached`
+
+> **Development posture (current):** `ProductBuildMode.DEVELOPMENT_SHIP_MODE = true`.  
+> Goal is **finish all engines + features**. Qualification paperwork and “no lock ⇒ no execute” gates do **not** block develop/execute.  
+> Flip `DEVELOPMENT_SHIP_MODE = false` only for a compliance honesty audit.
 
 ## When attach runs
 
@@ -12,73 +16,80 @@
 
 ## Catalog engines (all registered)
 
-| engineId | Gradle module | Production backend on attach |
+| engineId | Gradle module | Backend on attach (DEV ship mode) |
 |---|---|---|
-| `llama.cpp` | `:engines:llama-cpp` | Real `JniNativeBackend` via `libomnillm_llama` when present; **no** silent `StubNativeBackend` substitute |
-| `LiteRT-LM` | `:engines:litert-lm` | Registry stub only (UNKNOWN) |
-| `MLC-LLM` | `:engines:mlc-llm` | Registry stub only (UNKNOWN) |
-| `mllm` | `:engines:mllm` | Registry stub only (UNKNOWN) |
-| `ONNX-Runtime-GenAI` | `:engines:ort-genai` | Registry stub only (UNKNOWN) |
+| `llama.cpp` | `:engines:llama-cpp` | Real `JniNativeBackend` via `libomnillm_llama` when present |
+| `LiteRT-LM` | `:engines:litert-lm` | Adapter + SDK SPI (wire real SDK when available) |
+| `MLC-LLM` | `:engines:mlc-llm` | Adapter + runtime SPI (wire real MLC when available) |
+| `mllm` | `:engines:mllm` | Adapter + server/AAR SPI |
+| `ONNX-Runtime-GenAI` | `:engines:ort-genai` | Adapter + GenAI SPI |
 
 Each pack registers:
 
-1. `EngineRegistration` (build metadata; incomplete UPSTREAM.lock is allowed)
-2. Phase-capability **placeholder cells** at `UNQUALIFIED` + evidence `NOT_EXECUTED`
+1. `EngineRegistration` (build metadata; incomplete UPSTREAM.lock is allowed in DEV)
+2. Phase-capability cells (seeded from matrix; DEV mode does not require PASS to execute)
 
-## Selection policy (normative)
+## Selection policy (current)
 
-Implemented as `EngineSelectionPolicy` (see KDoc for the full rule list).
+Implemented as `EngineSelectionPolicy` + `ProductBuildMode`.
 
-1. **Executable only when SUPPORTED** — `EngineRegistry.resolveCapability` must project `SUPPORTED` for the exact phase-capability cell.
-2. **SUPPORTED requires evidence** — only `QUALIFIED_WITH_ENVELOPE` **and** evidence `PASS` project SUPPORTED. Design `BASELINE`, stub adapters, and native library presence do **not**.
-3. **Fail closed on UNKNOWN** — missing cell, non-envelope status, or non-PASS evidence ⇒ UNKNOWN / not selected (INV-018).
-4. **Only llama-cpp may use real native** in this attach path. Peers remain stub/UNKNOWN until their own native/SDK + device evidence land.
-5. **Native ≠ qualified** — loading `libomnillm_llama` does not flip cells to SUPPORTED.
-6. **No envelope inheritance** — evidence never generalizes across backend / device / model / workload.
-7. **Transports do not select engines** (ADR-011) — Orchestrator + Registry own routing.
+### DEVELOPMENT_SHIP_MODE = true (default)
+
+1. **All catalog engines** may use real native/SDK when wired (`nativeEligible = ALL_CATALOG`).
+2. **Execute does not require** `QUALIFIED_WITH_ENVELOPE` + lab PASS.
+3. Bound adapter ⇒ generation path may project **SUPPORTED** / run via Orchestrator (`EngineExecuteBinding`).
+4. Attach does **not** assert-fail on SUPPORTED projection.
+5. `runtime.exploratoryExecuteEnabled` defaults **true**.
+6. Transports still do not select engines (ADR-011) — Orchestrator + Registry own routing.
+7. Missing backend / missing model still fails with a clear error (implementation gap ≠ policy gate).
+
+### COMPLIANCE_HONESTY_MODE (DEVELOPMENT_SHIP_MODE = false)
+
+Restores old pre-build document rules:
+
+1. Executable only when cell projects SUPPORTED.
+2. SUPPORTED only from QUALIFIED_WITH_ENVELOPE + evidence PASS.
+3. Only llama-cpp native-eligible; peers stub/UNKNOWN.
+4. Fail closed on UNKNOWN; attach asserts no invented SUPPORTED cells.
 
 ## What attach deliberately does not do
 
-- Mark any cell `QUALIFIED` / `SUPPORTED` without real device evidence packs
-- Substitute `StubNativeBackend` for production llama-cpp when native is missing
-- Load LiteRT / MLC / mllm / ORT native or vendor SDK in this process
+- Load peer engine vendor SDKs that are **not packaged** yet (those are **implementation TODOs**, not policy blocks)
 - Write OmniLLM domain DB from engine adapters (ADR-010)
+- Claim Play-store “qualified on device matrix” without real evidence (lab PASS is separate from develop mode)
 
 ## Tests
 
-- `:android:runtime-service` → `EnginePackAttachmentTest`
-  - All catalog engines registered
-  - Zero SUPPORTED projections after attach
-  - Stub llama-cpp engine does not elevate capability
-  - Only llama-cpp is native-eligible per policy
-- `:engines:api` → `EngineRegistryTest` (projection pure rules)
+- `:android:runtime-service` → `EnginePackAttachmentTest` (update expectations for DEV mode)
+- `:engines:api` → `EngineRegistryTest` (projection pure rules still apply for compliance path)
 
 ## Wiring
 
 ```
 RuntimeControlPlane.attach
   → WaveAWiring.wire(engineExecute = EngineExecuteBinding)
-       Orchestrator ← DelegatingInferenceEngine (starts fail-closed)
+       Orchestrator ← DelegatingInferenceEngine
        Playground/Server/Tools/Routing ports ← Orchestrator path
   → ensureStarted → READY|DEGRADED
   → ensureEnginePacksAttached
   → EnginePackAttachment.attachAfterReady
-  → EngineRegistry + (optional) LlamaCppEngine(JniNativeBackend)
+  → EngineRegistry + catalog engines (native/SDK when present)
   → EngineExecuteBinding.applyAttachment
-       DelegatingInferenceEngine.bind(LlamaCppInferenceEngineAdapter)
+       DelegatingInferenceEngine.bind(...)
 ```
 
-### Exploratory execute (honest CONDITIONAL)
+### Execute path (DEV ship mode)
 
-| Condition | Capability projection | Execute |
-|---|---|---|
-| Native missing | UNKNOWN | Fail-closed clear error |
-| Native attached, `runtime.exploratoryExecuteEnabled=false` (default) | UNKNOWN | Fail-closed (explicit opt-in required) |
-| Native attached, flag true | **CONDITIONAL** (not SUPPORTED) | Plan→Reserve→Commit→Execute via Orchestrator using **explicit** `fixture:EXPERIMENTAL_FIXTURE` load markers |
-| Real install without path/FD / fixture markers | UNKNOWN | Fail closed — **no silent fixture** |
-| Cross engineBuildId / revision | UNKNOWN | Fail closed — no silent fallback |
+| Condition | Result |
+|---|---|
+| Adapter bound + model READY path | Execute allowed (stream tokens when backend real) |
+| Backend missing / stub only | Clear error / stub response — **fix by wiring real SDK** |
+| Model not imported | Fail with model-not-ready (feature work: hub import/load) |
+| COMPLIANCE mode + no PASS cell | Fail closed UNKNOWN |
 
-Setting: `runtime.exploratoryExecuteEnabled` (LOCAL_ADMIN, default false) in
-`specs/configuration-catalog.yaml` / `ConfigurationCatalog`.
+Setting: `runtime.exploratoryExecuteEnabled` defaults from `ProductBuildMode`  
+(`ConfigurationCatalog` / `specs/configuration-catalog.yaml`).
+
+**Master ship list:** root `SHIP_BACKLOG.md` (what still must be built vs policy).
 
 Gradle: `:android:runtime-service` depends on `:engines:api` and every catalog Engine Pack module; `:android:native` supplies `libomnillm_llama` for the runtime process only.

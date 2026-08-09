@@ -124,6 +124,7 @@ object ModelHubAction {
     const val CHANGE_ALIAS: String = "CHANGE_ALIAS"
     const val LOAD: String = "LOAD"
     const val UNLOAD: String = "UNLOAD"
+    const val ACCEPT_LICENSE: String = "ACCEPT_LICENSE"
 }
 
 /**

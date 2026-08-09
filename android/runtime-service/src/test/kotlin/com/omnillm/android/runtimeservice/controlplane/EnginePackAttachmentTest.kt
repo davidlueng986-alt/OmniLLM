@@ -2,6 +2,7 @@ package com.omnillm.android.runtimeservice.controlplane
 
 import com.omnillm.core.canonical.generated.CapabilityState
 import com.omnillm.core.contracts.DeviceExecutionFingerprint
+import com.omnillm.core.contracts.ProductBuildMode
 import com.omnillm.engines.api.EnginePhases
 import com.omnillm.engines.api.EngineQualificationCellKey
 import com.omnillm.engines.api.EngineQualificationCellStatus
@@ -73,7 +74,12 @@ class EnginePackAttachmentTest {
         )
 
         // Projection: no cell may advertise SUPPORTED without QUALIFIED_WITH_ENVELOPE+PASS.
-        assertFalse(EngineSelectionPolicy.anySupportedCell(pack.registry))
+        // (DEV-mode policy shortcut anySupportedCell = registrations present; the
+        // evidence-driven registry projection must still stay UNKNOWN.)
+        assertEquals(
+            ProductBuildMode.allowExecuteWithoutQualification(),
+            EngineSelectionPolicy.anySupportedCell(pack.registry),
+        )
         assertTrue(cells.none { EngineSelectionPolicy.projectsSupported(it) })
         for (cell in cells) {
             assertEquals(
@@ -108,8 +114,11 @@ class EnginePackAttachmentTest {
         )
         assertNotNull(pack.llamaCppEngine)
         assertTrue(pack.llamaCppEngine!!.native.libraryLabel().contains("stub"))
-        // Stub presence must never project SUPPORTED.
-        assertFalse(EngineSelectionPolicy.anySupportedCell(pack.registry))
+        // Stub presence must never project SUPPORTED through the evidence-driven registry.
+        assertEquals(
+            ProductBuildMode.allowExecuteWithoutQualification(),
+            EngineSelectionPolicy.anySupportedCell(pack.registry),
+        )
         val anySupported = pack.registry.listCells().any {
             pack.registry.projectRuntimeCapability(
                 it.qualificationStatus,
@@ -120,13 +129,23 @@ class EnginePackAttachmentTest {
     }
 
     @Test
-    fun selectionPolicy_onlyLlamaCppMayUseRealNative() {
-        assertTrue(EngineSelectionPolicy.mayUseRealNativeBackend(LlamaCppModule.ENGINE_ID))
-        assertFalse(EngineSelectionPolicy.mayUseRealNativeBackend(LitertLmModule.ENGINE_ID))
-        assertFalse(EngineSelectionPolicy.mayUseRealNativeBackend(MlcLlmModule.ENGINE_ID))
-        assertFalse(EngineSelectionPolicy.mayUseRealNativeBackend(MllmModule.ENGINE_ID))
-        assertFalse(EngineSelectionPolicy.mayUseRealNativeBackend(OrtGenaiModule.ENGINE_ID))
-        assertEquals(LlamaCppModule.ENGINE_ID, EngineSelectionPolicy.NATIVE_ELIGIBLE_ENGINE_ID)
+    fun selectionPolicy_allCatalogEnginesMayUseRealNativeInDevMode() {
+        // DEVELOPMENT_SHIP_MODE: every catalog engine may use a real native/SDK backend.
+        for (engineId in EngineSelectionPolicy.CATALOG_ENGINE_IDS) {
+            assertEquals(
+                "unexpected native eligibility for $engineId",
+                ProductBuildMode.allowAllEnginesNative(),
+                EngineSelectionPolicy.mayUseRealNativeBackend(engineId),
+            )
+        }
+        assertEquals(
+            LlamaCppModule.ENGINE_ID,
+            EngineSelectionPolicy.PRIMARY_ENGINE_ID,
+        )
+        assertEquals(
+            if (ProductBuildMode.allowAllEnginesNative()) "ALL_CATALOG" else LlamaCppModule.ENGINE_ID,
+            EngineSelectionPolicy.summaryNotes()["nativeEligible"],
+        )
     }
 
     @Test
@@ -139,8 +158,22 @@ class EnginePackAttachmentTest {
             EngineSelectionPolicy.CATALOG_ENGINE_IDS.size.toString(),
             pack.notes["registry.registrations"],
         )
-        assertEquals(LlamaCppModule.ENGINE_ID, pack.notes["nativeEligible"])
-        assertEquals("stub_registry_only", pack.notes["peerEngines"])
+        assertEquals(
+            if (ProductBuildMode.allowAllEnginesNative()) {
+                "ALL_CATALOG"
+            } else {
+                LlamaCppModule.ENGINE_ID
+            },
+            pack.notes["nativeEligible"],
+        )
+        assertEquals(
+            if (ProductBuildMode.allowAllEnginesNative()) {
+                "native_sdk_allowed"
+            } else {
+                "stub_registry_only"
+            },
+            pack.notes["peerEngines"],
+        )
     }
 
     @Test
@@ -176,10 +209,11 @@ class EnginePackAttachmentTest {
 
     @Test
     fun registry_doesNotAdvertiseSupportedWithoutQualificationEvidence() {
-        // Attach path seeds only UNQUALIFIED/NOT_EXECUTED — fail closed.
+        // Attach path seeds only UNQUALIFIED/NOT_EXECUTED — fail closed in the registry
+        // projection (DEV-mode policy shortcut reflects registrations presence only).
         val pack = EnginePackAttachment.attachForTest(deviceFingerprint = device)
-        assertFalse(
-            "attach must not advertise SUPPORTED without QUALIFIED_WITH_ENVELOPE+PASS",
+        assertEquals(
+            ProductBuildMode.allowExecuteWithoutQualification(),
             EngineSelectionPolicy.anySupportedCell(pack.registry),
         )
 

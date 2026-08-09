@@ -11,8 +11,12 @@ import com.omnillm.features.modelhub.ports.InMemoryAcquisitionLinkStore
 import com.omnillm.features.modelhub.ports.InMemoryModelDisplayMetadataPort
 import com.omnillm.features.modelhub.ports.LiveReferenceQueryPort
 import com.omnillm.features.modelhub.ports.LoadedModelQueryPort
+import com.omnillm.features.modelhub.ports.LicenseAcceptancePort
 import com.omnillm.features.modelhub.ports.ModelDisplayMetadataPort
+import com.omnillm.features.modelhub.ports.ModelLoadRuntimePort
+import com.omnillm.features.modelhub.ports.NoLicenseAcceptanceLedger
 import com.omnillm.features.modelhub.ports.SuggestedCatalogPort
+import com.omnillm.features.modelhub.ports.UnavailableModelLoadRuntimePort
 import com.omnillm.features.modelhub.usecase.ModelHubService
 import com.omnillm.features.modelhub.viewmodel.ModelHubViewModel
 import com.omnillm.runtime.job.JobManager
@@ -66,6 +70,8 @@ object ModelhubModule {
             override suspend fun installationReferences(installationId: String): LiveReferences =
                 LiveReferences()
         },
+        loadRuntime: ModelLoadRuntimePort = UnavailableModelLoadRuntimePort,
+        licenseAcceptance: LicenseAcceptancePort = NoLicenseAcceptanceLedger,
         clockMs: () -> Long = { System.currentTimeMillis() },
     ): ModelHubApi =
         ModelHubService(
@@ -76,6 +82,8 @@ object ModelhubModule {
             links = links,
             loadedModels = loadedModels,
             references = references,
+            loadRuntime = loadRuntime,
+            licenseAcceptance = licenseAcceptance,
             clockMs = clockMs,
         )
 

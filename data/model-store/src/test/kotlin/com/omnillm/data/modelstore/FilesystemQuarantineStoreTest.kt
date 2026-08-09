@@ -85,6 +85,67 @@ class FilesystemQuarantineStoreTest {
     }
 
     @Test
+    fun promote_projectsRoleFilesIntoInstallationDir() = runBlocking {
+        val root = tmp.root.toPath()
+        val store = FilesystemQuarantineStore(
+            filesRoot = root,
+            monotonicNowMs = { 1_000L },
+        )
+        val key = QuarantineKey("job2", "attempt2")
+        val (installId, revId, pkgId) = ids()
+        val expectedBlob = BlobId.parse(IdentityHashing.sha256Hex(payload))
+
+        val opened = store.openQuarantine(
+            key = key,
+            installationId = installId,
+            modelRevisionId = revId,
+            artifactPackageId = pkgId,
+            declared = listOf(
+                DeclaredArtifactFile(
+                    role = "WEIGHTS",
+                    blobId = expectedBlob,
+                    byteLength = payload.size.toLong(),
+                ),
+            ),
+            deadlineMonotonic = 60_000L,
+        )
+        assertTrue(opened is OmniResult.Ok)
+        val mat = store.materializeFromStream(
+            key = key,
+            role = "WEIGHTS",
+            expectedBlobId = expectedBlob,
+            expectedByteLength = payload.size.toLong(),
+            input = ByteArrayInputStream(payload),
+        )
+        assertTrue(mat is OmniResult.Ok)
+        val promoted = store.atomicPromote(key, installId, revId, pkgId)
+        assertTrue(promoted is OmniResult.Ok)
+        val result = (promoted as OmniResult.Ok).value
+        assertEquals("installations/${installId.value}", result.storageRootKey)
+
+        // Role file projected: installations/<id>/WEIGHTS (ReadyContentPort surface).
+        val rolePath = root
+            .resolve("installations")
+            .resolve(installId.value)
+            .resolve("WEIGHTS")
+        assertTrue("role file missing: $rolePath", rolePath.toFile().exists())
+        assertTrue(rolePath.toFile().readBytes().contentEquals(payload))
+
+        // ReadyContentPort round trip: open + verify content identity (INV-010).
+        val ready = FilesystemReadyContentPort(filesRoot = root)
+        val fds = ready.openReadOnly(installId, result.storageRootKey)
+        assertTrue(fds is OmniResult.Ok)
+        val list = (fds as OmniResult.Ok).value
+        assertEquals(1, list.size)
+        assertEquals("WEIGHTS", list.single().role)
+        assertEquals(expectedBlob.hex, list.single().blobId.hex)
+        assertEquals(payload.size.toLong(), list.single().byteLength)
+        val verify = ready.verifyOpenFds(list)
+        assertTrue(verify is OmniResult.Ok)
+        assertTrue((verify as OmniResult.Ok).value.ok)
+    }
+
+    @Test
     fun rejectsBadRole(): Unit = runBlocking {
         val store = FilesystemQuarantineStore(tmp.root.toPath())
         val (installId, revId, pkgId) = ids()

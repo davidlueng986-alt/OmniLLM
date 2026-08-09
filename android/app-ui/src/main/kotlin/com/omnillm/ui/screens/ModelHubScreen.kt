@@ -318,6 +318,94 @@ fun ModelHubScreen(
                                         ),
                                     )
                                 }
+                                "ACCEPT_LICENSE" -> {
+                                    if (viewModel == null) return@ModelDetailPane
+                                    val licenseDigest: String = card.licenseDigest ?: run {
+                                        actionMessage = "License digest missing — cannot accept"
+                                        return@ModelDetailPane
+                                    }
+                                    val installationId: String = card.installationId ?: run {
+                                        actionMessage = "Installation id missing — cannot accept"
+                                        return@ModelDetailPane
+                                    }
+                                    actionBusy = true
+                                    actionMessage = "Accepting license terms…"
+                                    scope.launch {
+                                        val commandId = UUID.randomUUID().toString()
+                                        val digest = IdentityHashing.sha256Hex(
+                                            "accept-license|$licenseDigest|$commandId",
+                                        )
+                                        val result = viewModel.acceptLicense(
+                                            com.omnillm.features.modelhub.api.AcceptLicenseSpec(
+                                                installationId = installationId,
+                                                licenseDigest = licenseDigest,
+                                                sourceAssertion = installationId,
+                                                command = ModelHubCommandIdentity(
+                                                    commandId = commandId,
+                                                    idempotencyKey = "accept-license-${commandId.take(8)}",
+                                                    canonicalInputDigest = digest,
+                                                ),
+                                            ),
+                                        )
+                                        actionMessage = when (result) {
+                                            is OmniResult.Ok -> "License accepted"
+                                            is OmniResult.Err ->
+                                                result.error.message ?: "license accept failed"
+                                        }
+                                        actionBusy = false
+                                        viewModel.refresh()
+                                    }
+                                }
+                                "LOAD", "UNLOAD" -> {
+                                    if (viewModel == null) return@ModelDetailPane
+                                    val installationId: String = card.installationId ?: run {
+                                        actionMessage = "Installation id missing — cannot load"
+                                        return@ModelDetailPane
+                                    }
+                                    actionBusy = true
+                                    actionMessage = if (action == "LOAD") {
+                                        "Loading model…"
+                                    } else {
+                                        "Unloading model…"
+                                    }
+                                    scope.launch {
+                                        val commandId = UUID.randomUUID().toString()
+                                        val digest = IdentityHashing.sha256Hex(
+                                            "$action|$installationId|$commandId",
+                                        )
+                                        val cmd = ModelHubCommandIdentity(
+                                            commandId = commandId,
+                                            idempotencyKey = "mh-$action-${commandId.take(8)}",
+                                            canonicalInputDigest = digest,
+                                        )
+                                        val result = if (action == "LOAD") {
+                                            viewModel.load(
+                                                com.omnillm.features.modelhub.api.StartLoadSpec(
+                                                    installationId = installationId,
+                                                    command = cmd,
+                                                ),
+                                            )
+                                        } else {
+                                            viewModel.unload(
+                                                com.omnillm.features.modelhub.api.StartUnloadSpec(
+                                                    installationId = installationId,
+                                                    command = cmd,
+                                                ),
+                                            )
+                                        }
+                                        actionMessage = when (result) {
+                                            is OmniResult.Ok ->
+                                                "$action → ${result.value.state}" +
+                                                    (result.value.loadedModelId?.let {
+                                                        " (${it.take(16)}…)"
+                                                    } ?: "")
+                                            is OmniResult.Err ->
+                                                result.error.message ?: "$action failed"
+                                        }
+                                        actionBusy = false
+                                        viewModel.refresh()
+                                    }
+                                }
                                 else -> {
                                     actionMessage = "Action $action not wired in smoke UI"
                                 }
@@ -559,6 +647,7 @@ private fun actionLabel(action: String): String = when (action) {
     "BENCHMARK" -> stringResource(R.string.modelhub_benchmark)
     "VIEW_LICENSE" -> stringResource(R.string.modelhub_view_license)
     "VIEW_EVIDENCE" -> stringResource(R.string.modelhub_view_evidence)
+    "ACCEPT_LICENSE" -> stringResource(R.string.modelhub_accept_license)
     "CANCEL" -> stringResource(R.string.action_cancel)
     else -> action
 }

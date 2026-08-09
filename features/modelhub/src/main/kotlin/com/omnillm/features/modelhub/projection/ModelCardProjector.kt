@@ -68,6 +68,7 @@ object ModelCardProjector {
         byteLength: Long? = null,
         quantizationDescriptorJson: String? = null,
         licenseDigest: String? = null,
+        licenseAccepted: Boolean = false,
         loaded: LoadedModelSnapshot? = null,
         refs: LiveReferences = LiveReferences(),
         activeJob: JobRecord? = null,
@@ -84,7 +85,7 @@ object ModelCardProjector {
             acquisitionChannel = acquisitionChannel,
             byteLength = byteLength,
             quantizationDescriptorJson = quantizationDescriptorJson,
-            licenseStatus = licenseStatusOf(eval),
+            licenseStatus = licenseStatusOf(eval, licenseDigest, licenseAccepted),
             licenseDigest = licenseDigest,
             authenticityOk = eval?.authenticityOk,
             compatibilityStatus = compatibilityOf(eval, snap.state),
@@ -147,6 +148,10 @@ object ModelCardProjector {
                 actions += ModelHubAction.DELETE
                 actions += ModelHubAction.BENCHMARK
                 actions += ModelHubAction.CHANGE_ALIAS
+                // M5: license terms must be accepted before load/generate.
+                if (snap.evaluation?.licenseOk != true) {
+                    actions += ModelHubAction.ACCEPT_LICENSE
+                }
                 if (snap.pinned) actions += ModelHubAction.UNPIN else actions += ModelHubAction.PIN
                 when (loaded?.state) {
                     null, "UNLOADED" -> actions += ModelHubAction.LOAD
@@ -172,12 +177,17 @@ object ModelCardProjector {
         return actions.distinct()
     }
 
-    private fun licenseStatusOf(eval: EvaluationDimensions?): String =
-        when {
-            eval == null -> LicenseStatus.UNKNOWN
-            eval.licenseOk -> LicenseStatus.ACCEPTED
-            else -> LicenseStatus.ACCEPTANCE_REQUIRED
-        }
+    private fun licenseStatusOf(
+        eval: EvaluationDimensions?,
+        licenseDigest: String? = null,
+        accepted: Boolean = false,
+    ): String = when {
+        eval?.licenseOk == true -> LicenseStatus.ACCEPTED
+        licenseDigest != null && accepted -> LicenseStatus.ACCEPTED
+        licenseDigest != null -> LicenseStatus.ACCEPTANCE_REQUIRED
+        eval == null -> LicenseStatus.UNKNOWN
+        else -> LicenseStatus.ACCEPTANCE_REQUIRED
+    }
 
     private fun compatibilityOf(eval: EvaluationDimensions?, installationState: String): String =
         when {

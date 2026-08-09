@@ -329,6 +329,32 @@ class FilesystemQuarantineStore(
             val installSeg = StorageLayout.installationRelativeSegments(installationId.value)
             val installDir = installSeg.fold(filesRoot) { acc, s -> acc.resolve(s) }
             Files.createDirectories(installDir)
+            // Role-file projection: installations/<id>/<role> (or <role>.<shard>).
+            // ReadyContentPort.openReadOnly lists this directory as the READY content
+            // surface for privileged load re-verify (CORE-MODEL §6 / INV-010).
+            for (file in snap.files) {
+                val src = resolveHandle(file.materializeHandle)
+                    ?: return OmniResult.err(
+                        OmniError.NOT_FOUND(message = "missing ${file.materializeHandle}"),
+                    )
+                val fileName = if (file.shardIndex == 0) {
+                    file.role
+                } else {
+                    "${file.role}.${file.shardIndex}"
+                }
+                val rolePath = installDir.resolve(fileName)
+                if (!rolePath.exists(LinkOption.NOFOLLOW_LINKS)) {
+                    val tmp = rolePath.resolveSibling(rolePath.fileName.toString() + ".tmp")
+                    Files.copy(src, tmp, StandardCopyOption.REPLACE_EXISTING)
+                    fsyncPath(tmp)
+                    Files.move(
+                        tmp,
+                        rolePath,
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING,
+                    )
+                }
+            }
             fsyncPath(installDir)
             val storageRootKey = StorageLayout.toHandle(installSeg)
             // Leave quarantine snapshot for reconciler until cleanup job runs.

@@ -137,6 +137,61 @@ data class SetPinSpec(
 }
 
 /**
+ * Explicit LOADED_MODEL load command (CORE-MODEL §1.2 / M4).
+ * Plan → admit → commit via Model Manager; the engine resolves the installed
+ * GGUF at inference time. [engineBuildId] is supplied by the runtime port.
+ */
+data class StartLoadSpec(
+    val installationId: String,
+    val command: ModelHubCommandIdentity,
+) {
+    init {
+        require(installationId.isNotBlank()) { "installationId must be non-blank" }
+    }
+}
+
+/** Explicit LOADED_MODEL unload command (CORE-MODEL §1.2 / M4). */
+data class StartUnloadSpec(
+    val installationId: String,
+    val command: ModelHubCommandIdentity,
+) {
+    init {
+        require(installationId.isNotBlank()) { "installationId must be non-blank" }
+    }
+}
+
+/** Result of a load/unload command (LOADED_MODEL state projection). */
+data class ModelLoadResult(
+    val loadedModelId: String?,
+    val installationId: String,
+    val state: String,
+    val engineBuildId: String? = null,
+    val placementClass: String? = null,
+)
+
+/**
+ * License acceptance command (CORE-MODEL §8 / SEC-SUPPLY §7 / M5).
+ * Acceptance binds (principal, terms digest, source assertion) append-only;
+ * identical bytes from a different source never share acceptance.
+ */
+data class AcceptLicenseSpec(
+    val installationId: String,
+    val licenseDigest: String,
+    val sourceAssertion: String,
+    val command: ModelHubCommandIdentity,
+) {
+    init {
+        require(installationId.isNotBlank()) { "installationId must be non-blank" }
+        require(licenseDigest.matches(HEX64)) { "licenseDigest must be 64-char hex" }
+        require(sourceAssertion.isNotBlank()) { "sourceAssertion must be non-blank" }
+    }
+
+    companion object {
+        private val HEX64 = Regex("^[0-9a-f]{64}$")
+    }
+}
+
+/**
  * Worker / control-plane progress for acquisition pipeline (not a UI command).
  * Progress dimensions match FEAT-MODELHUB §4 / FEAT-ADMIN JobProgress.
  */

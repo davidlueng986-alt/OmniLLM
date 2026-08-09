@@ -38,9 +38,11 @@ import java.util.concurrent.atomic.AtomicInteger
  * Bridges [LlamaCppEngine] (Engine Pack SPI) to Orchestrator [InferenceEnginePort].
  *
  * Plan is pure (ADR-002): envelope estimate only — no weight open / DB write.
- * Commit/start may load the packaged **EXPERIMENTAL_FIXTURE** path when no
- * resident GGUF is brokered (exploratory / software smoke only). Markers are
- * explicit — never silent fixture substitution for real installs.
+ * Commit/start loads the **real installed GGUF** when [modelSourceResolver]
+ * resolves a READY installation (privileged load re-verify, INV-010). When no
+ * real model is installed, it falls back to the packaged **EXPERIMENTAL_FIXTURE**
+ * path (exploratory / software smoke only) — markers are explicit, never a
+ * silent fixture substitution for real installs.
  * Cells stay UNQUALIFIED — never mint SUPPORTED.
  *
  * No silent cross-revision fallback: candidate [engineBuildId] must match the
@@ -49,6 +51,18 @@ import java.util.concurrent.atomic.AtomicInteger
 class LlamaCppInferenceEngineAdapter(
     private val engine: LlamaCppEngine,
     private val runtimeEpochProvider: () -> Long = { 1L },
+    /**
+     * Resolves the real installed model bytes for a plan. Default resolves
+     * nothing → explicit EXPERIMENTAL_FIXTURE path (host tests / exploratory).
+     * Production wiring supplies [RuntimeGgufModelSourceResolver].
+     */
+    private val modelSourceResolver: ModelSourceResolver = NO_MODEL_SOURCE,
+    /**
+     * When true (DEV mode), an unresolved real model falls back to the explicit
+     * fixture path so feature journeys still work end-to-end. Compliance mode
+     * should keep this false (fail closed, INV-018).
+     */
+    private val fallbackToFixtureOnUnresolved: Boolean = true,
 ) : InferenceEnginePort {
 
     private val planSeq = AtomicInteger(0)
@@ -323,9 +337,28 @@ class LlamaCppInferenceEngineAdapter(
             tokenizerEpoch = 1L,
             loadConfigurationDigest = plan.canonicalInputDigest,
         )
+
+        // Real installed GGUF (privileged load path, INV-010) when the resolver
+        // finds a READY installation; otherwise explicit fixture markers.
+        val resolved = modelSourceResolver.resolve(plan)
+        val realSource = when (resolved) {
+            is OmniResult.Ok -> resolved.value
+            is OmniResult.Err -> {
+                if (!fallbackToFixtureOnUnresolved) {
+                    return resolved
+                }
+                null
+            }
+        }
+        val (storageRootKey, resolvedPath, modelFd) = realSource?.let {
+            Triple(it.storageRootKey, it.resolvedModelPath, it.modelFd)
+        } ?: Triple(
+            "fixture:${JniNativeMapping.EXPERIMENTAL_FIXTURE}",
+            "fixture:${JniNativeMapping.EXPERIMENTAL_FIXTURE}",
+            -1,
+        )
         // Explicit fixture markers required by native fail-closed policy
         // (no silent broker-only → fixture). Domain installationId stays UUID.
-        val fixturePath = "fixture:${JniNativeMapping.EXPERIMENTAL_FIXTURE}"
         val loadInput = LoadInput(
             requestId = plan.requestId,
             principalId = plan.principalId,
@@ -333,13 +366,13 @@ class LlamaCppInferenceEngineAdapter(
             modelRevisionId = plan.modelRevisionId,
             loadKey = loadKey,
             device = DeviceDescriptor(deviceExecutionFingerprint = plan.deviceExecutionFingerprint),
-            storageRootKey = fixturePath,
+            storageRootKey = storageRootKey,
             runtimeEpoch = plan.runtimeEpoch,
             revocationEpoch = commit.revocationEpoch,
             templateEpoch = 1L,
             tokenizerEpoch = 1L,
-            resolvedModelPath = fixturePath,
-            modelFd = -1,
+            resolvedModelPath = resolvedPath,
+            modelFd = modelFd,
         )
         val loadPlan = when (val p = engine.planLoad(loadInput)) {
             is OmniResult.Err -> return p
@@ -389,9 +422,43 @@ class LlamaCppInferenceEngineAdapter(
         val terminal: StreamTerminal,
     )
 
+    /**
+     * Resolves the real installed model bytes for a plan's revision.
+     * Implementations run inside the `:runtime` process (trusted, INV-001/ADR-010);
+     * resolved paths/FDs never cross process boundaries to clients.
+     */
+    fun interface ModelSourceResolver {
+        /**
+         * @return Ok(source) with real path/FD, or Err when no READY installation
+         * exists for [plan.modelRevisionId] (caller decides fixture fallback).
+         */
+        suspend fun resolve(plan: Plan): OmniResult<ResolvedModelSource>
+    }
+
+    /** Real model bytes location for privileged load (path and/or fd). */
+    data class ResolvedModelSource(
+        val storageRootKey: String,
+        val resolvedModelPath: String? = null,
+        val modelFd: Int = -1,
+    ) {
+        init {
+            require(storageRootKey.isNotEmpty()) { "storageRootKey must be non-empty" }
+            require(resolvedModelPath != null || modelFd >= 0) {
+                "resolved source must carry a path or an fd"
+            }
+        }
+    }
+
     companion object {
         /** Non-empty ticket required by native load; exploratory fixture accepts any non-empty. */
         const val EXPLORATORY_LOAD_TICKET: String = "exploratory-privileged-ticket"
+
+        /** Default resolver: never resolves a real model (fixture-only path). */
+        val NO_MODEL_SOURCE: ModelSourceResolver = ModelSourceResolver { _ ->
+            OmniResult.err(
+                OmniError.NOT_FOUND(message = "no model source resolver configured"),
+            )
+        }
 
         fun digestOf(text: String): Sha256Digest =
             Sha256Digest.parse(IdentityHashing.sha256Hex(text))

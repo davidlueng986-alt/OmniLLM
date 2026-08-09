@@ -7,14 +7,17 @@ import com.omnillm.core.canonical.generated.ModelRevisionId
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.contracts.IdempotencyKey
 import com.omnillm.core.contracts.PrincipalId
+import com.omnillm.core.contracts.RevisionLeaseId
 import com.omnillm.core.errors.generated.OmniError
 import com.omnillm.core.errors.generated.OmniErrorCode
+import com.omnillm.core.resource.Reservation
 import com.omnillm.core.state.domain.InstallationId
 import com.omnillm.core.state.domain.JobId
 import com.omnillm.data.modelstore.DeclaredArtifactFile
 import com.omnillm.data.modelstore.QuarantineFileRecord
 import com.omnillm.data.modelstore.QuarantineKey
 import com.omnillm.features.modelhub.api.AcquisitionChannel
+import com.omnillm.features.modelhub.api.AcceptLicenseSpec
 import com.omnillm.features.modelhub.api.AcquisitionDeclaredFile
 import com.omnillm.features.modelhub.api.AcquisitionJobView
 import com.omnillm.features.modelhub.api.AcquisitionMaterializedFile
@@ -24,17 +27,24 @@ import com.omnillm.features.modelhub.api.ModelCard
 import com.omnillm.features.modelhub.api.ModelHubApi
 import com.omnillm.features.modelhub.api.ModelHubJobHandle
 import com.omnillm.features.modelhub.api.ModelHubSnapshot
+import com.omnillm.features.modelhub.api.ModelLoadResult
 import com.omnillm.features.modelhub.api.SetPinSpec
 import com.omnillm.features.modelhub.api.StartDeleteSpec
 import com.omnillm.features.modelhub.api.StartDownloadSpec
 import com.omnillm.features.modelhub.api.StartImportSpec
+import com.omnillm.features.modelhub.api.StartLoadSpec
+import com.omnillm.features.modelhub.api.StartUnloadSpec
 import com.omnillm.features.modelhub.ports.AcquisitionLinkStore
 import com.omnillm.features.modelhub.ports.InMemoryAcquisitionLinkStore
 import com.omnillm.features.modelhub.ports.InMemoryModelDisplayMetadataPort
 import com.omnillm.features.modelhub.ports.LiveReferenceQueryPort
+import com.omnillm.features.modelhub.ports.LicenseAcceptancePort
 import com.omnillm.features.modelhub.ports.LoadedModelQueryPort
 import com.omnillm.features.modelhub.ports.ModelDisplayMetadataPort
+import com.omnillm.features.modelhub.ports.ModelLoadRuntimePort
+import com.omnillm.features.modelhub.ports.NoLicenseAcceptanceLedger
 import com.omnillm.features.modelhub.ports.SuggestedCatalogPort
+import com.omnillm.features.modelhub.ports.UnavailableModelLoadRuntimePort
 import com.omnillm.features.modelhub.projection.ModelCardProjector
 import com.omnillm.interfaces.admin.LocalUiPrincipal
 import com.omnillm.runtime.job.DeleteResourceKind
@@ -65,6 +75,8 @@ class ModelHubService(
     private val links: AcquisitionLinkStore = InMemoryAcquisitionLinkStore(),
     private val loadedModels: LoadedModelQueryPort = EmptyLoadedModelQueryPort,
     private val references: LiveReferenceQueryPort = ZeroReferenceQueryPort,
+    private val loadRuntime: ModelLoadRuntimePort = UnavailableModelLoadRuntimePort,
+    private val licenseAcceptance: LicenseAcceptancePort = NoLicenseAcceptanceLedger,
     private val clockMs: () -> Long = { System.currentTimeMillis() },
 ) : ModelHubApi {
 
@@ -333,6 +345,239 @@ class ModelHubService(
         bumpResourceVersion(spec.installationId)
         return OmniResult.ok(toCard(updated))
     }
+
+    override suspend fun startLoad(
+        principal: PrincipalId,
+        spec: StartLoadSpec,
+    ): OmniResult<ModelLoadResult> {
+        requireLocalUi(principal)
+        if (!allowsManage()) return forbiddenManage()
+        val installationId = parseInstallationId(spec.installationId)
+            ?: return invalidId("installationId")
+        val install = modelManager.getInstallation(installationId)
+            ?: return OmniResult.err(
+                OmniError.NOT_FOUND(message = "installation not found"),
+            )
+        if (!install.allowsNewLoad()) {
+            return OmniResult.err(
+                OmniError.STATE_CONFLICT(
+                    message = "installation not READY for load",
+                    details = mapOf("state" to install.state),
+                ),
+            )
+        }
+        // M5: license acceptance gate — terms must be accepted before load/generate.
+        val licenseGate = licenseGateFor(install)
+        if (licenseGate != null) {
+            return OmniResult.err(licenseGate)
+        }
+        val engineBuildIdRaw = loadRuntime.primaryEngineBuildId()
+            ?: return OmniResult.err(
+                OmniError.CAPABILITY_UNSUPPORTED(
+                    message = "no engine attached — load unavailable",
+                    details = mapOf("installationId" to spec.installationId),
+                ),
+            )
+        val fingerprint = loadRuntime.deviceExecutionFingerprint()
+            ?: com.omnillm.core.contracts.DeviceExecutionFingerprint.parse("device-fp-load-command")
+        val engineBuildId = com.omnillm.core.contracts.EngineBuildId.parse(engineBuildIdRaw)
+        val loadKey = com.omnillm.core.contracts.LoadKey(
+            modelRevisionId = install.modelRevisionId,
+            engineBuildId = engineBuildId,
+            backend = "cpu",
+            deviceExecutionFingerprint = fingerprint,
+            templateEpoch = install.templateEpoch,
+            tokenizerEpoch = install.tokenizerEpoch,
+            loadConfigurationDigest = com.omnillm.core.canonical.generated.Sha256Digest.parse(
+                "0".repeat(64),
+            ),
+        )
+        val loadInput = com.omnillm.engines.api.LoadInput(
+            requestId = com.omnillm.core.contracts.RequestId.parse(
+                java.util.UUID.randomUUID().toString(),
+            ),
+            principalId = principal,
+            installationId = com.omnillm.core.identity.InstallationId.ofValidated(
+                installationId.value,
+            ),
+            modelRevisionId = install.modelRevisionId,
+            loadKey = loadKey,
+            device = com.omnillm.engines.api.DeviceDescriptor(
+                deviceExecutionFingerprint = fingerprint,
+            ),
+            storageRootKey = install.storageRootKey ?: "broker:${installationId.value}",
+            runtimeEpoch = 1L,
+            revocationEpoch = 0L,
+            templateEpoch = install.templateEpoch,
+            tokenizerEpoch = install.tokenizerEpoch,
+        )
+        // Plan (pure) → admit (RESERVED) → commit (LOADING/LOADED).
+        val plan = when (val p = modelManager.planLoad(loadInput)) {
+            is OmniResult.Err -> return p
+            is OmniResult.Ok -> p.value
+        }
+        val loadedModelId = com.omnillm.core.state.domain.LoadedModelId(
+            "lm-${java.util.UUID.randomUUID().toString().take(12)}",
+        )
+        val admitted = when (
+            val a = modelManager.admitLoad(
+                loadedModelId = loadedModelId,
+                installationId = installationId,
+                loadKey = loadKey,
+                plan = plan,
+                loadEnvelopeMatched = true,
+            )
+        ) {
+            is OmniResult.Err -> return a
+            is OmniResult.Ok -> a.value
+        }
+        val committed = when (
+            val c = modelManager.commitLoad(
+                loadedModelId = loadedModelId,
+                plan = plan,
+                reservation = reservationFor(plan),
+                commit = commitContextFor(plan, principal),
+                placementQualified = true,
+                loadEnvelopeMatched = true,
+                revocationEpoch = 0L,
+            )
+        ) {
+            is OmniResult.Err -> {
+                // Admitted but commit failed — surface RESERVED state honestly.
+                return OmniResult.err(c.error)
+            }
+            is OmniResult.Ok -> c.value
+        }
+        return OmniResult.ok(
+            ModelLoadResult(
+                loadedModelId = committed.loadedModelId.value,
+                installationId = spec.installationId,
+                state = committed.state,
+                engineBuildId = engineBuildIdRaw,
+                placementClass = admitted.placementClass,
+            ),
+        )
+    }
+
+    override suspend fun startUnload(
+        principal: PrincipalId,
+        spec: StartUnloadSpec,
+    ): OmniResult<ModelLoadResult> {
+        requireLocalUi(principal)
+        if (!allowsManage()) return forbiddenManage()
+        val installationId = parseInstallationId(spec.installationId)
+            ?: return invalidId("installationId")
+        val loaded = loadedModels.findByInstallation(spec.installationId)
+            .firstOrNull { it.state == "LOADED" || it.state == "PLANNED" || it.state == "RESERVED" }
+            ?: return OmniResult.err(
+                OmniError.NOT_FOUND(
+                    message = "no loaded model to unload",
+                    details = mapOf("installationId" to spec.installationId),
+                ),
+            )
+        val drained = when (
+            val d = modelManager.drainLoadedModel(loaded.loadedModelId)
+        ) {
+            is OmniResult.Err -> return d
+            is OmniResult.Ok -> d.value
+        }
+        return OmniResult.ok(
+            ModelLoadResult(
+                loadedModelId = drained.loadedModelId.value,
+                installationId = spec.installationId,
+                state = drained.state,
+                engineBuildId = drained.engineBuildId.value,
+                placementClass = drained.placementClass,
+            ),
+        )
+    }
+
+    override suspend fun acceptLicense(
+        principal: PrincipalId,
+        spec: AcceptLicenseSpec,
+    ): OmniResult<ModelCard> {
+        requireLocalUi(principal)
+        if (!allowsManage()) return forbiddenManage()
+        val installationId = parseInstallationId(spec.installationId)
+            ?: return invalidId("installationId")
+        val install = modelManager.getInstallation(installationId)
+            ?: return OmniResult.err(
+                OmniError.NOT_FOUND(message = "installation not found"),
+            )
+        // Append-only acceptance bound to (principal, terms digest, source).
+        licenseAcceptance.accept(
+            principalId = principal.value,
+            termsDigestHex = spec.licenseDigest,
+            sourceAssertion = spec.sourceAssertion,
+        )
+        bumpResourceVersion(spec.installationId)
+        return OmniResult.ok(toCard(install))
+    }
+
+    /**
+     * M5 gate: returns an OmniError when the installation carries license terms
+     * that the principal has not yet accepted (fail closed on unknown terms).
+     */
+    private fun licenseGateFor(install: InstallationSnapshot): OmniError? {
+        val digest = installLicenseDigest(install) ?: return null
+        if (licenseAcceptance.hasAccepted(
+                principalId = LocalUiPrincipal.ID.value,
+                termsDigestHex = digest,
+                sourceAssertion = installSourceAssertion(install),
+            )
+        ) {
+            return null
+        }
+        return OmniError.STATE_CONFLICT(
+            message = "license acceptance required before load",
+            details = mapOf(
+                "licenseDigest" to digest,
+                "installationId" to install.installationId.value,
+            ),
+        )
+    }
+
+    private fun installLicenseDigest(install: InstallationSnapshot): String? =
+        catalog.findByRevision(install.modelRevisionId.hex)?.licenseDigest
+
+    private fun installSourceAssertion(install: InstallationSnapshot): String =
+        install.aggregate.installationId.value
+
+    private fun reservationFor(plan: com.omnillm.engines.api.LoadPlan): Reservation =
+        Reservation(
+            reservationId = com.omnillm.core.resource.ReservationId.parse(
+                "res-load-${java.util.UUID.randomUUID().toString().take(8)}",
+            ),
+            principalId = plan.principalId.value,
+            issuerBootId = "modelhub-load",
+            runtimeEpoch = plan.runtimeEpoch,
+            nonce = "nonce-load",
+            deadlineMonotonic = plan.expiryMonotonic,
+            envelope = plan.resourceEnvelope,
+        )
+
+    private fun commitContextFor(
+        plan: com.omnillm.engines.api.LoadPlan,
+        principal: PrincipalId,
+    ): com.omnillm.engines.api.CommitContext =
+        com.omnillm.engines.api.CommitContext(
+            commitId = com.omnillm.core.contracts.CommitId.parse(
+                java.util.UUID.randomUUID().toString(),
+            ),
+            requestId = plan.requestId,
+            principalId = principal,
+            reservationId = com.omnillm.core.resource.ReservationId.parse(
+                "res-${java.util.UUID.randomUUID().toString().take(8)}",
+            ),
+            revisionLeaseId = com.omnillm.core.contracts.RevisionLeaseId.parse(
+                "lease-${java.util.UUID.randomUUID().toString().take(8)}",
+            ),
+            issuerBootId = "modelhub-load",
+            runtimeEpoch = plan.runtimeEpoch,
+            revocationEpoch = 0L,
+            oneShotNonce = "load-${java.util.UUID.randomUUID().toString().take(8)}",
+            privilegedLoadTicketId = "modelhub-load-ticket",
+        )
 
     override suspend fun beginAcquisitionAttempt(
         jobId: String,
@@ -700,6 +945,13 @@ class ModelHubService(
         val jobId = links.jobIdForInstallation(installationId)
         val job = jobId?.let { jobManager.query(JobId(it)).getOrNull() }
         val catalogEntry = catalog.findByRevision(snap.modelRevisionId.hex)
+        val licenseAccepted = catalogEntry?.licenseDigest?.let { digest ->
+            licenseAcceptance.hasAccepted(
+                principalId = LocalUiPrincipal.ID.value,
+                termsDigestHex = digest,
+                sourceAssertion = snap.installationId.value,
+            )
+        } ?: false
         val channel = channelByInstallation[installationId]
             ?: catalogEntry?.acquisitionChannel
             ?: AcquisitionChannel.UNKNOWN
@@ -714,6 +966,7 @@ class ModelHubService(
             byteLength = catalogEntry?.byteLength,
             quantizationDescriptorJson = catalogEntry?.quantizationDescriptorJson,
             licenseDigest = catalogEntry?.licenseDigest,
+            licenseAccepted = licenseAccepted,
             loaded = loaded,
             refs = refs,
             activeJob = job,

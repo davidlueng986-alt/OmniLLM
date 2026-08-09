@@ -18,8 +18,10 @@ import com.omnillm.core.contracts.PlanId
 import com.omnillm.core.contracts.PreparedOperation
 import com.omnillm.core.contracts.PreparedOperationId
 import com.omnillm.core.contracts.PrincipalId
+import com.omnillm.core.contracts.ProductBuildMode
 import com.omnillm.core.contracts.RequestId
 import com.omnillm.core.contracts.RevisionLeaseId
+import com.omnillm.core.errors.generated.OmniError
 import com.omnillm.core.identity.InstallationId
 import com.omnillm.core.resource.Reservation
 import com.omnillm.engines.api.CommitQueryState
@@ -31,10 +33,12 @@ import com.omnillm.runtime.ObservabilityModule
 import com.omnillm.runtime.OrchestratorModule
 import com.omnillm.runtime.PolicyModule
 import com.omnillm.runtime.RequestRegistryModule
+import com.omnillm.runtime.orchestrator.CapabilityLookup
 import com.omnillm.runtime.orchestrator.CostClassLabels
 import com.omnillm.runtime.orchestrator.InferenceEnginePort
 import com.omnillm.runtime.orchestrator.InferencePlanOutcome
 import com.omnillm.runtime.orchestrator.OrchestrationRequest
+import com.omnillm.runtime.orchestrator.Orchestrator
 import com.omnillm.runtime.orchestrator.RoutingCandidate
 import com.omnillm.runtime.orchestrator.RoutingPreference
 import com.omnillm.runtime.orchestrator.StreamBatchOutcome
@@ -53,7 +57,11 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Engine execute binding: FakeEngine + attachForTest stub path.
- * Does not invent SUPPORTED; exploratory CONDITIONAL only when policy allows.
+ *
+ * DEVELOPMENT_SHIP_MODE: bound adapter projects SUPPORTED for generation caps so
+ * features finish without qualification paperwork (SHIP_BACKLOG §8).
+ * Compliance mode (DEVELOPMENT_SHIP_MODE=false): exploratory CONDITIONAL only when
+ * policy allows; never SUPPORTED without evidence.
  */
 class EngineExecuteBindingTest {
 
@@ -87,38 +95,51 @@ class EngineExecuteBindingTest {
     }
 
     @Test
-    fun fakeEngine_withExploratory_returnsConditional_notSupported() {
+    fun fakeEngine_bound_capabilityReflectsBuildMode() {
         val fake = FakePortEngine()
         val binding = EngineExecuteBinding(exploratoryEnabled = { true })
         binding.bindTestEngine(fake)
-        // No attachment → attachedBuild null → still CONDITIONAL for generation when bound+flag
-        assertEquals(
-            CapabilityState.CONDITIONAL,
-            binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()),
-        )
-        assertEquals(
-            CapabilityState.UNKNOWN,
-            binding.resolveCapability(CapabilityId.STRUCTURED_OUTPUT, candidate()),
-        )
-        // Never SUPPORTED without evidence
-        assertTrue(
-            binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()) !=
+        val devMode = ProductBuildMode.allowExecuteWithoutQualification()
+        if (devMode) {
+            // Finish-all-features mode: bound adapter is executable.
+            assertEquals(
                 CapabilityState.SUPPORTED,
-        )
+                binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()),
+            )
+        } else {
+            // No attachment → attachedBuild null → CONDITIONAL for generation when bound+flag
+            assertEquals(
+                CapabilityState.CONDITIONAL,
+                binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()),
+            )
+            assertEquals(
+                CapabilityState.UNKNOWN,
+                binding.resolveCapability(CapabilityId.STRUCTURED_OUTPUT, candidate()),
+            )
+            // Never SUPPORTED without evidence
+            assertTrue(
+                binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()) !=
+                    CapabilityState.SUPPORTED,
+            )
+        }
     }
 
     @Test
-    fun fakeEngine_withoutExploratory_staysUnknown() {
+    fun fakeEngine_withoutExploratory_reflectsBuildMode() {
         val binding = EngineExecuteBinding(exploratoryEnabled = { false })
         binding.bindTestEngine(FakePortEngine())
         assertEquals(
-            CapabilityState.UNKNOWN,
+            if (ProductBuildMode.allowExecuteWithoutQualification()) {
+                CapabilityState.SUPPORTED
+            } else {
+                CapabilityState.UNKNOWN
+            },
             binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()),
         )
     }
 
     @Test
-    fun attachForTest_stub_bindsAdapter_noSupportedCells() {
+    fun attachForTest_stub_bindsAdapter_capabilityReflectsBuildMode() {
         val pack = EnginePackAttachment.attachForTest(
             includeStubEngine = true,
             deviceFingerprint = device,
@@ -128,13 +149,20 @@ class EngineExecuteBindingTest {
         val result = binding.applyAttachment(pack)
         assertTrue(result.bound)
         assertTrue(binding.isEngineBound())
-        assertFalse(
+        // DEV mode: registrations present ⇒ policy shortcut true.
+        // Compliance mode: UNQUALIFIED cells never project SUPPORTED.
+        assertEquals(
+            ProductBuildMode.allowExecuteWithoutQualification(),
             com.omnillm.android.runtimeservice.controlplane.EngineSelectionPolicy
                 .anySupportedCell(pack.registry),
         )
         val build = pack.llamaCppEngine!!.engineBuildId
         assertEquals(
-            CapabilityState.CONDITIONAL,
+            if (ProductBuildMode.allowExecuteWithoutQualification()) {
+                CapabilityState.SUPPORTED
+            } else {
+                CapabilityState.CONDITIONAL
+            },
             binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate(build)),
         )
         // Cross-build refuses
@@ -295,12 +323,17 @@ class EngineExecuteBindingTest {
     }
 
     @Test
-    fun exploratorySetting_defaultFalse_inCatalog() {
+    fun exploratorySetting_defaultReflectsBuildMode() {
         val def = com.omnillm.runtime.policy.ConfigurationCatalog.definition(
             EngineExecuteBinding.SETTING_EXPLORATORY_EXECUTE,
         )
         assertNotNull(def)
-        assertEquals(SettingValue.BoolValue(false), def!!.defaultValue)
+        assertEquals(
+            SettingValue.BoolValue(ProductBuildMode.defaultExploratoryExecuteEnabled()),
+            def!!.defaultValue,
+        )
+        // Catalog default is the mode default; an *absent* setting value is false
+        // (the effective value is composed by the settings merge, not the raw lookup).
         assertFalse(EngineExecuteBinding.readExploratoryEnabled(emptyMap()))
         assertTrue(
             EngineExecuteBinding.readExploratoryEnabled(
@@ -340,19 +373,9 @@ class EngineExecuteBindingTest {
         assertTrue(bad is OmniResult.Err)
     }
 
-    @Test
-    fun llamaCppStub_orchestratorSubmitPump_endToEnd() = runBlocking {
-        val pack = EnginePackAttachment.attachForTest(
-            includeStubEngine = true,
-            deviceFingerprint = device,
-        )
-        val binding = EngineExecuteBinding(exploratoryEnabled = { true })
-        binding.applyAttachment(pack)
-        assertTrue(binding.isEngineBound())
-
-        val ledgers = RequestRegistryModule.createInMemoryWithCommits()
-        val orch = OrchestratorModule.create(
-            registry = ledgers.requestRegistry,
+    private fun orchestratorWith(engine: InferenceEnginePort, capabilities: CapabilityLookup): Orchestrator =
+        OrchestratorModule.create(
+            registry = RequestRegistryModule.createInMemoryWithCommits().requestRegistry,
             governor = com.omnillm.runtime.governor.ResourceGovernor(
                 capacity = ResourceVector(
                     cpuAnonBytes = 512L * 1024L * 1024L,
@@ -368,14 +391,15 @@ class EngineExecuteBindingTest {
                 runtimeEpoch = 1L,
                 clockMonotonic = { 1_000L },
             ),
-            engine = binding.inferenceEngine,
-            capabilities = binding.capabilityLookup,
+            engine = engine,
+            capabilities = capabilities,
             issuerBootId = "boot-llama-e2e",
             runtimeEpoch = 1L,
             clockMonotonic = { 1_000L },
         )
-        val build = pack.llamaCppEngine!!.engineBuildId
-        val req = OrchestrationRequest(
+
+    private fun orchestrationRequest(build: EngineBuildId): OrchestrationRequest =
+        OrchestrationRequest(
             requestId = RequestId.parse(UUID.randomUUID().toString()),
             principalId = PrincipalId.parse("principal-llama-e2e"),
             idempotencyKey = IdempotencyKey.parse("idem-llama-e2e-${UUID.randomUUID()}"),
@@ -392,6 +416,20 @@ class EngineExecuteBindingTest {
             revocationEpoch = 0L,
             deadlineMonotonic = 1_000_000L,
         )
+
+    @Test
+    fun llamaCppStub_orchestratorSubmitPump_endToEnd() = runBlocking {
+        val pack = EnginePackAttachment.attachForTest(
+            includeStubEngine = true,
+            deviceFingerprint = device,
+        )
+        val binding = EngineExecuteBinding(exploratoryEnabled = { true })
+        binding.applyAttachment(pack)
+        assertTrue(binding.isEngineBound())
+
+        val orch = orchestratorWith(binding.inferenceEngine, binding.capabilityLookup)
+        val build = pack.llamaCppEngine!!.engineBuildId
+        val req = orchestrationRequest(build)
         val submitted = orch.submit(req)
         assertTrue("submit should succeed: $submitted", submitted is OmniResult.Ok)
         val terminal = orch.pumpOnce()
@@ -401,11 +439,112 @@ class EngineExecuteBindingTest {
         assertEquals("COMPLETED", result.state)
         assertEquals(build.value, result.actualRouting.engineBuildId.value)
         assertEquals("cpu", result.actualRouting.backend)
-        // Honesty: attach must not project SUPPORTED
-        assertFalse(
+        // Registry projection: attach seeds only UNQUALIFIED cells (compliance invariant).
+        // DEV mode policy shortcut only reflects registrations presence.
+        assertEquals(
+            ProductBuildMode.allowExecuteWithoutQualification(),
             com.omnillm.android.runtimeservice.controlplane.EngineSelectionPolicy
                 .anySupportedCell(pack.registry),
         )
+        assertTrue(
+            pack.registry.listCells().none {
+                it.qualificationStatus ==
+                    com.omnillm.engines.api.EngineQualificationCellStatus.QUALIFIED_WITH_ENVELOPE
+            },
+        )
+    }
+
+    @Test
+    fun llamaCppAdapter_realResolverUsesInstalledGguf() = runBlocking {
+        val pack = EnginePackAttachment.attachForTest(
+            includeStubEngine = true,
+            deviceFingerprint = device,
+        )
+        val build = pack.llamaCppEngine!!.engineBuildId
+        val realPath = "/runtime/files/installations/test-install/WEIGHTS"
+        var resolvedRevisions = 0
+        val resolver = LlamaCppInferenceEngineAdapter.ModelSourceResolver { plan ->
+            assertEquals(revision, plan.modelRevisionId)
+            resolvedRevisions++
+            OmniResult.ok(
+                LlamaCppInferenceEngineAdapter.ResolvedModelSource(
+                    storageRootKey = "installations/test-install",
+                    resolvedModelPath = realPath,
+                ),
+            )
+        }
+        val adapter = LlamaCppInferenceEngineAdapter(
+            engine = pack.llamaCppEngine!!,
+            modelSourceResolver = resolver,
+            fallbackToFixtureOnUnresolved = false,
+        )
+        val orch = orchestratorWith(
+            adapter,
+            CapabilityLookup { _, _ -> CapabilityState.SUPPORTED },
+        )
+        val submitted = orch.submit(orchestrationRequest(build))
+        assertTrue("submit should succeed: $submitted", submitted is OmniResult.Ok)
+        val terminal = orch.pumpOnce()
+        assertNotNull(terminal)
+        assertTrue("execute should succeed: $terminal", terminal is OmniResult.Ok)
+        assertEquals("COMPLETED", (terminal as OmniResult.Ok).value.state)
+        assertTrue("resolver must be invoked for the real install", resolvedRevisions >= 1)
+    }
+
+    @Test
+    fun llamaCppAdapter_unresolvedWithoutFallback_failsClosed() = runBlocking {
+        val pack = EnginePackAttachment.attachForTest(
+            includeStubEngine = true,
+            deviceFingerprint = device,
+        )
+        val build = pack.llamaCppEngine!!.engineBuildId
+        val resolver = LlamaCppInferenceEngineAdapter.ModelSourceResolver { _ ->
+            OmniResult.err(OmniError.NOT_FOUND(message = "no READY installation"))
+        }
+        val adapter = LlamaCppInferenceEngineAdapter(
+            engine = pack.llamaCppEngine!!,
+            modelSourceResolver = resolver,
+            fallbackToFixtureOnUnresolved = false,
+        )
+        val orch = orchestratorWith(
+            adapter,
+            CapabilityLookup { _, _ -> CapabilityState.SUPPORTED },
+        )
+        val submitted = orch.submit(orchestrationRequest(build))
+        assertTrue("submit should succeed: $submitted", submitted is OmniResult.Ok)
+        val terminal = orch.pumpOnce()
+        assertNotNull(terminal)
+        assertTrue(
+            "no READY install + no fallback must fail closed: $terminal",
+            terminal is OmniResult.Err,
+        )
+    }
+
+    @Test
+    fun llamaCppAdapter_unresolvedWithFallback_usesFixture() = runBlocking {
+        val pack = EnginePackAttachment.attachForTest(
+            includeStubEngine = true,
+            deviceFingerprint = device,
+        )
+        val build = pack.llamaCppEngine!!.engineBuildId
+        val resolver = LlamaCppInferenceEngineAdapter.ModelSourceResolver { _ ->
+            OmniResult.err(OmniError.NOT_FOUND(message = "no READY installation"))
+        }
+        val adapter = LlamaCppInferenceEngineAdapter(
+            engine = pack.llamaCppEngine!!,
+            modelSourceResolver = resolver,
+            fallbackToFixtureOnUnresolved = true,
+        )
+        val orch = orchestratorWith(
+            adapter,
+            CapabilityLookup { _, _ -> CapabilityState.SUPPORTED },
+        )
+        val submitted = orch.submit(orchestrationRequest(build))
+        assertTrue("submit should succeed: $submitted", submitted is OmniResult.Ok)
+        val terminal = orch.pumpOnce()
+        assertNotNull(terminal)
+        assertTrue("DEV fallback should succeed: $terminal", terminal is OmniResult.Ok)
+        assertEquals("COMPLETED", (terminal as OmniResult.Ok).value.state)
     }
 
     /**

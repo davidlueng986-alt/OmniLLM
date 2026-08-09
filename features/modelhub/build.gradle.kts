@@ -35,6 +35,9 @@ dependencies {
     // HTTPS download URL policy (SEC-INPUT §3 / SEC-SUPPLY §5).
     implementation(project(":runtime:policy"))
 
+    // Real HTTPS download executor (M1): bounded stream with per-hop URL policy.
+    implementation(libs.okhttp)
+
     // Admin command / LOCAL_UI principal shapes for UI-facing API.
     api(project(":interfaces:admin"))
 

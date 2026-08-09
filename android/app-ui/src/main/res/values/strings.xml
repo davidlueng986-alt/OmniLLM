@@ -111,6 +111,7 @@
     <string name="modelhub_load">Load</string>
     <string name="modelhub_unload">Unload</string>
     <string name="modelhub_benchmark">Benchmark</string>
+    <string name="modelhub_accept_license">Accept License Terms</string>
     <string name="modelhub_view_license">View license</string>
     <string name="modelhub_view_evidence">View evidence</string>
     <string name="modelhub_installation_state">Installation: %1$s</string>

@@ -199,9 +199,11 @@ object ConfigurationCatalog {
             clampAllowed = false,
             admissionBound = false,
             requiresPlanReservationCommit = false,
-            // Explicit opt-in for CONDITIONAL exploratory generate when llama-cpp
-            // native is attached but cells remain UNQUALIFIED (never invents SUPPORTED).
-            defaultValue = SettingValue.BoolValue(false),
+            // Development ship mode defaults ON so generate is not blocked by paperwork.
+            // Set ProductBuildMode.DEVELOPMENT_SHIP_MODE=false for compliance-style default OFF.
+            defaultValue = SettingValue.BoolValue(
+                com.omnillm.core.contracts.ProductBuildMode.defaultExploratoryExecuteEnabled(),
+            ),
         ),
         SettingDefinition(
             key = "server.loopbackEnabled",

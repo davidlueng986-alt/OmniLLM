@@ -49,6 +49,30 @@ interface ModelHubApi {
         spec: StartImportSpec,
     ): OmniResult<ModelHubJobHandle>
 
+    /**
+     * Explicit load (M4): Plan → admit → commit via Model Manager.
+     * Engine bytes resolve at inference time; LOADED_MODEL record is durable.
+     */
+    suspend fun startLoad(
+        principal: PrincipalId,
+        spec: StartLoadSpec,
+    ): OmniResult<ModelLoadResult>
+
+    /** Explicit unload (M4): drain LOADED_MODEL to UNLOADED. */
+    suspend fun startUnload(
+        principal: PrincipalId,
+        spec: StartUnloadSpec,
+    ): OmniResult<ModelLoadResult>
+
+    /**
+     * Accept license terms (M5). Append-only, bound to terms digest + source.
+     * After acceptance the model card projects ACCEPTED and load is allowed.
+     */
+    suspend fun acceptLicense(
+        principal: PrincipalId,
+        spec: AcceptLicenseSpec,
+    ): OmniResult<ModelCard>
+
     /** Request installation delete via DELETE job + DRAINING path. */
     suspend fun startDelete(
         principal: PrincipalId,

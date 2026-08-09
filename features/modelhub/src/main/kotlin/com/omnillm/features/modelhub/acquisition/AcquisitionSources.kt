@@ -86,6 +86,12 @@ object PinnedDownloadResolver {
         policy: DownloadUrlPolicy.Policy = DownloadUrlPolicy.Policy.DEFAULT,
         /** Optional host allowlist for fixture domain (host tests). */
         allowFixtureHost: Boolean = true,
+        /**
+         * Real-network source factory injected by the control plane (M1).
+         * When non-null and the URL passes policy, the factory produces the
+         * bounded HTTPS stream; when null, real URLs fail closed (host-only).
+         */
+        networkSourceFactory: (normalizedUrl: String) -> ArtifactByteSource? = { null },
     ): Outcome {
         val admit = DownloadUrlPolicy.admitUrl(sourceUrl, policy)
         if (admit is DownloadUrlPolicy.Outcome.Rejected) {
@@ -106,8 +112,11 @@ object PinnedDownloadResolver {
             return Outcome.Ready(FixtureArtifactSource(), accepted.normalizedUrl)
         }
 
-        // Real network download is out of software E2E scope here: fail closed
-        // unless a custom source factory is injected by the control plane host.
+        // Real network download: control-plane injected executor (OkHttp) or fail closed.
+        val networkSource = networkSourceFactory(accepted.normalizedUrl)
+        if (networkSource != null) {
+            return Outcome.Ready(networkSource, accepted.normalizedUrl)
+        }
         return Outcome.Rejected(
             OmniError.CAPABILITY_UNSUPPORTED(
                 message = "network download executor not attached for host",

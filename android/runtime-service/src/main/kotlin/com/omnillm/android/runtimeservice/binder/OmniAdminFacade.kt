@@ -1,4 +1,4 @@
-package com.omnillm.android.runtimeservice.binder
+﻿package com.omnillm.android.runtimeservice.binder
 
 import ai.omnillm.api.CommandResult
 import ai.omnillm.api.IJobObserver
@@ -32,7 +32,7 @@ import kotlinx.coroutines.runBlocking
 
 /**
  * Non-exported [IOmniAdmin] for the same-app UI process only
- * (ANDROID-SERVICE §1, access-control-catalog LOCAL_UI / LOCAL_ADMIN, INV-001).
+ * (ANDROID-SERVICE 禮1, access-control-catalog LOCAL_UI / LOCAL_ADMIN, INV-001).
  *
  * Never returned from the exported RuntimeBindingService.
  * All durable mutations return [CommandResult] (no void success claims).
@@ -205,7 +205,7 @@ class OmniAdminFacade(
 
     override fun ackJobEvents(subscriptionId: String?, streamEpoch: Long, eventToExclusive: Long) {
         val principal = assertLocalUi()
-        // Delivery control — not a durable domain mutation (no CommandResult on AIDL).
+        // Delivery control ??not a durable domain mutation (no CommandResult on AIDL).
         val result = requireApi().ackJobEvents(
             principal,
             subscriptionId.orEmpty(),
@@ -264,7 +264,7 @@ class OmniAdminFacade(
             idempotencyKey = domainCommand.idempotencyKey,
         )
         return runBlocking {
-            // DRAFT → REVIEWING if needed, then issue one-time ConsentGrant.
+            // DRAFT ??REVIEWING if needed, then issue one-time ConsentGrant.
             when (
                 val review = api.beginLocalReview(
                     principal = principal,
@@ -369,7 +369,7 @@ class OmniAdminFacade(
     }
 
     // ------------------------------------------------------------------
-    // LOCAL_UI inference proxies (FEAT-PLAYGROUND / FEAT-SERVER) — SW-FEAT-04/05
+    // LOCAL_UI inference proxies (FEAT-PLAYGROUND / FEAT-SERVER) ??SW-FEAT-04/05
     // ------------------------------------------------------------------
 
     override fun executePlaygroundChat(
@@ -629,7 +629,7 @@ class OmniAdminFacade(
             )
 
     /**
-     * LOCAL_UI SAF / Downloads import: read-only PFD → quarantine → READY.
+     * LOCAL_UI SAF / Downloads import: read-only PFD ??quarantine ??READY.
      * Trust channel remains LOCAL_IMPORT (never elevates authenticity).
      */
     override fun importLocalFile(
@@ -775,10 +775,12 @@ class OmniAdminFacade(
     }
 
     /**
-     * Catalog pin offline fixture: full software E2E via [AcquisitionPipeline]
-     * (HTTPS policy → quarantine → digest verify → atomic promote → READY).
-     * Tiny fixture bytes run synchronously on the binder thread path.
-     * Returns null when URL is not the offline fixture (caller uses plain job create).
+     * Catalog pin download: full software E2E via [AcquisitionPipeline]
+     * (HTTPS policy ??quarantine ??digest verify ??atomic promote ??READY).
+     * Offline fixture bytes run synchronously on the binder thread path.
+     * Real HTTPS downloads (M1) run through [OkHttpArtifactByteSource] when the
+     * job carries expected digest/size; identity is content-derived (same as SAF import).
+     * Returns null when the URL cannot be executed here (caller uses plain job create).
      */
     private fun routeFixtureDownload(
         plane: RuntimeControlPlane,
@@ -787,7 +789,7 @@ class OmniAdminFacade(
         params: com.omnillm.runtime.job.JobParameters.Download,
     ): OmniJobInfo? {
         val catalog = com.omnillm.features.modelhub.catalog.OfflineFixtureCatalog.DEFAULT
-        val entry = catalog.findByPinnedUrl(params.sourceUrl) ?: return null
+        val entry = catalog.findByPinnedUrl(params.sourceUrl)
         val installationId = java.util.UUID.randomUUID().toString()
         val command = com.omnillm.features.modelhub.api.ModelHubCommandIdentity(
             commandId = domainSpec.command.commandId,
@@ -798,6 +800,57 @@ class OmniAdminFacade(
             api = plane.modelHubApi,
             modelStore = plane.modelStore,
         )
+
+        // Real HTTPS download (M1): content-derived identity from expected digest.
+        if (entry == null) {
+            val sha = params.expectedSha256?.takeIf { it.matches(Regex("^[0-9a-f]{64}$")) }
+            val bytes = params.expectedBytes?.takeIf { it > 0L }
+            if (sha == null || bytes == null) {
+                return null
+            }
+            val blob = com.omnillm.core.canonical.generated.BlobId.parse(sha)
+            val pkgEntry = com.omnillm.core.canonical.ArtifactPackageEntry(
+                role = com.omnillm.features.modelhub.catalog.FixtureArtifact.ROLE_WEIGHTS,
+                blobId = blob,
+                byteLength = bytes,
+                shardIndex = 0,
+            )
+            val pkg = com.omnillm.core.canonical.ArtifactPackageCanonicalizer.artifactPackageId(
+                listOf(pkgEntry),
+            )
+            val rev = com.omnillm.core.canonical.IdentityHashing.modelRevisionIdOfCanonicalJson(
+                """{"artifactPackageId":"${pkg.hex}","format":"gguf","schemaVersion":1}""",
+            )
+            val urlPolicy = com.omnillm.runtime.policy.download.DownloadUrlPolicy.Policy.DEFAULT
+            val source = com.omnillm.features.modelhub.acquisition.OkHttpArtifactByteSource(
+                url = params.sourceUrl,
+                urlPolicy = urlPolicy,
+            )
+            return runBlocking {
+                when (
+                    val executed = pipeline.executePinnedDownload(
+                        installationId = installationId,
+                        jobId = domainSpec.jobId,
+                        modelRevisionId = rev.hex,
+                        artifactPackageId = pkg.hex,
+                        sourceUrl = params.sourceUrl,
+                        expectedSha256 = sha,
+                        expectedBytes = bytes,
+                        displayName = params.targetName?.ifBlank { null } ?: "Downloaded GGUF",
+                        command = command,
+                        sourceOverride = source,
+                        role = com.omnillm.features.modelhub.catalog.FixtureArtifact.ROLE_WEIGHTS,
+                    )
+                ) {
+                    is OmniResult.Ok -> jobInfoFrom(plane, principal, domainSpec.jobId, executed.value)
+                    is OmniResult.Err -> throw RemoteException(
+                        AdminAidlMapper.toAidlError(executed.error).message
+                            ?: executed.error.code.code,
+                    )
+                }
+            }
+        }
+
         return runBlocking {
             when (
                 val executed = pipeline.executePinnedDownload(
@@ -814,19 +867,7 @@ class OmniAdminFacade(
                     command = command,
                 )
             ) {
-                is OmniResult.Ok -> {
-                    when (val job = plane.adminApi.getJob(principal, domainSpec.jobId)) {
-                        is OmniResult.Ok -> AdminAidlMapper.toAidlJobInfo(job.value)
-                        is OmniResult.Err -> {
-                            val info = OmniJobInfo()
-                            info.jobId = domainSpec.jobId
-                            info.state = executed.value.job.state
-                            info.resourceVersion = executed.value.job.resourceVersion
-                            info.progress = 1.0
-                            info
-                        }
-                    }
-                }
+                is OmniResult.Ok -> jobInfoFrom(plane, principal, domainSpec.jobId, executed.value)
                 is OmniResult.Err -> throw RemoteException(
                     AdminAidlMapper.toAidlError(executed.error).message
                         ?: executed.error.code.code,
@@ -834,6 +875,24 @@ class OmniAdminFacade(
             }
         }
     }
+
+    private suspend fun jobInfoFrom(
+        plane: RuntimeControlPlane,
+        principal: com.omnillm.core.contracts.PrincipalId,
+        jobId: String,
+        executed: com.omnillm.features.modelhub.acquisition.AcquisitionPipeline.ExecuteResult,
+    ): OmniJobInfo =
+        when (val job = plane.adminApi.getJob(principal, jobId)) {
+            is OmniResult.Ok -> AdminAidlMapper.toAidlJobInfo(job.value)
+            is OmniResult.Err -> {
+                val info = OmniJobInfo()
+                info.jobId = jobId
+                info.state = executed.job.state
+                info.resourceVersion = executed.job.resourceVersion
+                info.progress = 1.0
+                info
+            }
+        }
 
     private fun ensureRuntimeAccepting() {
         val plane = RuntimeControlPlane.get()
@@ -852,7 +911,7 @@ class OmniAdminFacade(
      * even if not yet READY only for apply after ensureStarted from bind.
      */
     private fun ensureRuntimeAcceptingOrAllowStoppedRead() {
-        // applySettings is a durable mutation — require accepting work.
+        // applySettings is a durable mutation ??require accepting work.
         ensureRuntimeAccepting()
     }
 
@@ -873,7 +932,7 @@ class OmniAdminFacade(
             binder.linkToDeath(recipient, 0)
             deathRecipients[subscriptionId] = recipient
         } catch (_: RemoteException) {
-            // Already dead — close immediately.
+            // Already dead ??close immediately.
             RuntimeControlPlane.get()?.adminApi?.closeSubscription(
                 LocalUiPrincipal.ID,
                 subscriptionId,

@@ -112,14 +112,14 @@ Dependency edges point **inward only** (Experience → Interface → Control Pla
 
 ## Status (software)
 
-Implementation is **beyond skeleton**: full module graph, 12 Feature Packs hosted on the control plane, durable claim/commit/session SQLite, AIDL/HTTP transports, Compose UI shell, and a packaged llama JNI **shim** (not full upstream GGUF qualification).
+Implementation is **beyond skeleton**: full module graph, 12 Feature Packs hosted on the control plane, durable claim/commit/session SQLite, AIDL/HTTP transports, Compose UI shell, and a packaged llama JNI **upstream** (vendored llama.cpp b9999, LOCKED, real GGUF generation verified on emulator).
 
 | Area | Snapshot |
 |---|---|
 | Modules | 43 Gradle modules (`settings.gradle.kts`) |
 | Feature Packs | 12/12 constructed on control plane |
-| Engine Packs | 5 adapters + `engines:api`; all **UNQUALIFIED** / registry **UNKNOWN** |
-| Native | `libomnillm_llama` CMake/JNI shim for arm64-v8a + x86_64; full llama.cpp `NOT_LOCKED` |
+| Engine Packs | 5 adapters + `engines:api`; llama.cpp upstream **LOCKED + device-verified**; LiteRT/MLC/mllm/ORT adapters fail-closed (vendor artifacts pending) |
+| Native | `libomnillm_llama` CMake/JNI links vendored llama.cpp b9999 for arm64-v8a + x86_64; 16 KB gates pass |
 | Release assemble | `:android:app-ui:assembleRelease` + `:android:companion-sandbox:assembleRelease` |
 | Honesty | No QUALIFIED/SUPPORTED cells without device evidence |
 

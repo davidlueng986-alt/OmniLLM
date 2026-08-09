@@ -5,6 +5,7 @@ import com.omnillm.core.canonical.generated.BlobId
 import com.omnillm.core.canonical.generated.ModelRevisionId
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.canonical.generated.Sha256Digest
+import com.omnillm.core.contracts.DeviceExecutionFingerprint
 import com.omnillm.core.contracts.EngineBuildId
 import com.omnillm.core.contracts.PlanId
 import com.omnillm.core.errors.generated.OmniErrorCode
@@ -31,6 +32,7 @@ import com.omnillm.engines.api.PlacementClassLabels
 import com.omnillm.core.canonical.generated.ResourceEnvelope
 import com.omnillm.core.canonical.generated.ResourceVector
 import com.omnillm.features.modelhub.api.AcquisitionChannel
+import com.omnillm.features.modelhub.api.AcceptLicenseSpec
 import com.omnillm.features.modelhub.api.AcquisitionDeclaredFile
 import com.omnillm.features.modelhub.api.AcquisitionMaterializedFile
 import com.omnillm.features.modelhub.api.AcquisitionProgressUpdate
@@ -42,8 +44,12 @@ import com.omnillm.features.modelhub.api.SetPinSpec
 import com.omnillm.features.modelhub.api.StartDeleteSpec
 import com.omnillm.features.modelhub.api.StartDownloadSpec
 import com.omnillm.features.modelhub.api.StartImportSpec
+import com.omnillm.features.modelhub.api.StartLoadSpec
+import com.omnillm.features.modelhub.api.StartUnloadSpec
 import com.omnillm.features.modelhub.ports.FixedSuggestedCatalogPort
 import com.omnillm.features.modelhub.ports.LiveReferenceQueryPort
+import com.omnillm.features.modelhub.ports.LoadedModelQueryPort
+import com.omnillm.features.modelhub.ports.ModelLoadRuntimePort
 import com.omnillm.features.modelhub.projection.ModelCardProjector
 import com.omnillm.features.modelhub.usecase.ModelHubService
 import com.omnillm.features.modelhub.viewmodel.ModelHubViewModel
@@ -420,6 +426,141 @@ class ModelHubServiceTest {
     }
 
     // ------------------------------------------------------------------
+
+    @Test
+    fun startLoad_readyInstallation_reachesLoadedState() = runBlocking {
+        val installationId = "11111111-2222-4333-8444-555555555555"
+        promoteToReady(installationId, "job-load-test")
+        val ledger = com.omnillm.features.modelhub.ports.InMemoryLicenseAcceptanceLedger()
+        ledger.accept(LocalUiPrincipal.ID.value, catalogEntry.licenseDigest!!, installationId)
+        val loadApi = ModelHubService(
+            jobManager = jobManager,
+            modelManager = modelManager,
+            catalog = FixedSuggestedCatalogPort(listOf(catalogEntry)),
+            loadedModels = object : LoadedModelQueryPort {
+                override suspend fun findByInstallation(installationId: String): List<LoadedModelSnapshot> =
+                    loadedModels.findByInstallation(InstallationId(installationId))
+            },
+            references = object : LiveReferenceQueryPort {
+                override suspend fun installationReferences(installationId: String): LiveReferences =
+                    refs.installationRefs
+            },
+            loadRuntime = object : ModelLoadRuntimePort {
+                override fun primaryEngineBuildId(): String = "engine-test"
+                override fun deviceExecutionFingerprint(): DeviceExecutionFingerprint =
+                    DeviceExecutionFingerprint.parse("device-fp-load-test")
+            },
+            licenseAcceptance = ledger,
+        )
+        val result = loadApi.startLoad(
+            LocalUiPrincipal.ID,
+            StartLoadSpec(
+                installationId = installationId,
+                command = cmd("load-1"),
+            ),
+        )
+        assertTrue("load failed: $result", result is OmniResult.Ok)
+        val loaded = (result as OmniResult.Ok).value
+        assertEquals("LOADED", loaded.state)
+        assertEquals(installationId, loaded.installationId)
+        assertTrue(!loaded.loadedModelId.isNullOrBlank())
+
+        // Unload path: LOADED → DRAINING.
+        val unloaded = assertOk(
+            loadApi.startUnload(
+                LocalUiPrincipal.ID,
+                StartUnloadSpec(
+                    installationId = installationId,
+                    command = cmd("unload-1"),
+                ),
+            ),
+        )
+        assertTrue(
+            "unload must drain: ${unloaded.state}",
+            unloaded.state == "DRAINING" || unloaded.state == "UNLOADING" ||
+                unloaded.state == "UNLOADED",
+        )
+    }
+
+    @Test
+    fun startLoad_withoutAttachedEngine_failsClosed() = runBlocking {
+        val installationId = "22222222-3333-4444-8555-666666666666"
+        promoteToReady(installationId, "job-load-fail")
+        // Default port = UnavailableModelLoadRuntimePort → fail closed.
+        val result = api.startLoad(
+            LocalUiPrincipal.ID,
+            StartLoadSpec(
+                installationId = installationId,
+                command = cmd("load-fail"),
+            ),
+        )
+        assertTrue("must fail closed without engine", result is OmniResult.Err)
+    }
+
+    @Test
+    fun startUnload_withoutLoadedModel_returnsNotFound() = runBlocking {
+        val installationId = "33333333-4444-4555-8666-777777777777"
+        promoteToReady(installationId, "job-unload-none")
+        val result = api.startUnload(
+            LocalUiPrincipal.ID,
+            StartUnloadSpec(
+                installationId = installationId,
+                command = cmd("unload-none"),
+            ),
+        )
+        assertTrue("must be NOT_FOUND", result is OmniResult.Err)
+    }
+
+    @Test
+    fun acceptLicense_unlocksLoadGate() = runBlocking {
+        val installationId = "44444444-5555-4666-8777-888888888888"
+        promoteToReady(installationId, "job-license")
+        val ledger = com.omnillm.features.modelhub.ports.InMemoryLicenseAcceptanceLedger()
+        val licenseApi = ModelHubService(
+            jobManager = jobManager,
+            modelManager = modelManager,
+            catalog = FixedSuggestedCatalogPort(listOf(catalogEntry)),
+            references = object : LiveReferenceQueryPort {
+                override suspend fun installationReferences(installationId: String): LiveReferences =
+                    refs.installationRefs
+            },
+            loadRuntime = object : ModelLoadRuntimePort {
+                override fun primaryEngineBuildId(): String = "engine-test"
+                override fun deviceExecutionFingerprint(): DeviceExecutionFingerprint =
+                    DeviceExecutionFingerprint.parse("device-fp-license-test")
+            },
+            licenseAcceptance = ledger,
+        )
+        // Catalog entry has licenseDigest "f".repeat(64) → load must be gated.
+        val gated = licenseApi.startLoad(
+            LocalUiPrincipal.ID,
+            StartLoadSpec(installationId = installationId, command = cmd("load-gated")),
+        )
+        assertTrue("load must be gated until license accepted: $gated", gated is OmniResult.Err)
+
+        // Accept → card projects ACCEPTED.
+        val accepted = assertOk(
+            licenseApi.acceptLicense(
+                LocalUiPrincipal.ID,
+                AcceptLicenseSpec(
+                    installationId = installationId,
+                    licenseDigest = catalogEntry.licenseDigest!!,
+                    sourceAssertion = installationId,
+                    command = cmd("accept-1"),
+                ),
+            ),
+        )
+        assertEquals("ACCEPTED", accepted.licenseStatus)
+
+        // Now load succeeds.
+        val loaded = assertOk(
+            licenseApi.startLoad(
+                LocalUiPrincipal.ID,
+                StartLoadSpec(installationId = installationId, command = cmd("load-ok")),
+            ),
+        )
+        assertEquals("LOADED", loaded.state)
+    }
 
     private suspend fun promoteToReady(installationId: String, jobId: String) {
         assertOk(

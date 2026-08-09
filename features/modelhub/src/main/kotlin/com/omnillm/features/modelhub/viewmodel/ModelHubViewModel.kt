@@ -4,15 +4,19 @@ import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniError
 import com.omnillm.features.modelhub.api.AcquisitionJobView
+import com.omnillm.features.modelhub.api.AcceptLicenseSpec
 import com.omnillm.features.modelhub.api.CancelAcquisitionSpec
 import com.omnillm.features.modelhub.api.ModelCard
 import com.omnillm.features.modelhub.api.ModelHubApi
 import com.omnillm.features.modelhub.api.ModelHubJobHandle
 import com.omnillm.features.modelhub.api.ModelHubSnapshot
+import com.omnillm.features.modelhub.api.ModelLoadResult
 import com.omnillm.features.modelhub.api.SetPinSpec
 import com.omnillm.features.modelhub.api.StartDeleteSpec
 import com.omnillm.features.modelhub.api.StartDownloadSpec
 import com.omnillm.features.modelhub.api.StartImportSpec
+import com.omnillm.features.modelhub.api.StartLoadSpec
+import com.omnillm.features.modelhub.api.StartUnloadSpec
 import com.omnillm.interfaces.admin.LocalUiPrincipal
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -96,6 +100,38 @@ class ModelHubViewModel(
 
     suspend fun setPinned(spec: SetPinSpec): OmniResult<ModelCard> {
         val result = api.setPinned(principal, spec)
+        when (result) {
+            is OmniResult.Ok -> {
+                _state.value = _state.value.copy(selectedCard = result.value, lastError = null)
+                refresh()
+            }
+            is OmniResult.Err -> _state.value = _state.value.copy(lastError = result.error)
+        }
+        return result
+    }
+
+    suspend fun load(spec: StartLoadSpec): OmniResult<ModelLoadResult> {
+        val result = api.startLoad(principal, spec)
+        when (result) {
+            is OmniResult.Ok -> _state.value = _state.value.copy(lastError = null)
+            is OmniResult.Err -> _state.value = _state.value.copy(lastError = result.error)
+        }
+        refresh()
+        return result
+    }
+
+    suspend fun unload(spec: StartUnloadSpec): OmniResult<ModelLoadResult> {
+        val result = api.startUnload(principal, spec)
+        when (result) {
+            is OmniResult.Ok -> _state.value = _state.value.copy(lastError = null)
+            is OmniResult.Err -> _state.value = _state.value.copy(lastError = result.error)
+        }
+        refresh()
+        return result
+    }
+
+    suspend fun acceptLicense(spec: AcceptLicenseSpec): OmniResult<ModelCard> {
+        val result = api.acceptLicense(principal, spec)
         when (result) {
             is OmniResult.Ok -> {
                 _state.value = _state.value.copy(selectedCard = result.value, lastError = null)

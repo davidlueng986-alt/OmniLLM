@@ -399,12 +399,28 @@ class RuntimeControlPlane private constructor(
                     },
                 )
                 // Shared engine execute binding — updated by ensureEnginePacksAttached.
+                // Real installed GGUF resolution for llama-cpp (privileged load,
+                // INV-010): READY installation → content re-verify → in-process path.
+                val ggufModelSourceResolver =
+                    com.omnillm.android.runtimeservice.featurehost.RuntimeGgufModelSourceResolver(
+                        filesRoot = AndroidStorageRoots.filesRootPath(appContext),
+                        installations = com.omnillm.runtime.modelmanager.durable
+                            .SqlInstallationRepository(
+                                ports = controlDb.installations,
+                                clock = clock,
+                            ),
+                        readyContent = modelStore,
+                    )
                 val engineExecuteBinding =
                     com.omnillm.android.runtimeservice.featurehost.EngineExecuteBinding(
                         exploratoryEnabled = {
                             com.omnillm.android.runtimeservice.featurehost.EngineExecuteBinding
                                 .readExploratoryEnabled(policy.settingsSnapshot().values)
                         },
+                        modelSourceResolver = ggufModelSourceResolver,
+                        fallbackToFixtureOnUnresolved =
+                            com.omnillm.core.contracts.ProductBuildMode
+                                .allowExecuteWithoutQualification(),
                     )
                 val waveA = WaveAWiring.wire(
                     WaveAWiring.Deps(

@@ -241,6 +241,7 @@ object WaveAWiring {
             references = object : LiveReferenceQueryPort {
                 override suspend fun installationReferences(installationId: String): LiveReferences = LiveReferences()
             },
+            loadRuntime = ControlPlaneModelLoadRuntimePort(deps.engineExecute),
             clockMs = deps.clockMs,
         )
         val playground = PlaygroundModule.createApi(

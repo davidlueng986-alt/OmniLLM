@@ -50,39 +50,42 @@ All 12 packs are **constructed on the control plane** (`WaveAWiring` + `FeatureP
 
 Authority: `docs/80-engines/*`, `specs/engine-qualification-status.yaml`, per-module `capability-matrix.yaml`, `UPSTREAM.lock`.
 
-**Global rule (verified):** No engine cell is marked **QUALIFIED** or projected **SUPPORTED** without evidence. Design may be BASELINE while every runtime cell remains UNQUALIFIED.
+**Build posture:** `ProductBuildMode.DEVELOPMENT_SHIP_MODE = true`.  
+Develop/execute is **not** blocked by lab QUALIFIED/PASS. Lab cells in specs may still say UNQUALIFIED — that is **compliance bookkeeping**, not a “stop coding” rule.  
+**What still blocks “engines work”:** missing real SDK/native + model generate paths — see root **`SHIP_BACKLOG.md`**.
 
-| ID | engineId | Design (docs) | Software status | Qualification honesty | Notes |
+| ID | engineId | Design (docs) | Software status | Runtime backend (fact) | Notes |
 |---|---|---|---|---|---|
 | **ENGINE-STANDARD** | — | BASELINE | **PASS** | N/A | SPI in `engines/api`; registry, placement, FakeEngine tests. |
-| **ENGINE-LLAMACPP** | `llama.cpp` | BASELINE | **PASS** (adapter + packaging) / **PARTIAL** (upstream) | **UNQUALIFIED / UNKNOWN** | Adapter + Plan/Reserve/Commit/Execute pipeline tests; JNI `libomnillm_llama` packaged (experimental fixture / optional vendored tree); production bind via `EngineExecuteBinding` when `.so` present. `UPSTREAM.lock` **NOT_LOCKED**. Exploratory execute → **CONDITIONAL** only if `runtime.exploratoryExecuteEnabled`. |
-| **ENGINE-LITERT** | `LiteRT-LM` | BASELINE | **PARTIAL** | **UNQUALIFIED / UNKNOWN** | Adapter module + pipeline/stub tests; registry stub on attach; **no** production native/SDK load. |
-| **ENGINE-MLC** | `MLC-LLM` | BASELINE | **PARTIAL** | **UNQUALIFIED / UNKNOWN** | Adapter + exploratory stub; no production native. |
-| **ENGINE-MLLM** | `mllm` | BASELINE | **PARTIAL** | **UNQUALIFIED / UNKNOWN** | Adapter + private channel scaffold; no production native. |
-| **ENGINE-ORTGENAI** | `ONNX-Runtime-GenAI` | BASELINE | **PARTIAL** | **UNQUALIFIED / UNKNOWN** | Adapter stub; no ORT/GenAI natives packaged. |
-| **ENGINE-QUALIFICATION-STATUS** | — | BASELINE | **PASS** | Spec honest | `specs/engine-qualification-status.yaml` all UNQUALIFIED/UNKNOWN; matrices match; attach asserts no SUPPORTED cells without evidence. |
+| **ENGINE-LLAMACPP** | `llama.cpp` | BASELINE | **PARTIAL** | JNI + **fixture** generate (not full GGUF) | Adapter + pipeline OK; need true upstream (E1). DEV mode may execute when bound. |
+| **ENGINE-LITERT** | `LiteRT-LM` | BASELINE | **PARTIAL** | StubSdk only | Need official AAR/SDK (E3). |
+| **ENGINE-MLC** | `MLC-LLM` | BASELINE | **PARTIAL** | Stub runtime | Need MLC Android runtime (E4). |
+| **ENGINE-MLLM** | `mllm` | BASELINE | **PARTIAL** | Server channel stub | Need AAR/server (E5). |
+| **ENGINE-ORTGENAI** | `ONNX-Runtime-GenAI` | BASELINE | **PARTIAL** | Stub GenAI | Need ORT+GenAI natives (E6). |
+| **ENGINE-QUALIFICATION-STATUS** | — | BASELINE | **PASS** (spec) | — | Spec cells for lab; DEV mode ignores PASS for execute. |
 
-### Engine software vs device evidence
+### Engine software vs “done”
 
-| Layer | Software | Device / human |
+| Layer | Status | Action to finish |
 |---|---|---|
-| Registry registration after READY | Implemented | — |
-| Placeholder cells UNQUALIFIED + NOT_EXECUTED | Implemented | — |
-| Native packaging 16 KB / ABI | Tooling + llama shim | Full multi-device matrix |
-| PASS evidence packs | Not invented | Lab / OEM only |
-| SUPPORTED projection | Impossible without QUALIFIED_WITH_ENVELOPE + PASS | Human evidence workflow |
+| Registry registration after READY | Done | — |
+| DEV execute without PASS packs | Done (`ProductBuildMode`) | — |
+| Real llama GGUF generate | Partial | E1 |
+| Peer engines real backend | Missing | E3–E6 |
+| Playground/HTTP stable tokens | Partial | E2, I1, I5 |
+| Lab PASS / multi-device matrix | Optional for claims | Human later; not develop gate |
 
 ---
 
 ## Summary counts
 
-| Category | PASS | PARTIAL | MISSING |
-|---|---|---|---|
-| FEAT-* (12) | 11 | 1 (TOOLS depth/UI) | 0 |
-| ENGINE-* packs (5) | 1 software-primary (llama-cpp adapter path) + 4 partial stubs | (counted under PARTIAL) | 0 |
-| ENGINE-STANDARD / QUALIFICATION-STATUS | 2 PASS | — | — |
+| Category | Scaffold/host | True product depth |
+|---|---|---|
+| FEAT-* (12) | 12 modules + control plane host | Many main journeys still need depth (SHIP_BACKLOG F1–F12, M*, I*) |
+| ENGINE-* packs (5) | 5 adapters | **0/5** meet “real TEXT_GENERATION on device” Done definition yet |
+| Policy / honesty gates | Unblocked for develop | Flip `DEVELOPMENT_SHIP_MODE=false` only for compliance audit |
 
-**Software readiness alignment:** Matches `PRODUCT_READINESS.md` → software ready **YES**, with honest UNQUALIFIED engines and human residuals for device, Play, and upstream locks.
+**Alignment:** Scaffold software packaging is strong; **feature/engine completion for ship** is tracked only in **`SHIP_BACKLOG.md`** (not “UNQUALIFIED = stop”).
 
 ---
 

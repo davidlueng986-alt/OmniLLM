@@ -292,12 +292,253 @@ class ControlPlaneHttpHandler(
         idempotencyKeyHeader: String?,
     ): SseHandlerResult {
         // Pre-stream error (HTTP) — stream not committed (CORE-INTERFACE §4).
+        if (orchestrator == null) {
+            return SseHandlerResult.PreStreamError(
+                OmniError.CAPABILITY_UNSUPPORTED(message = "inference orchestrator not attached"),
+            )
+        }
+        val plane = com.omnillm.android.runtimeservice.controlplane.RuntimeControlPlane.get()
+        if (plane != null) {
+            plane.ensureEnginePacksAttached()
+            val binding = try {
+                plane.engineExecute
+            } catch (_: Exception) {
+                null
+            }
+            if (binding != null && binding.isEngineBound() && binding.isExploratoryExecuteEnabled()) {
+                val userText = request.messages
+                    .lastOrNull { it.role.equals("user", ignoreCase = true) }?.content
+                    ?: request.messages.lastOrNull()?.content
+                    ?: ""
+                if (userText.isBlank()) {
+                    return SseHandlerResult.PreStreamError(
+                        OmniError.INVALID_REQUEST(message = "chat messages must include content"),
+                    )
+                }
+                val requestId = requestIdHeader?.takeIf { it.isNotBlank() }
+                    ?: UUID.randomUUID().toString()
+                val idem = idempotencyKeyHeader?.takeIf { it.isNotBlank() }
+                    ?: "stream-chat-$requestId"
+                val digest = com.omnillm.core.canonical.IdentityHashing.sha256Hex(
+                    "http-stream-chat|$requestId|$idem|${request.model}|${userText.length}",
+                )
+                val revisionHex = request.model.lowercase().let {
+                    if (it.matches(Regex("^[0-9a-f]{64}$"))) it
+                    else com.omnillm.core.canonical.IdentityHashing.sha256Hex("model|${request.model}")
+                }
+                val port = com.omnillm.android.runtimeservice.featurehost.ControlPlaneFeaturePorts
+                    .playgroundInference(
+                        orchestrator = orchestrator,
+                        binding = binding,
+                        modelManager = plane.modelManager,
+                        clockMs = { clock().toEpochMilli() },
+                        runtimeEpoch = { resourceVersion() },
+                    )
+                val spec = com.omnillm.features.playground.api.ChatRequestSpec(
+                    identity = com.omnillm.features.playground.api.InferenceIdentity(
+                        requestId = requestId,
+                        idempotencyKey = idem,
+                        canonicalInputDigest = digest,
+                    ),
+                    modelRevisionId = revisionHex,
+                    messages = listOf(
+                        com.omnillm.features.playground.api.ChatMessage(
+                            role = "user",
+                            content = userText,
+                        ),
+                    ),
+                    stream = true,
+                )
+                return when (
+                    val r = port.startChat(
+                        com.omnillm.core.contracts.PrincipalId.parse(principal.principalId),
+                        spec,
+                    )
+                ) {
+                    is OmniResult.Err -> SseHandlerResult.PreStreamError(r.error)
+                    is OmniResult.Ok -> {
+                        val handle = r.value
+                        if (handle.error != null) {
+                            SseHandlerResult.PreStreamError(handle.error!!)
+                        } else {
+                            streamOpenAiChatChunks(
+                                requestId = handle.requestId,
+                                model = request.model,
+                                principal = principal,
+                                port = plane.playgroundApi,
+                            )
+                        }
+                    }
+                }
+            }
+        }
         return SseHandlerResult.PreStreamError(
             OmniError.CAPABILITY_UNSUPPORTED(
-                message = "streaming chat requires READY model candidates",
-                details = mapOf("model" to request.model),
+                message = "streaming chat requires engine attached + " +
+                    "runtime.exploratoryExecuteEnabled",
+                details = mapOf(
+                    "requestId" to (requestIdHeader ?: "client-generated"),
+                    "setting" to com.omnillm.android.runtimeservice.featurehost.EngineExecuteBinding
+                        .SETTING_EXPLORATORY_EXECUTE,
+                ),
             ),
         )
+    }
+
+    /**
+     * OpenAI SSE chunk framing over the durable playground stream projection
+     * (CORE-INTERFACE §4: post-commit errors are terminal events, never late HTTP).
+     * Stateless Session default: disconnect does not auto-continue.
+     */
+    private fun streamOpenAiChatChunks(
+        requestId: String,
+        model: String,
+        principal: HttpPrincipal,
+        port: com.omnillm.features.playground.api.PlaygroundApi,
+    ): SseHandlerResult.Stream {        val created = clock().epochSecond
+        val events = flow {
+            // Role preamble chunk (OpenAI convention).
+            emit(
+                SseEvent(
+                    data = openAiChunkJson(requestId, created, model, roleDelta = "assistant"),
+                    event = null,
+                    id = "0",
+                    isTerminal = false,
+                ),
+            )
+            var afterSeq = 0L
+            var seqId = 1L
+            var done = false
+            var attempts = 0
+            while (!done && attempts < MAX_STREAM_POLLS) {
+                attempts++
+                when (val batch = port.streamEvents(
+                    PrincipalId.parse(principal.principalId),
+                    requestId,
+                    afterSeq,
+                )) {
+                    is OmniResult.Err -> {
+                        emit(
+                            SseEvent(
+                                data = """{"error":{"message":${jsonEscape(batch.error.message ?: "stream error")}}}""",
+                                event = SseFraming.EVENT_TERMINAL,
+                                id = (seqId++).toString(),
+                                isTerminal = true,
+                            ),
+                        )
+                        done = true
+                    }
+                    is OmniResult.Ok -> {
+                        val b = batch.value
+                        for (ev in b.events) {
+                            afterSeq = maxOf(afterSeq, ev.seq + 1L)
+                            if (ev.kind == "delta") {
+                                ev.textDelta?.takeIf { it.isNotEmpty() }?.let { text ->
+                                    emit(
+                                        SseEvent(
+                                            data = openAiChunkJson(
+                                                requestId,
+                                                created,
+                                                model,
+                                                contentDelta = text,
+                                            ),
+                                            event = null,
+                                            id = (seqId++).toString(),
+                                            isTerminal = false,
+                                        ),
+                                    )
+                                }
+                            }
+                            if (ev.isTerminal || ev.kind == "terminal") {
+                                done = true
+                            }
+                        }
+                        if (b.isTerminal || done) {
+                            // Final chunk with finish_reason + usage summary, then [DONE].
+                            emit(
+                                SseEvent(
+                                    data = openAiChunkJson(
+                                        requestId,
+                                        created,
+                                        model,
+                                        finishReason = "stop",
+                                        terminal = true,
+                                    ),
+                                    event = null,
+                                    id = (seqId++).toString(),
+                                    isTerminal = false,
+                                ),
+                            )
+                            emit(
+                                SseEvent(
+                                    data = "[DONE]",
+                                    event = SseFraming.EVENT_TERMINAL,
+                                    id = (seqId++).toString(),
+                                    isTerminal = true,
+                                ),
+                            )
+                            done = true
+                        } else {
+                            kotlinx.coroutines.delay(STREAM_POLL_MS)
+                        }
+                    }
+                }
+            }
+            if (!done) {
+                // Bounded safety terminal — never silently hang the client.
+                emit(
+                    SseEvent(
+                        data = "[DONE]",
+                        event = SseFraming.EVENT_TERMINAL,
+                        id = (seqId++).toString(),
+                        isTerminal = true,
+                    ),
+                )
+            }
+        }
+        return SseHandlerResult.Stream(
+            requestId = requestId,
+            events = events,
+            headers = mapOf("X-OmniLLM-Request-Id" to requestId),
+        )
+    }
+
+    /** OpenAI `chat.completion.chunk` data payload (escaped JSON string). */
+    private fun openAiChunkJson(
+        requestId: String,
+        created: Long,
+        model: String,
+        roleDelta: String? = null,
+        contentDelta: String? = null,
+        finishReason: String? = null,
+        terminal: Boolean = false,
+    ): String {
+        val delta = buildMap {
+            roleDelta?.let { put("role", JsonPrimitive(it)) }
+            contentDelta?.let { put("content", JsonPrimitive(it)) }
+        }
+        val choice = buildMap {
+            put("index", JsonPrimitive(0))
+            put("delta", JsonObject(delta))
+            put("finish_reason", finishReason?.let { JsonPrimitive(it) } ?: JsonNull)
+        }
+        val obj = buildMap {
+            put("id", JsonPrimitive("chatcmpl-$requestId"))
+            put("object", JsonPrimitive("chat.completion.chunk"))
+            put("created", JsonPrimitive(created))
+            put("model", JsonPrimitive(model))
+            put("choices", JsonArray(listOf(JsonObject(choice))))
+            if (terminal) {
+                put("usage", JsonObject(
+                    mapOf(
+                        "prompt_tokens" to JsonPrimitive(0),
+                        "completion_tokens" to JsonPrimitive(0),
+                        "total_tokens" to JsonPrimitive(0),
+                    ),
+                ))
+            }
+        }
+        return JsonObject(obj).toString()
     }
 
     override suspend fun createEmbedding(
@@ -1508,6 +1749,12 @@ class ControlPlaneHttpHandler(
 
     private fun JsonObject.bool(key: String): Boolean? =
         (this[key] as? JsonPrimitive)?.booleanOrNull
+
+    companion object {
+        /** Bounded SSE stream polling (bounded poll × delay ≈ 5 min max). */
+        const val MAX_STREAM_POLLS: Int = 15_000
+        const val STREAM_POLL_MS: Long = 20L
+    }
 }
 
 private object ClaimShapeOk {

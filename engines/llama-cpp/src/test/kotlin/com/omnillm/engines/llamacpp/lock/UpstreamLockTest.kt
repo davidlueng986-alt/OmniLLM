@@ -17,7 +17,7 @@ class UpstreamLockTest {
     }
 
     @Test
-    fun classpathLock_pinsRepositoryTagCommit_butRemainsNotLocked() {
+    fun classpathLock_completeAfterDigestCapture() {
         val lock = UpstreamLockLoader.loadFromClasspathOrTemplate()
         assertEquals("https://github.com/ggml-org/llama.cpp", lock.repository)
         assertEquals("b9999", lock.tag)
@@ -28,15 +28,29 @@ class UpstreamLockTest {
             "bcd8ec749126d45cb06737d0690295d73df4b6e7e194205bcf91190368f27285",
             lock.licenseDigest,
         )
-        // sourceDigest / artifactDigest / toolchainDigest intentionally pending.
-        assertFalse(
-            "lock must stay incomplete until source/artifact/toolchain digests",
-            lock.isComplete(),
+        // Supply-chain lock complete (2026-08-09): source/toolchain/artifact digests
+        // captured from the pinned b9999 archive + NDK debug build.
+        assertEquals(UpstreamLock.LOCK_STATE_LOCKED, lock.lockState)
+        assertTrue(
+            "sourceDigest must be captured",
+            !lock.sourceDigest.isNullOrBlank(),
         )
+        assertTrue(
+            "toolchainDigest must be captured",
+            !lock.toolchainDigest.isNullOrBlank(),
+        )
+        assertTrue(
+            "artifactDigest must be captured",
+            !lock.artifactDigest.isNullOrBlank(),
+        )
+        assertTrue("complete lock isComplete()", lock.isComplete())
         assertTrue(
             lock.abis.isEmpty() || lock.abis.contains("arm64-v8a"),
         )
         assertEquals("b9999@47c786924ad1ab7e91da2cdc72fcdb563780c2bd", lock.upstreamCommitOrTag())
+        // A complete supply-chain lock alone must not mint SUPPORTED:
+        // qualification cells stay UNQUALIFIED until device evidence.
+        assertTrue(!lock.engineBuildIdRaw.isNullOrBlank())
     }
 
     @Test

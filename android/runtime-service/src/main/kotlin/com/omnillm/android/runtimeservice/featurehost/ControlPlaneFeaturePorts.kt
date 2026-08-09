@@ -322,15 +322,17 @@ private class OrchestratorPlaygroundInferencePort(
         if (!binding.isEngineBound()) {
             return OmniResult.err(
                 OmniError.CAPABILITY_UNSUPPORTED(
-                    message = "playground engine not attached (fail closed — native missing or unbound)",
+                    message = "playground engine not attached (native missing or unbound)",
                 ),
             )
         }
-        if (!binding.isExploratoryExecuteEnabled()) {
+        if (!binding.isExploratoryExecuteEnabled() &&
+            !com.omnillm.core.contracts.ProductBuildMode.allowExecuteWithoutQualification()
+        ) {
             return OmniResult.err(
                 OmniError.CAPABILITY_UNSUPPORTED(
                     message = "experimental generate disabled; enable runtime.exploratoryExecuteEnabled " +
-                        "(LOCAL_ADMIN). Capability remains UNKNOWN without evidence.",
+                        "(LOCAL_ADMIN).",
                     details = mapOf("setting" to EngineExecuteBinding.SETTING_EXPLORATORY_EXECUTE),
                 ),
             )
@@ -534,7 +536,9 @@ private class OrchestratorServerInferencePort(
                 ),
             )
         }
-        if (!binding.isExploratoryExecuteEnabled()) {
+        if (!binding.isExploratoryExecuteEnabled() &&
+            !com.omnillm.core.contracts.ProductBuildMode.allowExecuteWithoutQualification()
+        ) {
             return OmniResult.ok(
                 SmokeTestResult(
                     step = "PLAN",
@@ -719,16 +723,27 @@ private class OrchestratorToolsInferencePort(
         maxAttempts: Int,
         maxRepairAttempts: Int,
     ): OmniResult<StructuredInferenceHandle> {
-        // Structured output cell is UNKNOWN until qualified — fail closed honestly.
-        // Do not pretend CONDITIONAL TEXT_GENERATION implies STRUCTURED_OUTPUT.
-        return OmniResult.err(
-            OmniError.CAPABILITY_UNKNOWN(
-                message = "STRUCTURED_OUTPUT unknown/unqualified (fail closed); " +
-                    "exploratory generate does not elevate structured cells",
-                details = mapOf(
-                    "capability" to CapabilityId.STRUCTURED_OUTPUT.id,
-                    "engineBound" to binding.isEngineBound().toString(),
+        if (!com.omnillm.core.contracts.ProductBuildMode.allowExecuteWithoutQualification()) {
+            return OmniResult.err(
+                OmniError.CAPABILITY_UNKNOWN(
+                    message = "STRUCTURED_OUTPUT unknown/unqualified (compliance mode)",
+                    details = mapOf(
+                        "capability" to CapabilityId.STRUCTURED_OUTPUT.id,
+                        "engineBound" to binding.isEngineBound().toString(),
+                    ),
                 ),
+            )
+        }
+        // Development ship mode: allow path to orchestrator once engine bound (wire fully later).
+        if (!binding.isEngineBound()) {
+            return OmniResult.err(
+                OmniError.CAPABILITY_UNSUPPORTED(message = "structured: engine not bound"),
+            )
+        }
+        return OmniResult.err(
+            OmniError.CAPABILITY_UNSUPPORTED(
+                message = "STRUCTURED_OUTPUT path open in DEV mode but engine structured adapter not implemented yet",
+                details = mapOf("capability" to CapabilityId.STRUCTURED_OUTPUT.id, "todo" to "E1/I3"),
             ),
         )
     }
@@ -738,13 +753,27 @@ private class OrchestratorToolsInferencePort(
         spec: ToolCallingSpec,
         actualMode: StructuredMode,
         maxAttempts: Int,
-    ): OmniResult<ToolCallingHandle> =
-        OmniResult.err(
-            OmniError.CAPABILITY_UNKNOWN(
-                message = "TOOL_CALLING unknown/unqualified (fail closed); host tools never execute",
-                details = mapOf("capability" to CapabilityId.TOOL_CALLING.id),
+    ): OmniResult<ToolCallingHandle> {
+        if (!com.omnillm.core.contracts.ProductBuildMode.allowExecuteWithoutQualification()) {
+            return OmniResult.err(
+                OmniError.CAPABILITY_UNKNOWN(
+                    message = "TOOL_CALLING unknown/unqualified (compliance mode)",
+                    details = mapOf("capability" to CapabilityId.TOOL_CALLING.id),
+                ),
+            )
+        }
+        if (!binding.isEngineBound()) {
+            return OmniResult.err(
+                OmniError.CAPABILITY_UNSUPPORTED(message = "tools: engine not bound"),
+            )
+        }
+        return OmniResult.err(
+            OmniError.CAPABILITY_UNSUPPORTED(
+                message = "TOOL_CALLING path open in DEV mode but tool loop not implemented yet",
+                details = mapOf("capability" to CapabilityId.TOOL_CALLING.id, "todo" to "I3/F9"),
             ),
         )
+    }
 
     override suspend fun cancel(principal: PrincipalId, requestId: String): OmniResult<Unit> {
         val rid = try {

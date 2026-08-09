@@ -26,6 +26,7 @@ import com.omnillm.features.lan.LanFeatureModule
 import com.omnillm.features.lan.viewmodel.LanAccessViewModel
 import com.omnillm.features.modelhub.ModelhubModule
 import com.omnillm.features.modelhub.api.AcquisitionChannel
+import com.omnillm.features.modelhub.api.AcceptLicenseSpec
 import com.omnillm.features.modelhub.api.AcquisitionDeclaredFile
 import com.omnillm.features.modelhub.api.AcquisitionJobView
 import com.omnillm.features.modelhub.api.AcquisitionMaterializedFile
@@ -35,10 +36,13 @@ import com.omnillm.features.modelhub.api.ModelCard
 import com.omnillm.features.modelhub.api.ModelHubApi
 import com.omnillm.features.modelhub.api.ModelHubJobHandle
 import com.omnillm.features.modelhub.api.ModelHubSnapshot
+import com.omnillm.features.modelhub.api.ModelLoadResult
 import com.omnillm.features.modelhub.api.SetPinSpec
 import com.omnillm.features.modelhub.api.StartDeleteSpec
 import com.omnillm.features.modelhub.api.StartDownloadSpec
 import com.omnillm.features.modelhub.api.StartImportSpec
+import com.omnillm.features.modelhub.api.StartLoadSpec
+import com.omnillm.features.modelhub.api.StartUnloadSpec
 import com.omnillm.features.modelhub.catalog.FixtureArtifact
 import com.omnillm.features.modelhub.catalog.OfflineFixtureCatalog
 import com.omnillm.features.modelhub.projection.ModelCardProjector
@@ -351,6 +355,36 @@ class AdminProjectedModelHubApi(
 
     override suspend fun setPinned(principal: PrincipalId, spec: SetPinSpec): OmniResult<ModelCard> =
         OmniResult.err(OmniError.CAPABILITY_UNSUPPORTED(message = "pin requires ModelHub control-plane API"))
+
+    override suspend fun startLoad(
+        principal: PrincipalId,
+        spec: StartLoadSpec,
+    ): OmniResult<ModelLoadResult> =
+        OmniResult.err(
+            OmniError.CAPABILITY_UNSUPPORTED(
+                message = "load requires ModelHub control-plane API (binder path)",
+            ),
+        )
+
+    override suspend fun startUnload(
+        principal: PrincipalId,
+        spec: StartUnloadSpec,
+    ): OmniResult<ModelLoadResult> =
+        OmniResult.err(
+            OmniError.CAPABILITY_UNSUPPORTED(
+                message = "unload requires ModelHub control-plane API (binder path)",
+            ),
+        )
+
+    override suspend fun acceptLicense(
+        principal: PrincipalId,
+        spec: AcceptLicenseSpec,
+    ): OmniResult<ModelCard> =
+        OmniResult.err(
+            OmniError.CAPABILITY_UNSUPPORTED(
+                message = "license acceptance requires ModelHub control-plane API (binder path)",
+            ),
+        )
 
     override suspend fun beginAcquisitionAttempt(
         jobId: String,

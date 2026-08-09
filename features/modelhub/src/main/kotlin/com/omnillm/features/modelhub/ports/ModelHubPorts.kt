@@ -103,6 +103,56 @@ class EmptySuggestedCatalogPort : SuggestedCatalogPort {
     override fun findByRevision(modelRevisionId: String): CatalogModelEntry? = null
 }
 
+/**
+ * Engine load coordination surface for LOAD/UNLOAD commands (M4).
+ * Wired by the runtime control plane — the feature never loads native engines
+ * itself (INV-001). Returns null when no engine is attached (fail closed).
+ */
+interface ModelLoadRuntimePort {
+    /** Attached primary engine build id (e.g. llama-cpp locked build), or null. */
+    fun primaryEngineBuildId(): String?
+
+    /** Device fingerprint used for LoadKey construction (runtime-observed). */
+    fun deviceExecutionFingerprint(): com.omnillm.core.contracts.DeviceExecutionFingerprint?
+}
+
+/** Port that resolves nothing — feature tests / unattached hosts fail closed. */
+object UnavailableModelLoadRuntimePort : ModelLoadRuntimePort {
+    override fun primaryEngineBuildId(): String? = null
+    override fun deviceExecutionFingerprint(): com.omnillm.core.contracts.DeviceExecutionFingerprint? = null
+}
+
+/**
+ * License acceptance ledger (CORE-MODEL §8 / SEC-SUPPLY §7 / M5).
+ * Append-only acceptance events bound to (principal, terms digest, source).
+ * Identical bytes from different sources never share acceptance.
+ */
+interface LicenseAcceptancePort {
+    fun accept(principalId: String, termsDigestHex: String, sourceAssertion: String)
+    fun hasAccepted(principalId: String, termsDigestHex: String, sourceAssertion: String): Boolean
+}
+
+/** In-memory acceptance ledger (control-plane host; durable variant later). */
+class InMemoryLicenseAcceptanceLedger : LicenseAcceptancePort {
+    private val accepted = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private fun key(p: String, d: String, s: String) = "$p|$d|$s"
+
+    override fun accept(principalId: String, termsDigestHex: String, sourceAssertion: String) {
+        require(termsDigestHex.matches(Regex("^[0-9a-f]{64}$"))) { "terms digest must be 64-hex" }
+        require(sourceAssertion.isNotEmpty()) { "sourceAssertion must be non-empty" }
+        accepted.add(key(principalId, termsDigestHex, sourceAssertion))
+    }
+
+    override fun hasAccepted(principalId: String, termsDigestHex: String, sourceAssertion: String): Boolean =
+        accepted.contains(key(principalId, termsDigestHex, sourceAssertion))
+}
+
+/** Empty ledger — everything still requires acceptance (fail closed). */
+object NoLicenseAcceptanceLedger : LicenseAcceptancePort {
+    override fun accept(principalId: String, termsDigestHex: String, sourceAssertion: String) = Unit
+    override fun hasAccepted(principalId: String, termsDigestHex: String, sourceAssertion: String): Boolean = false
+}
+
 /** Fixed list catalog for tests / seed. */
 class FixedSuggestedCatalogPort(
     private val entries: List<CatalogModelEntry>,

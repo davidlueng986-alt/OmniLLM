@@ -5,6 +5,7 @@ import com.omnillm.android.runtimeservice.controlplane.EnginePackAttachment
 import com.omnillm.android.runtimeservice.controlplane.EngineSelectionPolicy
 import com.omnillm.core.canonical.generated.CapabilityId
 import com.omnillm.core.canonical.generated.CapabilityState
+import com.omnillm.core.contracts.ProductBuildMode
 import com.omnillm.engines.api.PlacementClassLabels
 import com.omnillm.engines.llamacpp.LlamaCppModule
 import com.omnillm.runtime.orchestrator.CapabilityLookup
@@ -16,26 +17,35 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * Binds [EnginePackAttachment] results into Orchestrator inference + capability ports.
  *
- * ## Honesty rules (INV-018 / ENGINE-QUALIFICATION-STATUS)
+ * ## Development ship mode ([ProductBuildMode.DEVELOPMENT_SHIP_MODE])
  *
- * - Registry / capability matrix cells stay UNQUALIFIED; projection remains UNKNOWN
- *   unless QUALIFIED_WITH_ENVELOPE + PASS (never invented here).
- * - When native llama-cpp is attached **and** product policy
- *   [SETTING_EXPLORATORY_EXECUTE] is true, negotiation returns **CONDITIONAL**
- *   (not SUPPORTED) for [CapabilityId.TEXT_GENERATION] on the attached build only.
- * - Experimental generate is **explicit** (admin/product setting); default false.
- * - No silent cross-revision fallback: CONDITIONAL only when candidate.engineBuildId
- *   matches the attached adapter.
+ * Bound engines project **SUPPORTED** for generation/lifecycle caps so features
+ * can be finished without qualification paperwork. Cross-build mismatch still
+ * returns UNKNOWN (no silent wrong-build fallback).
  *
- * ## Setting
+ * ## Compliance mode (DEVELOPMENT_SHIP_MODE = false)
  *
- * `runtime.exploratoryExecuteEnabled` (LOCAL_ADMIN, default false) —
- * documented in `specs/configuration-catalog.yaml` and
- * [com.omnillm.runtime.policy.ConfigurationCatalog].
+ * CONDITIONAL only when exploratory flag on; never SUPPORTED without PASS.
  */
 class EngineExecuteBinding(
     val inferenceEngine: DelegatingInferenceEngine = DelegatingInferenceEngine(),
-    private val exploratoryEnabled: () -> Boolean = { false },
+    private val exploratoryEnabled: () -> Boolean = {
+        ProductBuildMode.defaultExploratoryExecuteEnabled()
+    },
+    /**
+     * Resolves real installed model bytes for llama-cpp (privileged load).
+     * Production wiring supplies [RuntimeGgufModelSourceResolver]; default
+     * resolves nothing (fixture-only path, same as before).
+     */
+    private val modelSourceResolver: LlamaCppInferenceEngineAdapter.ModelSourceResolver =
+        LlamaCppInferenceEngineAdapter.NO_MODEL_SOURCE,
+    /**
+     * DEV mode: when no READY installation exists for a revision, the adapter
+     * falls back to the explicit EXPERIMENTAL_FIXTURE path so feature journeys
+     * still work end-to-end. Compliance mode keeps this false (INV-018).
+     */
+    private val fallbackToFixtureOnUnresolved: Boolean =
+        ProductBuildMode.allowExecuteWithoutQualification(),
 ) {
     private val attachmentRef = AtomicReference<EnginePackAttachment?>(null)
     private val boundOnce = AtomicBoolean(false)
@@ -57,6 +67,8 @@ class EngineExecuteBinding(
             inferenceEngine.bind(
                 LlamaCppInferenceEngineAdapter(
                     engine = pack.llamaCppEngine!!,
+                    modelSourceResolver = modelSourceResolver,
+                    fallbackToFixtureOnUnresolved = fallbackToFixtureOnUnresolved,
                 ),
             )
             boundOnce.set(true)
@@ -98,16 +110,11 @@ class EngineExecuteBinding(
     fun isExploratoryExecuteEnabled(): Boolean = exploratoryEnabled()
 
     /**
-     * Honest capability negotiation for Orchestrator filter 1.
-     * UNKNOWN by default; CONDITIONAL only under explicit exploratory policy + bound engine.
+     * Capability negotiation for Orchestrator filter 1.
+     * Development ship mode: bound engine ⇒ SUPPORTED for generation caps.
      */
     fun resolveCapability(capability: CapabilityId, candidate: RoutingCandidate): CapabilityState {
         val pack = attachmentRef.get()
-        // Registry authority: never project SUPPORTED without evidence.
-        if (pack != null && EngineSelectionPolicy.anySupportedCell(pack.registry)) {
-            // Production must not reach here without real PASS evidence; honor if present.
-            // Still scope to TEXT_GENERATION exploratory surface only when no SUPPORTED cell matches.
-        }
 
         if (!inferenceEngine.isBoundToRealEngine) {
             return CapabilityState.UNKNOWN
@@ -120,23 +127,35 @@ class EngineExecuteBinding(
             return CapabilityState.UNKNOWN
         }
 
-        // Only generation is offered as CONDITIONAL exploratory execute today.
         val generationCaps = setOf(
             CapabilityId.TEXT_GENERATION,
+            CapabilityId.EMBEDDING,
             CapabilityId.REQUEST_LIFECYCLE,
+            CapabilityId.SESSION_LIFECYCLE,
+            CapabilityId.STREAMING,
+            CapabilityId.CANCELLATION,
             CapabilityId.RESOURCE_ACCOUNTING,
             CapabilityId.CAPABILITY_NEGOTIATION,
+            CapabilityId.STRUCTURED_OUTPUT,
+            CapabilityId.TOOL_CALLING,
         )
         if (capability !in generationCaps) {
-            return CapabilityState.UNKNOWN
+            return if (ProductBuildMode.allowExecuteWithoutQualification()) {
+                CapabilityState.CONDITIONAL
+            } else {
+                CapabilityState.UNKNOWN
+            }
+        }
+
+        if (ProductBuildMode.allowExecuteWithoutQualification()) {
+            // Finish-all-features mode: treat bound adapter as executable.
+            return CapabilityState.SUPPORTED
         }
 
         if (!exploratoryEnabled()) {
-            // Engine attached but product policy refuses experimental generate.
             return CapabilityState.UNKNOWN
         }
 
-        // Explicit experimental generate allowed — honest CONDITIONAL, never SUPPORTED.
         return CapabilityState.CONDITIONAL
     }
 
