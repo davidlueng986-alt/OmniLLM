@@ -40,7 +40,9 @@ class StreamSessionFacade(
     executor: Executor,
     private val onClosed: (StreamSessionFacade) -> Unit = {},
     private val onObserverDeathCancel: Boolean = true,
-) : IStreamSession.Stub() {
+    /** Model revision the stream is bound to (nullable until resolved). */
+    private val modelRevisionId: String? = null,
+) : IStreamSession.Stub(), LiveStreamSession {
 
     private val credit = StreamCreditWindow(ownerId = requestId)
     private val cancelRequested = AtomicBoolean(false)
@@ -60,9 +62,15 @@ class StreamSessionFacade(
         },
     )
 
-    val requestIdValue: String get() = requestId
+    override val requestIdValue: String get() = requestId
 
-    fun isClosed(): Boolean = closed.get()
+    /** Principal that owns this session (COR-20 registry scoping). */
+    override val principalIdValue: String get() = principalId.value
+
+    /** Model revision this stream is bound to, or null (COR-06 reference counting). */
+    override val modelRevisionIdValue: String? get() = modelRevisionId
+
+    override fun isClosed(): Boolean = closed.get()
 
     fun creditSnapshot(): StreamCreditSnapshot = delivery.creditSnapshot()
 

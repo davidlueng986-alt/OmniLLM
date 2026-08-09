@@ -2,16 +2,21 @@ package com.omnillm.android.runtimeservice.featurehost
 
 import android.content.Context
 import com.omnillm.android.runtimeservice.binder.ClientRegistrationStore
+import com.omnillm.android.runtimeservice.binder.StreamSessionRegistry
+import com.omnillm.android.runtimeservice.controlplane.RuntimeControlPlane
 import com.omnillm.android.runtimeservice.http.GatewayLifecycle
 import com.omnillm.android.runtimeservice.http.LoopbackTokenService
 import com.omnillm.core.canonical.generated.CapabilityId
 import com.omnillm.core.canonical.generated.CapabilityState
 import com.omnillm.core.canonical.generated.EvidenceLabel
+import com.omnillm.core.canonical.generated.ModelRevisionId
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.canonical.generated.ResourceVector
 import com.omnillm.core.contracts.DeviceExecutionFingerprint
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniError
+import com.omnillm.core.state.domain.InstallationId
+import com.omnillm.core.state.domain.LoadedModelId
 import com.omnillm.features.admin.AdminFeatureModule
 import com.omnillm.features.admin.ports.AdminModelPort
 import com.omnillm.features.admin.ports.AdminRuntimeStatusPort
@@ -29,9 +34,12 @@ import com.omnillm.features.dashboard.ports.AllSupportedCapabilityPort
 import com.omnillm.features.dashboard.ports.GovernorResourceAdapter
 import com.omnillm.features.modelhub.ModelhubModule
 import com.omnillm.features.modelhub.catalog.OfflineFixtureCatalog
+import com.omnillm.features.modelhub.ports.AcquisitionLinkStore
 import com.omnillm.features.modelhub.ports.InMemoryAcquisitionLinkStore
+import com.omnillm.features.modelhub.ports.InMemoryInstallationResourceVersionPort
 import com.omnillm.features.modelhub.ports.InMemoryModelDisplayMetadataPort
 import com.omnillm.features.modelhub.ports.LiveReferenceQueryPort
+import com.omnillm.features.modelhub.ports.LoadedModelLifecyclePort
 import com.omnillm.features.modelhub.ports.LoadedModelQueryPort
 import com.omnillm.features.playground.PlaygroundModule
 import com.omnillm.features.playground.ports.PlaygroundFeaturePorts
@@ -54,6 +62,7 @@ import com.omnillm.interfaces.admin.AdminApiService
 import com.omnillm.interfaces.http.gateway.GatewayConfig
 import com.omnillm.runtime.OrchestratorModule
 import com.omnillm.runtime.governor.ResourceGovernor
+import com.omnillm.runtime.job.JobKind
 import com.omnillm.runtime.job.JobManager
 import com.omnillm.runtime.modelmanager.ModelManager
 import com.omnillm.runtime.modelmanager.ModelManagerModule
@@ -121,6 +130,14 @@ object WaveAWiring {
         val toolsApiHolder: ToolsApiHolder = ToolsApiHolder(),
         /** Late-bound BenchmarkApi for dashboard MEASUREMENTS last-run projection. */
         val benchmarkApiHolder: BenchmarkApiHolder = BenchmarkApiHolder(),
+        /**
+         * Live binder stream sessions for COR-06 reference counting. Defaults to
+         * the control-plane registry; overridable in tests. Process-local: after
+         * restart the registry is empty (sessions are non-durable by design).
+         */
+        val streamSessions: () -> StreamSessionRegistry = {
+            RuntimeControlPlane.get()?.streamSessions ?: StreamSessionRegistry()
+        },
     )
 
     fun bootstrapForTest(
@@ -229,19 +246,31 @@ object WaveAWiring {
                 clockMs = deps.clockMs,
             ),
         )
+        // COR-06/COR-07: real loaded-model + live-reference wiring. LoadedModel
+        // rows are process-local (DATA-OWNERSHIP) — the tracker observes the
+        // modelhub lifecycle and resolves authoritative FSM state via ModelManager.
+        val loadedModelTracker = ControlPlaneLoadedModelTracker(deps.modelManager)
+        val linkStore = InMemoryAcquisitionLinkStore()
         val modelHub = ModelhubModule.createApi(
             jobManager = deps.jobManager,
             modelManager = deps.modelManager,
             catalog = offlineCatalog,
             display = InMemoryModelDisplayMetadataPort(),
-            links = InMemoryAcquisitionLinkStore(),
-            loadedModels = object : LoadedModelQueryPort {
-                override suspend fun findByInstallation(installationId: String): List<LoadedModelSnapshot> = emptyList()
-            },
-            references = object : LiveReferenceQueryPort {
-                override suspend fun installationReferences(installationId: String): LiveReferences = LiveReferences()
-            },
+            links = linkStore,
+            loadedModels = ControlPlaneLoadedModelQueryPort(
+                tracker = loadedModelTracker,
+                modelManager = deps.modelManager,
+            ),
+            references = ControlPlaneLiveReferenceQueryPort(
+                tracker = loadedModelTracker,
+                modelManager = deps.modelManager,
+                jobManager = deps.jobManager,
+                links = linkStore,
+                sessions = deps.streamSessions,
+            ),
             loadRuntime = ControlPlaneModelLoadRuntimePort(deps.engineExecute),
+            lifecycle = loadedModelTracker,
+            resourceVersions = InMemoryInstallationResourceVersionPort(),
             clockMs = deps.clockMs,
         )
         val playground = PlaygroundModule.createApi(
@@ -424,4 +453,105 @@ class JvmDeviceProbe(private val clockMs: () -> Long) : DeviceProbePort {
             discoveredAtEpochMs = clockMs(),
         ),
     )
+}
+
+// ---------------------------------------------------------------------------
+// COR-06 / COR-07: real loaded-model + live-reference wiring
+// ---------------------------------------------------------------------------
+
+/**
+ * In-process installation↔loadedModel index (COR-06/COR-07).
+ *
+ * LoadedModel rows are process-local by design (DATA-OWNERSHIP: native handles
+ * are non-durable), so a process-local tracker observes modelhub load/drain
+ * events and the query port resolves authoritative FSM state through
+ * [ModelManager.getLoadedModel]. Unknown entries count as live (fail closed).
+ */
+private class ControlPlaneLoadedModelTracker(
+    private val modelManager: ModelManager,
+) : LoadedModelLifecyclePort {
+
+    private val byInstallation = java.util.concurrent.ConcurrentHashMap<String, MutableSet<String>>()
+
+    override fun onLoadAdmitted(installationId: String, loadedModelId: String) {
+        byInstallation.computeIfAbsent(installationId) {
+            java.util.concurrent.ConcurrentHashMap.newKeySet()
+        }.add(loadedModelId)
+    }
+
+    override fun onDrainRequested(installationId: String, loadedModelId: String) {
+        // Keep the entry: authoritative state (DRAINING → UNLOADED) resolves
+        // through ModelManager; terminal rows are pruned lazily on query.
+    }
+
+    fun loadedModelIdsFor(installationId: String): List<String> =
+        byInstallation[installationId]?.toList().orEmpty()
+}
+
+/** Authoritative LoadedModel lookup for the modelhub projection ports. */
+private class ControlPlaneLoadedModelQueryPort(
+    private val tracker: ControlPlaneLoadedModelTracker,
+    private val modelManager: ModelManager,
+) : LoadedModelQueryPort {
+    override suspend fun findByInstallation(installationId: String): List<LoadedModelSnapshot> =
+        tracker.loadedModelIdsFor(installationId).mapNotNull { id ->
+            modelManager.getLoadedModel(LoadedModelId(id))?.takeIf { !it.isTerminal() }
+        }
+}
+
+/**
+ * Real live-reference counting for delete/drain guards (COR-06):
+ * - loadedModelCount: tracked LoadedModels with authoritative non-terminal FSM state
+ * - jobCount: active jobs linked to the installation (delete jobs excluded —
+ *   the delete pipeline must not self-block)
+ * - sessionCount/requestCount: live binder streams bound to the installation
+ *   revision (live inference requires a loaded model, so this is covered both
+ *   ways; durable claims without live sessions are fenced/reconciling, not live work)
+ * - leaseCount: revision lease pins (delete fencing)
+ *
+ * Unknown loaded-model rows count as live (fail closed — never zero).
+ */
+private class ControlPlaneLiveReferenceQueryPort(
+    private val tracker: ControlPlaneLoadedModelTracker,
+    private val modelManager: ModelManager,
+    private val jobManager: JobManager,
+    private val links: AcquisitionLinkStore,
+    private val sessions: () -> StreamSessionRegistry,
+) : LiveReferenceQueryPort {
+
+    override suspend fun installationReferences(installationId: String): LiveReferences {
+        val install = modelManager.getInstallation(InstallationId(installationId))
+        val revision = install?.modelRevisionId?.hex
+
+        val loaded = tracker.loadedModelIdsFor(installationId).count { id ->
+            val snap = modelManager.getLoadedModel(LoadedModelId(id))
+            snap == null || !snap.isTerminal()
+        }
+        val jobs = jobManager.listActive().count { record ->
+            record.identity.kind != JobKind.DELETE &&
+                links.installationIdForJob(record.identity.jobId.value) == installationId
+        }
+        val liveSessions = if (revision != null) {
+            sessions().all().count { session ->
+                !session.isClosed() && session.modelRevisionIdValue?.lowercase() == revision
+            }
+        } else {
+            0
+        }
+        val leaseCount = if (revision != null) {
+            val pinned = modelManager.isRevisionPinnedByLease(
+                ModelRevisionId.parse(revision),
+            )
+            if (pinned) 1 else 0
+        } else {
+            0
+        }
+        return LiveReferences(
+            requestCount = liveSessions,
+            sessionCount = liveSessions,
+            loadedModelCount = loaded,
+            jobCount = jobs,
+            leaseCount = leaseCount,
+        )
+    }
 }

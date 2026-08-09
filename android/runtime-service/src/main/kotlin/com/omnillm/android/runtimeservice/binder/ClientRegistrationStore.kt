@@ -27,14 +27,19 @@ class ClientRegistrationStore {
     /**
      * Issue an ACTIVE registration for [principal] with [scopes].
      * Same-app local admin path may grant APP_CLIENT default scopes when [scopes] is empty.
+     *
+     * COR-21/SEC-02: `"*"` never passes through unless [allowWildcard] (LOCAL_ADMIN
+     * flows only). Exported AIDL pairing requests are stripped of any wildcard —
+     * expansion beyond APP_CLIENT requires explicit admin approval.
      */
     fun register(
         principal: ObservedPrincipal,
         scopes: Collection<String>,
         displayName: String? = null,
+        allowWildcard: Boolean = false,
     ): ClientRegistration {
         val handle = UUID.randomUUID().toString()
-        val granted = normalizeScopes(scopes).ifEmpty {
+        val granted = normalizeScopes(scopes, allowWildcard).ifEmpty {
             if (principal.isSameAppUid) APP_CLIENT_DEFAULT_SCOPES else emptySet()
         }
         val reg = ClientRegistration(
@@ -126,13 +131,18 @@ class ClientRegistrationStore {
             return PrincipalId.parse("aidl:uid=${principal.callingUid}:user=${principal.userId}")
         }
 
-        private fun normalizeScopes(scopes: Collection<String>): Set<String> {
+        /**
+         * Normalize requested scopes. Unknown strings are dropped (fail closed);
+         * `"*"` is only honored when [allowWildcard] (LOCAL_ADMIN approval).
+         */
+        private fun normalizeScopes(scopes: Collection<String>, allowWildcard: Boolean): Set<String> {
             val out = linkedSetOf<String>()
             for (raw in scopes) {
                 val s = raw.trim()
                 if (s.isEmpty()) continue
                 if (s == "*") {
-                    out.add("*")
+                    // COR-21/SEC-02: wildcard never passes through exported AIDL.
+                    if (allowWildcard) out.add("*")
                     continue
                 }
                 // Fail closed on unknown scope strings (INV-018).

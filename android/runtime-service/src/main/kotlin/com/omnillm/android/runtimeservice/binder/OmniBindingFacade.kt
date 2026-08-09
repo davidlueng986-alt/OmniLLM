@@ -56,10 +56,13 @@ class OmniBindingFacade(
 
         // Scaffold: same-app principal is locally approvable and immediately consumable.
         // Third-party stays PENDING until Admin approval (TODO).
+        // COR-21/SEC-02: same-app auto-approval grants the minimal APP_CLIENT
+        // default scope set only — requested scopes never expand it. Expansion
+        // requires explicit approval (PENDING challenge flow).
         val challenge = if (principal.isSameAppUid) {
             val reg = registrations.register(
                 principal = principal,
-                scopes = scopes.toList(),
+                scopes = emptyList(),
                 displayName = request?.clientDisplayName,
             )
             Challenge(

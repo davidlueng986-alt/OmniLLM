@@ -167,7 +167,12 @@ class OmniRuntimeFacade(
         }
         val digest = chatDigest(request)
 
-        sessions.get(requestId.value)?.takeUnless { it.isClosed() }?.let { return it }
+        // COR-20: reuse is principal-scoped — never hand another principal's
+        // live session for the same requestId. Registry entries are always
+        // StreamSessionFacade in production.
+        sessions.getForPrincipal(requestId.value, registration.principalId.value)
+            ?.takeUnless { it.isClosed() }
+            ?.let { return it as StreamSessionFacade }
 
         val session = StreamSessionFacade(
             requestId = requestId.value,
@@ -176,48 +181,56 @@ class OmniRuntimeFacade(
             boundUid = registration.callingUid,
             callback = callback,
             executor = streamExecutor,
+            modelRevisionId = request.model?.takeIf { it.isNotBlank() },
             onClosed = { sessions.remove(it) },
         )
         sessions.put(session)
         session.grantCredit(eventCredit = 16L, byteCredit = 32L * 1024L)
 
-        val events = runBlocking {
-            runCatching {
-                buildChatOrchestrationEvents(
-                    plane = plane,
-                    registration = registration,
-                    request = request,
-                    requestId = requestId,
-                    idempotencyKey = idem,
-                    canonicalDigest = digest,
-                )
-            }.getOrElse { t ->
-                listOf(
-                    metaEvent("accepted", model = request.model),
-                    terminalFailedEvent(
-                        code = OmniErrorCode.INTERNAL,
-                        message = t.message ?: "chat orchestration failed",
-                        details = mapOf(
-                            "requestId" to requestId.value,
-                            "operation" to OP_CHAT,
+        // COR-15: native generation must never run on the binder transaction
+        // thread. Dispatch orchestration (submit → pumpOnce → engine.start) to
+        // the dedicated stream executor; events are delivered asynchronously via
+        // the session's delivery engine. The binder call returns immediately.
+        streamExecutor.execute {
+            val events = runBlocking {
+                runCatching {
+                    buildChatOrchestrationEvents(
+                        plane = plane,
+                        registration = registration,
+                        request = request,
+                        requestId = requestId,
+                        idempotencyKey = idem,
+                        canonicalDigest = digest,
+                    )
+                }.getOrElse { t ->
+                    listOf(
+                        metaEvent("accepted", model = request.model),
+                        terminalFailedEvent(
+                            code = OmniErrorCode.INTERNAL,
+                            message = t.message ?: "chat orchestration failed",
+                            details = mapOf(
+                                "requestId" to requestId.value,
+                                "operation" to OP_CHAT,
+                            ),
                         ),
-                    ),
-                )
+                    )
+                }
             }
-        }
-        session.enqueue(events)
-        val terminal = events.lastOrNull { it.terminal }
-        if (terminal != null && terminal.terminalState != null) {
-            // Orchestrator records durable terminal on success path; ensure scaffold
-            // fail-closed also lands in registry when submit never claimed.
-            val existing = plane.requestRegistry.queryRequestTerminal(requestId)
-            if (existing == null && plane.requestRegistry.queryRequest(requestId) != null) {
-                plane.requestRegistry.recordTerminal(
-                    requestId = requestId,
-                    terminalState = mapTerminalState(terminal.terminalState!!),
-                    terminalSeq = System.nanoTime(),
-                    errorCode = terminal.error?.code,
-                )
+            if (!session.isClosed()) {
+                session.enqueue(events)
+            }
+            // Durable terminal recorded even when the observer already closed.
+            val terminal = events.lastOrNull { it.terminal }
+            if (terminal != null && terminal.terminalState != null) {
+                val existing = plane.requestRegistry.queryRequestTerminal(requestId)
+                if (existing == null && plane.requestRegistry.queryRequest(requestId) != null) {
+                    plane.requestRegistry.recordTerminal(
+                        requestId = requestId,
+                        terminalState = mapTerminalState(terminal.terminalState!!),
+                        terminalSeq = System.nanoTime(),
+                        errorCode = terminal.error?.code,
+                    )
+                }
             }
         }
         return session
@@ -504,9 +517,8 @@ class OmniRuntimeFacade(
             )
         }
         // Prefer live stream session cancel (same durable path).
-        sessions.get(reqIdRaw)?.let { session ->
-            return session.cancel(command)
-        }
+        // Registry entries are always StreamSessionFacade in production.
+        (sessions.get(reqIdRaw) as? StreamSessionFacade)?.cancel(command)?.let { return it }
 
         val commandId = try {
             CommandId.parse(command.commandId.orEmpty())
@@ -667,52 +679,27 @@ class OmniRuntimeFacade(
 
     override fun listModels(pageToken: String?, pageSize: Int): OmniModelPage {
         requireRegistration(AccessScope.models_read)
-        // Bound pageSize so clients cannot request unbounded parcels (ANDROID-BINDER §1).
-        val limit = pageSize.coerceIn(1, MAX_MODEL_PAGE_SIZE)
-        val page = OmniModelPage()
-        page.nextPageToken = null
-        page.snapshotVersion = 0L
+        // COR-02: never let an internal projection failure (or principal-gate
+        // regression) escape as an unhandled exception on the binder thread.
+        // Map to a clean, empty page — fail closed, no invented codes.
         val plane = RuntimeControlPlane.get()
-        if (plane == null) {
-            page.items = emptyArray()
-            return page
+        if (plane == null) return emptyModelPage()
+        return try {
+            buildModelPage(
+                pageToken = pageToken,
+                pageSize = pageSize,
+                snapshotVersion = plane.identity.runtimeEpoch,
+            ) { plane.modelHubApi.listInstalled(registration.principalId) }
+        } catch (_: Exception) {
+            emptyModelPage()
         }
-        // Same ModelHub installed projection as Admin snapshot / HTTP listModels (ADR-011).
-        // Capabilities remain empty unless evidence-backed (honest UNKNOWN matrix).
-        val items = runBlocking {
-            when (val listed = plane.modelHubApi.listInstalled(registration.principalId)) {
-                is OmniResult.Ok -> listed.value
-                    .drop(offsetFromPageToken(pageToken))
-                    .take(limit)
-                    .map { card ->
-                        AdminAidlMapper.toAidlModelInfo(
-                            modelRevisionId = card.modelRevisionId,
-                            displayName = card.displayName,
-                            installationState = card.installationState,
-                        )
-                    }.toTypedArray()
-                is OmniResult.Err -> emptyArray()
-            }
-        }
-        page.items = items
-        // Opaque keyset cursor: simple index token for bounded pages (no unbounded parcel).
-        val nextIndex = offsetFromPageToken(pageToken) + items.size
-        val total = runBlocking {
-            when (val listed = plane.modelHubApi.listInstalled(registration.principalId)) {
-                is OmniResult.Ok -> listed.value.size
-                is OmniResult.Err -> 0
-            }
-        }
-        page.nextPageToken = if (nextIndex < total) nextIndex.toString() else null
-        page.snapshotVersion = plane.identity.runtimeEpoch
-        return page
     }
 
-    private fun offsetFromPageToken(pageToken: String?): Int {
-        if (pageToken.isNullOrBlank()) return 0
-        return pageToken.toIntOrNull()?.coerceAtLeast(0) ?: 0
-    }
-
+    /**
+     * Pure page projection (COR-02/TST-02): one [listInstalled] call, bounded
+     * page, opaque index cursor. Companion function so JVM regression tests can
+     * inject fakes without Android Binder/Context (never mints new error codes).
+     */
     override fun createAsset(request: OmniAssetCreateRequest?): OmniAssetInfo {
         val reg = requireRegistration(AccessScope.assets_create)
         rejectIfNotAccepting("createAsset")
@@ -1009,7 +996,10 @@ class OmniRuntimeFacade(
         }
 
         // Reuse live session if still open for this request (duplicate open).
-        sessions.get(requestId.value)?.takeUnless { it.isClosed() }?.let { return it }
+        // COR-20: reuse is principal-scoped — never another principal's session.
+        sessions.getForPrincipal(requestId.value, registration.principalId.value)
+            ?.takeUnless { it.isClosed() }
+            ?.let { return it as StreamSessionFacade }
 
         val session = StreamSessionFacade(
             requestId = requestId.value,
@@ -1018,6 +1008,7 @@ class OmniRuntimeFacade(
             boundUid = registration.callingUid,
             callback = callback,
             executor = streamExecutor,
+            modelRevisionId = model?.takeIf { it.isNotBlank() },
             onClosed = { sessions.remove(it) },
         )
         sessions.put(session)
@@ -1108,19 +1099,86 @@ class OmniRuntimeFacade(
                 Thread(r, "omnillm-aidl-stream").apply { isDaemon = true }
             }
 
+        /**
+         * Pure page projection (COR-02/TST-02): one [listInstalled] call, bounded
+         * page, opaque index cursor. Companion function so JVM regression tests
+         * can inject fakes without Android Binder/Context. Never mints new error
+         * codes — a failed projection yields a clean, empty page (fail closed).
+         */
+        internal fun buildModelPage(
+            pageToken: String?,
+            pageSize: Int,
+            snapshotVersion: Long,
+            listInstalled: suspend () -> com.omnillm.core.canonical.generated.OmniResult<
+                List<com.omnillm.features.modelhub.api.ModelCard>
+                >,
+        ): OmniModelPage {
+            val limit = pageSize.coerceIn(1, MAX_MODEL_PAGE_SIZE)
+            val page = OmniModelPage()
+            page.nextPageToken = null
+            page.snapshotVersion = snapshotVersion
+            val listed = try {
+                runBlocking { listInstalled() }
+            } catch (_: Exception) {
+                page.items = emptyArray()
+                return page
+            }
+            when (listed) {
+                is com.omnillm.core.canonical.generated.OmniResult.Err -> {
+                    page.items = emptyArray()
+                    return page
+                }
+                is com.omnillm.core.canonical.generated.OmniResult.Ok -> Unit
+            }
+            val cards = listed.value
+            val offset = offsetFromPageToken(pageToken)
+            val items = cards
+                .drop(offset)
+                .take(limit)
+                .map { card ->
+                    AdminAidlMapper.toAidlModelInfo(
+                        modelRevisionId = card.modelRevisionId,
+                        displayName = card.displayName,
+                        installationState = card.installationState,
+                    )
+                }.toTypedArray()
+            page.items = items
+            val nextIndex = offset + items.size
+            page.nextPageToken = if (nextIndex < cards.size) nextIndex.toString() else null
+            return page
+        }
+
+        internal fun emptyModelPage(): OmniModelPage = OmniModelPage().apply {
+            nextPageToken = null
+            items = emptyArray()
+            snapshotVersion = 0L
+        }
+
+        private fun offsetFromPageToken(pageToken: String?): Int {
+            if (pageToken.isNullOrBlank()) return 0
+            return pageToken.toIntOrNull()?.coerceAtLeast(0) ?: 0
+        }
+
+        // COR-13: digests hash FULL message content + asset ids, so two requests
+        // with identical lengths but different content yield different digests
+        // (idempotency conflict on replay — never silent content substitution).
         fun chatDigest(request: OmniChatRequest): Sha256Digest {
-            val msgs = request.messages?.joinToString("|") { m ->
-                "${m.role}:${m.content?.length ?: 0}:${m.assetIds?.size ?: 0}"
+            val msgs = request.messages?.joinToString("\u001f") { m ->
+                val role = m.role.orEmpty()
+                val content = m.content.orEmpty()
+                val assetIds = m.assetIds?.joinToString(",").orEmpty()
+                "$role\u001e$content\u001e$assetIds"
             }.orEmpty()
             val payload =
-                """{"op":"CHAT","requestId":"${request.requestId}","model":"${request.model}","msgs":"$msgs","stream":${request.stream}}"""
+                """{"op":"CHAT","requestId":"${request.requestId}","model":"${request.model}","stream":${request.stream},"msgs":[$msgs]}"""
             return Sha256Digest.parse(IdentityHashing.sha256Hex(payload))
         }
 
         fun embedDigest(request: OmniEmbeddingRequest): Sha256Digest {
-            val n = request.inputs?.size ?: 0
+            // COR-13: hash the full input list — never lengths only.
+            val inputs = request.inputs?.joinToString("\u001f").orEmpty()
             val payload =
-                """{"op":"EMBEDDING","requestId":"${request.requestId}","model":"${request.model}","n":$n}"""
+                """{"op":"EMBEDDING","requestId":"${request.requestId}","model":"${request.model}","inputs":[$inputs]}"""
             return Sha256Digest.parse(IdentityHashing.sha256Hex(payload))
         }
 
