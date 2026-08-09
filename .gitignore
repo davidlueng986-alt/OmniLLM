@@ -60,6 +60,9 @@ e2e-artifacts/omnillm.db*
 *.err
 *.err.txt
 e2e-artifacts/*.log
+# BLD-08: device-run dumps (session/prep JSON with machine-specific paths,
+# serials and capture state) are never evidence — the .md notes are.
+e2e-artifacts/*.json
 /compile-*/
 /admin-*/
 /assemble-*/
