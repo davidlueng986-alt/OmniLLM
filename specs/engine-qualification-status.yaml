@@ -61,8 +61,8 @@ engines:
   qualificationStatus: UNQUALIFIED
   registryExposure: UNKNOWN
   runtimeCapabilityDefault: UNKNOWN
-  notes:
-    - "Stage 2E (2026-08-09): real backend integrated (RealGenAiBackend over ai.onnxruntime.genai v0.14.0 AAR Java API, direct JVM access — no OmniLLM JNI bridge); module compile/test/assemble green"
+  evidenceNotes:
+    - "Stage 2E (2026-08-09): real backend integrated (RealGenAiBackend over ai.onnxruntime.genai v0.14.0 AAR Java API, direct JVM access — no OmniLLM JNI bridge); module compile/test green"
     - "UPSTREAM.lock LOCKED: onnxruntime-genai-android 0.14.0 AAR (GitHub release asset — NOT on Maven Central; sha256 c2e9b967...) + base com.microsoft.onnxruntime:onnxruntime-android 1.25.1 (Maven Central)"
     - "Artifact facts verified: minSdk 24; ABIs arm64-v8a + x86_64; 16 KB ELF alignment PASS (4/4 genai AAR, 8/8 base AAR); MIT license"
     - "UNQUALIFIED is honest: no device-verified inference. INTEGRATED ≠ SUPPORTED; all cells UNQUALIFIED/NOT_EXECUTED (build-log evidence only)"

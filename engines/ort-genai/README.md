@@ -7,8 +7,9 @@
 | Integration standard | `ENGINE-STANDARD` (`docs/80-engines/engine-integration-standard.md`) |
 | `engineId` (registry) | `ONNX-Runtime-GenAI` |
 | Design status | `BASELINE` (design-complete) |
-| Upstream lock | `NOT_LOCKED` (template only) |
-| Qualification | `UNQUALIFIED` |
+| Upstream lock | `LOCKED` (v0.14.0 AAR; see `UPSTREAM.lock`) |
+| Integration status | `INTEGRATED` (real backend, compile-verified) |
+| Qualification | `UNQUALIFIED` (no device evidence — honest) |
 | Runtime exposure | `UNKNOWN` (never `SUPPORTED` without cell evidence) |
 
 ## Purpose
@@ -16,20 +17,24 @@
 Adapter pack for Microsoft [onnxruntime-genai](https://github.com/microsoft/onnxruntime-genai):
 GenAI runtime API + execution-provider adapter shape.
 
-This pack is **software-complete as a session adapter stub**: full OmniEngine
-plan / commit / start / embed / close mapping, resource envelopes, phase
-cancellation, error mapping, and Registry registration. It does **not** load
-ORT/GenAI native libraries, does **not** claim provider support, and does
-**not** write OmniLLM DB or model store (ENGINE-STANDARD §3 / ADR-010).
+This pack now contains a **real backend** (`RealGenAiBackend`) over the official
+`ai.onnxruntime.genai` Java API from the pinned Android AAR (v0.14.0) — direct
+JVM access, no OmniLLM JNI bridge. Full OmniEngine plan / commit / start /
+embed / close mapping, resource envelopes, phase cancellation, error mapping,
+and Registry registration. It does **not** claim provider support, does **not**
+write OmniLLM DB or model store (ENGINE-STANDARD §3 / ADR-010), and stays
+`UNQUALIFIED` until device-verified inference evidence exists (Stage 5).
 
 ## Layout
 
 ```
 engines/ort-genai/
-  README.md                 # this file + native integration guide
-  UPSTREAM.lock             # lock template (NOT_LOCKED) — human pin fields
-  capability-matrix.yaml    # qualification cell placeholders (all UNQUALIFIED)
-  build.gradle.kts
+  README.md                 # this file + integration guide
+  UPSTREAM.lock             # LOCKED (v0.14.0 AAR + base ORT 1.25.1 pins)
+  capability-matrix.yaml    # qualification cells (all UNQUALIFIED; INTEGRATED noted)
+  build.gradle.kts          # compileOnly real API classes (libs/…jar, inline pin)
+  libs/
+    onnxruntime-genai-android-0.14.0.jar  # classes.jar extracted from pinned AAR
   src/main/kotlin/com/omnillm/engines/
     OrtGenaiModule.kt       # compatibility re-export
     ortgenai/
@@ -44,51 +49,52 @@ engines/ort-genai/
         ParameterValidator.kt
       resource/ResourceEnvelopeEstimator.kt
       session/
-        GenAiBackend.kt     # opaque session adapter SPI
-        StubGenAiBackend.kt # fail-closed default (no native load success)
+        GenAiBackend.kt           # opaque session adapter SPI
+        GenAiRuntime.kt           # native seam (Model/Params/Generator)
+        OrtGenAiRuntime.kt        # direct ai.onnxruntime.genai binding
+        RealGenAiBackend.kt       # production backend (real calls)
+        GenAiBackendFactory.kt    # create / forHostUnitTests / isRuntimeAvailable
+        StubGenAiBackend.kt       # host-unit-test only (never production default)
 ```
 
 ## OmniEngine mapping
 
-| OmniLLM phase | Upstream mapping (design) | Stub runtime |
+| OmniLLM phase | Upstream mapping | Real backend (v0.14.0 Java API) |
 |---|---|---|
-| PROBE | package / provider presence | plan OK; execute → `CAPABILITY_UNKNOWN` |
-| LOAD | model + generator params; provider init / graph opt / compile-cache | plan OK; commit → `CAPABILITY_UNKNOWN` |
-| PLAN / COMMIT inference | session / sequence state (or worker-wrapped) | plan OK; commit → `CAPABILITY_UNKNOWN` |
-| START / GENERATE | token generation | `CAPABILITY_UNKNOWN` |
-| EMBED / multimodal / tools | only when API + model evidence | plan OK (envelope); commit → `CAPABILITY_UNKNOWN` |
-| CLOSE / UNLOAD | drain native state | local bookkeeping OK (no native) |
+| PROBE | package / provider presence | native-load probe; natives absent ⇒ `NOT_AVAILABLE` |
+| LOAD | model + generator params; provider init / graph opt / compile-cache | `Model(modelDir)` + `Tokenizer` + `GeneratorParams` from ONNX GenAI folder (`genai_config.json` required); fail-closed when unproven or natives absent |
+| PLAN / COMMIT inference | session / sequence state (or worker-wrapped) | session = `GeneratorParams` holder; commit gated by lock + exploratory policy |
+| START / GENERATE | token generation | token loop: `generateNextToken()` + `TokenizerStream` decode; stop on EOS / MAX_TOKENS / cooperative cancel |
+| EMBED / multimodal / tools | only when API + model evidence | `CAPABILITY_UNKNOWN` (Java API has no embedding surface) |
+| CLOSE / UNLOAD | drain native state | `close()` on generator / params / model (KV cache released) |
 
-If upstream has no separate plan/commit API, a future JNI adapter must wrap with
-worker, qualified envelope, and ledger. Cells that cannot satisfy core
-invariants are **not published** as supported.
+If upstream has no separate plan/commit API, the adapter wraps with worker,
+qualified envelope, and ledger. Cells that cannot satisfy core invariants are
+**not published** as supported.
 
 ## Upstream lock (ENGINE-STANDARD §4)
 
-`UPSTREAM.lock` is a **template**. Empty digests / missing tag-commit keep
-`lockState: NOT_LOCKED`. Builds without a complete lock are exploratory only.
+`UPSTREAM.lock` is **LOCKED** (2026-08-09):
 
-Required for lock completeness (ENGINE-ORTGENAI §1):
+- `microsoft/onnxruntime-genai` tag `v0.14.0` @ `b7a6ec30…`; artifact =
+  official GitHub release AAR `onnxruntime-genai-android-0.14.0.aar`
+  (sha256 `c2e9b967…`, GitHub-published digest re-verified from bytes).
+- **Not on Maven Central** — the artifact is a GitHub release asset; the JVM
+  Java API "package publication is pending". Base runtime dependency:
+  `com.microsoft.onnxruntime:onnxruntime-android:1.25.1` (Maven Central).
+- Verified facts: minSdk 24; ABIs `arm64-v8a` + `x86_64`; 16 KB ELF alignment
+  PASS (4/4 genai AAR, 8/8 base AAR); MIT license.
+- Lock completeness ≠ qualification: cells stay `UNQUALIFIED / NOT_EXECUTED`.
 
-- release/tag/commit
-- sourceDigest + patchDigest (present, even if empty patches)
-- ORT/GenAI artifacts + provider libraries digests (for EP cells)
-- toolchain + ABI
-- config schema pointer
-- artifactDigest + engineBuildId
-- observedAt
-- license/notice digests
-
-See `notes.humanPinSteps` in `UPSTREAM.lock` for the human pin sequence.
 Updating any lock field ⇒ new `EngineBuildId`; old evidence does not auto-carry.
 
 ## Provider matrix
 
 | Backend | Design | Runtime default | Notes |
 |---|---|---|---|
-| `cpu` | portable candidate | `UNKNOWN` | Primary Android candidate when EP packaged |
+| `cpu` | portable candidate | `UNKNOWN` | CPU EP statically linked in pinned AAR; device evidence still required |
 | `nnapi` | accelerator candidate | `UNKNOWN` | Android package + device evidence only |
-| `qnn` | accelerator candidate | `UNKNOWN` | OEM/driver variance; no CPU inheritance |
+| `qnn` | accelerator candidate | `UNKNOWN` | OEM/driver variance; GenAI 0.14.0 dropped QNN from the AAR |
 
 Desktop EP support is **not** extrapolated to Android (ENGINE-ORTGENAI §3).
 
@@ -100,7 +106,9 @@ Desktop EP support is **not** extrapolated to Android (ENGINE-ORTGENAI §3).
 | Untrusted model or provider code | isolated CPU or different-UID companion (`EXTERNAL_UID_ACCELERATED`) |
 
 Until phase cancellation is measured, prefer worker / isolated paths.
-`UNKNOWN` cancellation is worker-only (fail-closed).
+`UNKNOWN` cancellation is worker-only (fail-closed). The Java bindings expose
+no native cancel API — cancellation is cooperative polling between tokens, so
+an in-flight generate is not preemptible (worker-kill-only until measured).
 
 ## Registry registration
 
@@ -129,47 +137,66 @@ Seeding from `capability-matrix.yaml` inserts **UNQUALIFIED / NOT_EXECUTED** cel
 - Never silently ignore unsupported parameters
 - Plan has no domain mutation (ADR-002)
 - Dry-load / probe never elevates model trust (INV-008)
-- Incomplete lock ⇒ exploratory only; Registry stays UNKNOWN
-- Missing / unloaded natives must **not** report load success
+- Natives absent ⇒ `NOT_AVAILABLE` — never a load-success report
+- AAR presence ≠ SUPPORTED; exploratory gate required for execute
+- Prompt content never synthesized from a digest — `promptUtf8` or staged registry only
 
-## Native / SDK integration guide
+## Integration guide
 
-Real ORT GenAI SDK is **not** wired in this monorepo (no Maven/native download
-automation that requires human secrets). Complete the software adapter first,
-then pin and package offline.
+### Current state (Stage 2E)
 
-### Steps for a human integrator
+- `RealGenAiBackend` + `OrtGenAiRuntime` compiled **against the real
+  `ai.onnxruntime.genai` classes** (from `libs/onnxruntime-genai-android-0.14.0.jar`
+  = classes.jar extracted from the pinned AAR; sha256 in `UPSTREAM.lock`).
+- Module builds `compileKotlin` / `test` / `jar` green; `:engines:ort-genai:test`
+  exercises real native-availability detection (host JVM: fail-closed) + full
+  orchestration logic against a fake runtime.
+- Host JVM **cannot** run real inference: the AAR `.so` are Android ELF, and no
+  JVM GenAI artifact exists on Maven Central. Real-inference smoke needs
+  provisioning (below).
 
-1. **Pin upstream** — fill every field in `UPSTREAM.lock` (see human pin steps).
-2. **Build ORT + GenAI for Android** — NDK 28.2.x, ABIs `arm64-v8a` (and others as needed), 16 KB page size.
-3. **Package** under `:android:native` or an engine-local jni folder; verify page-size + SBOM.
-4. **Implement** `JniGenAiBackend : GenAiBackend` mapping:
-   - `OgaModel` / config → `loadModel` → opaque `GenAiModelToken`
-   - `OgaGenerator` / sequences → `createSession` → opaque `GenAiSessionToken`
-   - token stream → `GenAiStreamEvent` → `EventNormalizer`
-   - EP selection from `backend` / `provider` attributes (fail closed on unknown EP)
-5. **Wire** via `OrtGenaiModule.createEngine(backend = JniGenAiBackend(…))` only from `:runtime` / workers — never UI (INV-001).
-6. **Qualify** per cell (device × driver × model × workload × phase); never invent PASS.
-7. **Do not** claim `SUPPORTED` until Registry cells are `QUALIFIED_WITH_ENVELOPE` + `PASS`.
+### Stage 5 (device qualification) checklist
+
+1. **Android packaging** — consuming module `:android:runtime-service` adds:
+   - `implementation(files("…/onnxruntime-genai-android-0.14.0.aar"))`
+     (download URL in `UPSTREAM.lock`; sha256 `c2e9b967…`)
+   - `implementation("com.microsoft.onnxruntime:onnxruntime-android:1.25.1")`
+   - verify AAR jni packaging + 16 KB alignment (ELF check already green).
+2. **Model provisioning** — ONNX GenAI folder (`genai_config.json` + `.onnx` +
+   tokenizer) into app-private storage; a tiny fixture exists upstream:
+   `test/test_models/hf-internal-testing/tiny-random-gpt2-fp32` (~3.5 MB) at the
+   pinned commit. Control plane resolves broker key → path via
+   `modelDirProvider` / `modelDir` attribute.
+3. **Instrumented tests** — `androidTest` on device/emulator running
+   `RealGenAiBackend` end-to-end (or the gated
+   `provisionedRealInference_smoke` with
+   `-Pomnillm.ortgenai.smokeModelDir=<folder>` on a JVM GenAI build).
+4. **Measure** phase cancellation / resource peaks; capture cell evidence
+   (device × driver × model × workload), then flip cells with PASS records.
+5. Prompt wiring: control plane supplies `promptUtf8` (or `stagePrompt` by
+   digest) when calling `start` — the SPI stays digest-only at plan level.
 
 ### `GenAiBackend` SPI summary
 
 | Method | Role |
 |---|---|
-| `probe` | Bounded package/provider check |
-| `loadModel` | Model + generator params + provider init (LOAD) |
-| `createSession` | Sequence / generator state |
+| `probe` | Bounded package/provider check (native-load probe) |
+| `loadModel` | Model + tokenizer + generator params (LOAD) |
+| `createSession` | `GeneratorParams` holder |
 | `generate` | Token generation + cancel poll |
-| `embed` | Default UNKNOWN until API+model cell |
-| `closeSession` / `unloadModel` | Drain |
+| `embed` | UNKNOWN until API+model cell |
+| `closeSession` / `unloadModel` | Drain (close() releases KV) |
 
-Default `StubGenAiBackend(exploratoryDryRun = false)` returns
-`UNKNOWN_CAPABILITY` for all mutation paths — suitable for unit tests and
-production registry attach without natives.
+`StubGenAiBackend` remains for host unit tests only (`GenAiBackendFactory.forHostUnitTests`);
+`OrtGenaiModule.createEngine` defaults to the **real** backend (fail-closed).
 
 ## Known limitations (ENGINE-ORTGENAI §10)
 
-- Unpinned version / provider / model config cannot be a rebuild baseline.
+- No JVM (non-Android) GenAI artifact — host real-inference smoke requires an
+  upstream JVM build or a device/emulator (Stage 5).
+- v0.14.0 Java API has no `OrtGenAI`/`Model.load(path, sessionOptions)` and no
+  separate KV-release API — streaming via `Generator` + `TokenizerStream`; KV
+  freed by `close()`. (Design doc §1/§5 assumed the older surface.)
 - Provider capability, cancel, and memory differ widely across Android/OEM — per-cell qualification only.
 - Prefix/KV, embedding, multimodal, tool/structured capabilities are **not** inferred from ONNX format alone.
 - Config + external-data packages have high input complexity; need bounded parser + full manifest.
@@ -186,9 +213,8 @@ session/tokenizer, phase cancel/resource, event/error, reply-loss/crash,
 
 - `api(project(":engines:api"))` — OmniEngine SPI only
 - Core contracts / errors / resource / identity / state / canonical
-
-No ORT or GenAI Maven/native dependency is wired until UPSTREAM.lock is complete
-and packaging (ABI, 16 KB, SBOM) is proven.
+- `compileOnly` + `testImplementation`: `libs/onnxruntime-genai-android-0.14.0.jar`
+  (real API classes; inline pin — do not move to `libs.versions.toml`)
 
 ## Tests
 
@@ -196,6 +222,9 @@ and packaging (ABI, 16 KB, SBOM) is proven.
 ./gradlew :engines:ort-genai:test
 ```
 
-Coverage: lock template completeness, registry UNQUALIFIED seeding, pure plan,
-fail-closed probe/commit/start/embed, parameter validation, resource envelopes,
-phase cancellation UNKNOWN, exploratory dry-run plumbing (test-only).
+Coverage: real native-availability fail-closed (host JVM), load/session/generate
+orchestration (fake runtime), token-loop stop conditions (MAX_TOKENS/EOS/cancel),
+staged-prompt registry, search-option mapping, cleanup, lock LOCKED parse,
+registry UNQUALIFIED seeding, pure plan, parameter validation, resource
+envelopes, phase cancellation UNKNOWN, exploratory dry-run plumbing (test-only).
+Real-inference smoke is assume-gated on provisioned natives + model (Stage 5).

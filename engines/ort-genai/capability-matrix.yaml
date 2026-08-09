@@ -2,6 +2,13 @@
 # Runtime exposure is projected by EngineRegistry from qualification cells.
 # Design baseline ≠ SUPPORTED. Default runtime capability: UNKNOWN.
 #
+# Stage 2E (2026-08-09): upstream artifact LOCKED (onnxruntime-genai-android
+# v0.14.0 AAR + base onnxruntime-android 1.25.1; see UPSTREAM.lock) and the
+# adapter is INTEGRATED (real RealGenAiBackend compiled against the pinned AAR
+# Java API; module compile/test/assemble green). Qualification remains
+# UNQUALIFIED — no device-verified inference evidence; every cell stays
+# UNQUALIFIED/NOT_EXECUTED. INTEGRATED is an integration fact, not SUPPORTED.
+#
 # Dimensions: backend (provider) × format × phase × placement × operation profile.
 # Cancellation modes: COOPERATIVE | INTERRUPTIBLE | WORKER_KILL_ONLY | NOT_SUPPORTED | UNKNOWN
 # Cell status: UNQUALIFIED | STATIC_REVIEWED | SPIKE_REQUIRED | QUALIFIED_WITH_ENVELOPE | SUSPENDED
@@ -9,10 +16,23 @@
 schemaVersion: 1
 engineId: ONNX-Runtime-GenAI
 designStatus: BASELINE
-upstreamLockStatus: NOT_LOCKED
+upstreamLockStatus: LOCKED
+integrationStatus: INTEGRATED
 qualificationStatus: UNQUALIFIED
 registryExposure: UNKNOWN
 runtimeCapabilityDefault: UNKNOWN
+
+# Integration evidence (build-log class; no device/driver/model/workload cell):
+# - Backend: engines/ort-genai/src/main/kotlin/.../session/RealGenAiBackend.kt +
+#   OrtGenAiRuntime.kt (direct ai.onnxruntime.genai v0.14.0 API; no OmniLLM JNI bridge)
+# - Upstream pin: UPSTREAM.lock LOCKED (AAR sha256 c2e9b967…; commit b7a6ec30…)
+# - Compile against real API classes (libs/onnxruntime-genai-android-0.14.0.jar =
+#   classes.jar extracted from pinned AAR; sha256 32d71ee9…)
+# - 16 KB ELF alignment PASS 4/4 (genai AAR) + 8/8 (base AAR); minSdk 24
+# - Host JVM: native-availability detection is real (GenAI.init() throws without
+#   Android .so → NOT_AVAILABLE fail-closed); no fake tokens anywhere
+# - NOT device-verified: no inference on an Android device/emulator yet (Stage 5:
+#   instrumented tests; smoke model provisioning documented in UPSTREAM.lock)
 
 # Model package: ONNX model + external data + genai config + tokenizer/template + provider metadata.
 # Multi-file package uses role+BlobId total order; free JSON missing fields / unknown major → fail closed.
@@ -30,24 +50,25 @@ backends:
   - id: cpu
     design: portable_candidate
     runtimeDefault: UNKNOWN
-    notes: "Primary Android candidate when EP packaged; still per-cell evidence"
+    notes: "Primary Android candidate; CPU EP statically linked in the pinned AAR; still per-cell device evidence"
   - id: nnapi
     design: accelerator_candidate
     runtimeDefault: UNKNOWN
-    notes: "Publish only with Android package + device/driver/model/workload evidence; no desktop extrapolation"
+    notes: "Publish only with Android package + device/driver/model/workload evidence; no desktop extrapolation; AAR has no separate NNAPI EP lib"
   - id: qnn
     design: accelerator_candidate
     runtimeDefault: UNKNOWN
-    notes: "OEM/driver variance high; never inherit CPU evidence"
+    notes: "OEM/driver variance high; never inherit CPU evidence; GenAI 0.14.0 removed QNN packaging from the Android AAR"
 
 operations:
   - id: PROBE
     design: package_and_provider_check
     runtimeDefault: UNKNOWN
+    notes: "Real backend: native-load probe (GenAI.init); natives absent ⇒ NOT_AVAILABLE"
   - id: LOAD
     design: model_generator_params_provider_init_graph_opt
     runtimeDefault: UNKNOWN
-    notes: "Provider init / graph optimization / compile-cache are LOAD-phase and need pre-execution envelope"
+    notes: "Real backend: Model(path)+Tokenizer+GeneratorParams from ONNX GenAI folder (genai_config.json required); provider init / graph optimization / compile-cache are LOAD-phase and need pre-execution envelope"
   - id: PLAN_INFERENCE
     design: session_or_sequence_state
     runtimeDefault: UNKNOWN
@@ -55,15 +76,18 @@ operations:
   - id: COMMIT_INFERENCE
     design: session_or_sequence_state
     runtimeDefault: UNKNOWN
+    notes: "Real backend: session = GeneratorParams holder; Generator materialized per generate"
   - id: START
     design: token_generation_drive
     runtimeDefault: UNKNOWN
   - id: GENERATE
     design: token_generation
     runtimeDefault: UNKNOWN
+    notes: "Real backend: token loop (generateNextToken + TokenizerStream), stop on EOS/MAX_TOKENS/cancel; prompt from promptUtf8 or staged digest registry — never synthetic"
   - id: EMBED
     design: unknown_until_api_and_model_qualified
     runtimeDefault: UNKNOWN
+    notes: "Java API has no embedding surface; remains UNKNOWN"
   - id: MULTIMODAL
     design: unknown_until_api_and_model_qualified
     runtimeDefault: UNKNOWN
@@ -73,12 +97,16 @@ operations:
   - id: CLOSE
     design: drain
     runtimeDefault: UNKNOWN
+    notes: "Real backend: generator/params close() releases KV cache"
   - id: UNLOAD
     design: drain
     runtimeDefault: UNKNOWN
 
 # Phase cancellation — design expectation vs measured mode (ENGINE-ORTGENAI §6).
 # Provider without bounded cooperative cancel ⇒ full lifecycle on killable worker.
+# Stage 2E measured note: Java bindings expose no native cancel API — cancellation
+# is cooperative polling between tokens; in-flight generate is not preemptible
+# ⇒ WORKER_KILL_ONLY remains the honest placement until measured on device.
 phaseCancellation:
   - phase: PROBE
     expectedMode: COOPERATIVE
@@ -259,7 +287,7 @@ cells:
     cancellationMode: UNKNOWN
 
 unsupportedByDefault:
-  - "Unpinned ORT/GenAI/provider/model config as rebuild baseline"
+  - "Unpinned ORT/GenAI/provider/model config as rebuild baseline (locked 2026-08-09; still no device evidence)"
   - "Desktop EP support extrapolated to Android"
   - "Provider capability/cancel/memory without per-device cell evidence"
   - "Prefix/KV from ONNX format alone"
@@ -283,8 +311,11 @@ resourceEnvelopeDimensions:
   # graph optimization / provider compile-cache / workspace roll into peak envelope; never claim 0 for unknown EP memory
 
 knownLimitations:
-  - "NOT_QUALIFIED_UNTIL_UPSTREAM_LOCK — design BASELINE only"
+  - "UNQUALIFIED_UNTIL_DEVICE_EVIDENCE — design BASELINE; adapter INTEGRATED; no device-verified inference (Stage 5: instrumented tests + smoke model provisioning)"
+  - "No JVM (non-Android) GenAI artifact on Maven Central — host real-inference smoke requires an upstream build-from-source JVM package or a device/emulator"
+  - "No `OrtGenAI`/`Model.load(path, sessionOptions)`/separate KV-release API in v0.14.0 Java bindings — streaming via Generator + TokenizerStream; KV freed by close()"
   - "Provider variance across Android/OEM requires per-cell qualification"
   - "Prefix/KV/embed/multimodal/tools not inferred from ONNX format"
   - "Config + external-data packages need bounded parser and complete manifest"
   - "Provider crash poisons all native state; reply-loss uses ledger query only"
+  - "Prompt content crosses only via promptUtf8 or staged-digest registry — digest-only SPI cannot synthesize a prompt"

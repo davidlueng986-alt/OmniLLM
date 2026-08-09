@@ -188,6 +188,13 @@ data class GenAiGenerateRequest(
     val temperature: Float? = null,
     val topP: Float? = null,
     val topK: Int? = null,
+    /**
+     * Optional UTF-8 prompt body for real tokenization (ENGINE-ORTGENAI §4).
+     * When null/empty, [RealGenAiBackend] falls back to the staged-prompt
+     * registry keyed by [promptDigestHex]; missing content fails closed —
+     * no synthetic tokenize input (a digest is not a prompt).
+     */
+    val promptUtf8: String? = null,
     val attributes: Map<String, String> = emptyMap(),
 ) {
     init {

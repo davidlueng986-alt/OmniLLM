@@ -1,4 +1,4 @@
-# OmniLLM Engine Pack — ONNX Runtime GenAI UPSTREAM.lock (template)
+# OmniLLM Engine Pack — ONNX Runtime GenAI UPSTREAM.lock
 # Authority: ENGINE-ORTGENAI §1, ENGINE-STANDARD §4
 #
 # Rules:
@@ -10,49 +10,85 @@
 # - Builds without a complete lock are exploratory evidence only.
 # - Updating any lock field ⇒ new EngineBuildId; old evidence does not auto-carry.
 #
-# Status of this file in-tree: NOT_LOCKED (template placeholders).
-# Human pin checklist: fill every empty digest field below, then set lockState: LOCKED.
+# Pin note (2026-08-09, Stage 2E — real integration):
+# - Upstream: microsoft/onnxruntime-genai tag v0.14.0 @
+#   b7a6ec307bea84e3b64aa33d59bcad817122d9af (release 2026-05-29).
+# - **The GenAI Android artifact is NOT on Maven Central.** `onnxruntime-genai-android`
+#   is a GitHub release asset (verified 2026-08-09: repo1.maven.org has no such
+#   artifact; official Java API docs state "package publication is pending").
+#   Pinned artifact = official release AAR bytes:
+#     https://github.com/microsoft/onnxruntime-genai/releases/download/v0.14.0/
+#       onnxruntime-genai-android-0.14.0.aar
+#   artifactDigest = SHA-256 of the AAR (matches the digest GitHub publishes for
+#   the asset, re-verified from downloaded bytes).
+# - sourceDigest = SHA-256 of the codeload .tar.gz of the pinned commit
+#   (https://codeload.github.com/microsoft/onnxruntime-genai/tar.gz/<commit>).
+# - The AAR statically links ONNX Runtime into libonnxruntime-genai.so
+#   (verified: DT_NEEDED has no libonnxruntime.so), but the Java `GenAI.init()`
+#   still System.loadLibrary("onnxruntime") → base AAR required at runtime:
+#     com.microsoft.onnxruntime:onnxruntime-android:1.25.1 (Maven Central,
+#     sha256 08ccb60c…; ORT v1.25.1 @ 8a77e459420f58fb946fd9067285cfa719f10bdd).
+#     1.25.x is the ORT era of GenAI 0.14.0 (cmake default 1.25.0-dev; exact
+#     subversion used by the release AAR pipeline lives in ADO run logs only —
+#     re-pin there before device qualification).
+# - AAR facts (verified 2026-08-09): minSdkVersion 24 (manifest + build settings);
+#   ABIs arm64-v8a + x86_64; 16 KB ELF alignment PASS 4/4 (repo
+#   check_elf_16kb_alignment.py, --min-align 16384); base AAR: 4 ABIs, 8/8 PASS.
+# - Java API surface (javap-verified from AAR classes.jar): ai.onnxruntime.genai
+#   {Model(String), Tokenizer(Model), GeneratorParams(Model), Generator(Model,
+#   GeneratorParams), TokenizerStream, Sequences, Config, GenAIException}.
+#   No `OrtGenAI` class / `Model.load(path, sessionOptions)` in this version.
+#   KV cache release via close(); no separate Java KV-release API.
+# - The Java API classes for compileOnly live in engines/ort-genai/libs/
+#   onnxruntime-genai-android-0.14.0.jar = classes.jar extracted from the pinned
+#   AAR (sha256 32d71ee9…); extraction is reproducible: unzip <aar> classes.jar.
+# - Qualification cells remain UNQUALIFIED until device evidence; a complete
+#   lock is a supply-chain requirement, not a SUPPORTED claim.
 
 schemaVersion: 1
 engineId: ONNX-Runtime-GenAI
-lockState: NOT_LOCKED
+lockState: LOCKED
 
 upstream:
   # Official repository (discovery / license source)
   repository: "https://github.com/microsoft/onnxruntime-genai"
-  # Exact tag and/or full commit SHA (both preferred when available)
-  tag: ""
-  commit: ""
-  # SHA-256 of the pinned GenAI source tree (tarball or git archive)
-  sourceDigest: ""
-  # SHA-256 of OmniLLM patch set applied on top of upstream (empty string = no patches;
+  # Pinned release tag + full commit SHA (observed 2026-08-09)
+  tag: "v0.14.0"
+  commit: "b7a6ec307bea84e3b64aa33d59bcad817122d9af"
+  # SHA-256 of codeload tar.gz of the pinned commit (method noted above)
+  sourceDigest: "ae06a6c4e8616d8cdd18e6ea311236c638cd251155f331e2c0742a4e4a08dc6a"
+  # SHA-256 of OmniLLM patch set on top of upstream (empty string = no patches;
   # field must be present for lock completeness)
   patchDigest: ""
-  # When the lock fields above were observed (ISO-8601 UTC). Empty until locked.
-  observedAt: ""
+  # When the lock fields above were observed (ISO-8601 UTC)
+  observedAt: "2026-08-09T00:00:00Z"
 
-# Companion ORT runtime / EP libraries (ENGINE-ORTGENAI required lock fields)
+# Companion ORT runtime (ENGINE-ORTGENAI required lock fields).
+# AAR-based consumption: the base AAR is a runtime dependency of GenAI.init()
+# (loadLibrary("onnxruntime")). Release-AAR exact ORT subversion is only
+# recorded in ADO run logs; 1.25.1 is the aligned Maven Central release.
 ortRuntime:
   # Separate pin for ONNX Runtime used by GenAI (repository/tag/commit/digest)
   repository: "https://github.com/microsoft/onnxruntime"
-  tag: ""
-  commit: ""
-  artifactDigest: ""
+  tag: "v1.25.1"
+  commit: "8a77e459420f58fb946fd9067285cfa719f10bdd"
+  artifactDigest: "08ccb60c93bd027843e8227743ddcb0275a00ee706cb0df4bae91cc1a21a55f5"
 
 providerLibraries:
-  # Digests of EP shared libraries packaged with this EngineBuildId (empty until locked).
-  # Each backend cell may only be qualified when its digest is non-empty + device evidence.
-  cpu: ""
+  # Digests of EP shared libraries packaged with this EngineBuildId.
+  # GenAI 0.14.0 Android AAR statically links the CPU EP inside the AAR
+  # (no separate .so); provider cells still need per-device evidence.
+  cpu: "c2e9b967a1ecdf766246fbee8572c6637df01183cc263f9b954c01a9ec591f69"
   nnapi: ""
   qnn: ""
 
 license:
-  # SPDX or short name recorded at qualification time (upstream MIT at discovery)
+  # SPDX recorded for upstream
   spdx: "MIT"
   # Path relative to pinned source for LICENSE / NOTICE capture
   licensePath: "LICENSE"
-  # SHA-256 of license bytes captured at lock time
-  licenseDigest: ""
+  # SHA-256 of LICENSE bytes at the pinned commit
+  licenseDigest: "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
   # Optional notice / third-party report digests (ORT + providers + GenAI)
   noticeDigest: ""
   dependencyReportDigest: ""
@@ -61,19 +97,22 @@ toolchain:
   # Must match product ANDROID-NATIVE / platform-policy locks when building for Android
   ndkVersion: "28.2.13676358"
   cmakeVersion: "3.22.1"
-  # Opaque digest of the full toolchain fingerprint (NDK+CMake+host+flags template)
-  toolchainDigest: ""
-  hostOs: ""
-  hostArch: ""
+  # SHA-256 of recorded AAR-consumption fingerprint: AAR identities + ABIs +
+  # minSdk + host JDK/Gradle (see lock header) — captured 2026-08-09
+  toolchainDigest: "4790cc9265c06dcb10723f838f62b4d11ef035e24e0612f269552a8c9240d544"
+  hostOs: "win32"
+  hostArch: "amd64"
 
 build:
-  # Canonical build flag set for this EngineBuildId
+  # Canonical build flag set for this EngineBuildId (AAR consumption; no native rebuild)
   buildFlags: ""
-  # ABIs included in this build (Android: arm64-v8a, x86_64, …)
-  abis: []
-  # Page-size / 16 KB packaging evidence pointer (digest or evidence id)
-  pageSizeEvidence: ""
-  # GenAI / model package config schema identity (digest or version id)
+  # ABIs shipped by the pinned GenAI AAR (base AAR adds armeabi-v7a + x86)
+  abis: ["arm64-v8a", "x86_64"]
+  # 16 KB packaging evidence: repo check_elf_16kb_alignment.py PASS 4/4
+  # (genai AAR) and 8/8 (base AAR) at --min-align 16384 — verified 2026-08-09
+  pageSizeEvidence: "elf-16kb-verified-2026-08-09-genai-4of4-base-8of8-PASS"
+  # No canonical genai_config.json schema artifact pinned upstream; recorded at
+  # first model-package qualification (empty until then)
   configSchemaDigest: ""
   features:
     cpu: true
@@ -86,10 +125,11 @@ build:
 
 artifact:
   # EngineBuildId string published with this lock (opaque; not a native pointer)
-  engineBuildId: ""
-  # SHA-256 of packaged native artifact(s) (.so / AAR jni + provider modules)
-  artifactDigest: ""
-  symbolIndexDigest: ""
+  engineBuildId: "ort-genai-0.14.0-aar-c2e9b967"
+  # SHA-256 of the pinned onnxruntime-genai-android-0.14.0.aar (official asset digest)
+  artifactDigest: "c2e9b967a1ecdf766246fbee8572c6637df01183cc263f9b954c01a9ec591f69"
+  # Java API classes.jar extracted from the AAR (engines/ort-genai/libs/)
+  symbolIndexDigest: "32d71ee928f97fffb3bd3f8cc82608f2a806656c63e52bd5403a1a41bd65f399"
 
 testedProfile:
   # Labels only — evidence lives in EngineRegistry cells, not this lock alone
@@ -100,16 +140,28 @@ testedProfile:
   profileId: ""
 
 notes:
-  integrationShape: "GenAI runtime API + execution provider adapter (JNI/C API); not a desktop-server port"
+  integrationShape: "Official GenAI Java API (AAR classes.jar) — direct JVM access, no OmniLLM JNI bridge; real backend = RealGenAiBackend (probe/load/session/stream/cancel/error mapping)"
   placementHint: "Verified runtime/provider/model may use privileged/crash-contained when all phases qualify; untrusted model/provider → isolated CPU or companion UID acceleration (ADR-007)"
-  failClosed: "Incomplete lock ⇒ Registry exposure UNKNOWN; dry-load never elevates trust; desktop EP support does not extrapolate to Android"
+  failClosed: "Lock completeness ≠ device qualification; cells stay UNQUALIFIED/NOT_EXECUTED until device evidence; natives absent ⇒ NOT_AVAILABLE (never load success); host JVM cannot load Android .so — real-inference smoke requires device/emulator (Stage 5) or an upstream JVM build"
   lockEligibility: "NOT_QUALIFIED_UNTIL_UPSTREAM_LOCK"
+  artifactProvisioning: |
+    Android runtime packaging (out of Stage 2E scope, required before device
+    qualification — Stage 5): consuming Android module (:android:runtime-service)
+    must add
+      implementation(files("<repo>/engines/ort-genai/libs/onnxruntime-genai-android-0.14.0.aar"))  # download from the GitHub release URL above; sha256 c2e9b967…
+      implementation("com.microsoft.onnxruntime:onnxruntime-android:1.25.1")
+    and verify AAR jni packaging + 16 KB alignment (ELF check is green for both).
+    A JVM (non-Android) GenAI build does not exist on Maven Central; host smoke
+    tests need an upstream build-from-source JVM package (build.py --build_java).
   humanPinSteps: |
-    1. Pick GenAI release tag/commit; compute sourceDigest (sha256 of archive).
-    2. Pin matching ORT tag/commit + artifactDigest.
-    3. Record provider library digests for each packaged EP (cpu/nnapi/qnn).
-    4. Record patchDigest (empty string if no OmniLLM patches).
-    5. Record toolchainDigest, abis, pageSizeEvidence, configSchemaDigest.
-    6. Capture licenseDigest + noticeDigest; set observedAt (UTC).
-    7. Assign engineBuildId + artifactDigest; set lockState: LOCKED.
-    8. Re-run qualification cells; never inherit evidence across EngineBuildId.
+    1. (done 2026-08-09) Pick GenAI release tag/commit; sourceDigest = codeload tar.gz.
+    2. (done) AAR asset pin + sha256 (official digest re-verified from bytes).
+    3. (done) Base onnxruntime-android 1.25.1 pin (Maven Central) + sha256; exact
+       release-AAR ORT subversion from ADO logs before device qualification.
+    4. (done) providerLibraries.cpu = AAR digest (statically linked CPU EP);
+       nnapi/qnn remain empty (0.14.0 removed QNN packaging from the AAR).
+    5. (done) patchDigest "" (no patches); toolchainDigest = AAR-consumption fingerprint.
+    6. (done) licenseDigest captured; observedAt set.
+    7. (done) engineBuildId + artifactDigest; lockState LOCKED.
+    8. (pending) configSchemaDigest at first model-package qualification.
+    9. Re-run qualification cells; never inherit evidence across EngineBuildId.

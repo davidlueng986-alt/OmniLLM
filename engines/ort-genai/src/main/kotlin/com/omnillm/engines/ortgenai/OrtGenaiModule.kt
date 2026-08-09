@@ -12,23 +12,24 @@ import com.omnillm.engines.api.EvidenceStatusLabels
 import com.omnillm.engines.ortgenai.lock.UpstreamLock
 import com.omnillm.engines.ortgenai.lock.UpstreamLockLoader
 import com.omnillm.engines.ortgenai.session.GenAiBackend
-import com.omnillm.engines.ortgenai.session.StubGenAiBackend
+import com.omnillm.engines.ortgenai.session.GenAiBackendFactory
 
 /**
  * Module `:engines:ort-genai` — ONNX Runtime GenAI pack (ENGINE-ORTGENAI).
  *
- * Integration shape: GenAI runtime API + execution provider adapter (JNI later).
- * Design status is BASELINE (complete product design); runtime remains
- * UNQUALIFIED / UNKNOWN until UPSTREAM.lock is complete and evidence cells PASS.
+ * Integration shape: official GenAI Java API from the pinned Android AAR
+ * (v0.14.0), direct JVM access (no OmniLLM JNI bridge). Design status is
+ * BASELINE; runtime remains UNQUALIFIED / UNKNOWN until device evidence cells
+ * PASS — a pinned, real backend is a supply-chain + integration fact, not a
+ * SUPPORTED claim.
  *
  * Hard rules:
  * - Never write OmniLLM DB / model store (ENGINE-STANDARD §3 / ADR-010)
  * - Never return native pointers across process
  * - Never silently ignore unsupported parameters
  * - Plan has no domain mutation (ADR-002)
- * - Incomplete UPSTREAM.lock ⇒ exploratory only; Registry stays UNKNOWN
- * - Do **not** claim SUPPORTED without QUALIFIED_WITH_ENVELOPE + PASS evidence
  * - Missing natives must never report load success
+ * - Do **not** claim SUPPORTED without QUALIFIED_WITH_ENVELOPE + PASS evidence
  */
 object OrtGenaiModule {
     const val MODULE_PATH: String = ":engines:ort-genai"
@@ -40,7 +41,7 @@ object OrtGenaiModule {
     const val QUALIFICATION_STATUS: String = "UNQUALIFIED"
     const val REGISTRY_EXPOSURE: String = "UNKNOWN"
 
-    /** Placeholder build id until a complete lock produces a real artifact digest. */
+    /** Fallback build id when the lock has no artifact build id (template only). */
     const val DEFAULT_ENGINE_BUILD_ID: String = "ort-genai-not-locked"
 
     /** Placeholder device/driver used only when seeding matrix rows without a real device. */
@@ -51,19 +52,21 @@ object OrtGenaiModule {
         EngineBuildId.parse(DEFAULT_ENGINE_BUILD_ID)
 
     /**
-     * Factory for the Kotlin session adapter. Default [GenAiBackend] is
-     * [StubGenAiBackend] with exploratory dry-run **off** (unproven ops →
-     * CAPABILITY_UNKNOWN). Never loads real ORT/GenAI natives.
+     * Factory for the Kotlin session adapter. Default [GenAiBackend] is the
+     * **real** ONNX Runtime GenAI backend (fail-closed: natives absent or
+     * execute unproven ⇒ NOT_AVAILABLE / CAPABILITY_UNKNOWN). Pass
+     * [GenAiBackendFactory.forHostUnitTests] explicitly for unit tests that
+     * must not touch native loading.
      */
     fun createEngine(
         lock: UpstreamLock = UpstreamLockLoader.loadFromClasspathOrTemplate(),
-        backend: GenAiBackend = StubGenAiBackend(exploratoryDryRun = false),
+        backend: GenAiBackend? = null,
         engineBuildId: EngineBuildId = lock.resolvedEngineBuildId()
             ?: defaultEngineBuildId(),
         /**
          * When false (default), commit/execute paths map unproven operations to
          * CAPABILITY_UNKNOWN even if a backend would otherwise succeed.
-         * Tests that need dry-run plumbing set this true **and** use exploratory stub.
+         * Control plane opts in only with a complete lock + exploratory policy.
          */
         allowUnprovenExecution: Boolean = false,
         measuredPhaseCancellation: Map<String, String> = emptyMap(),
@@ -71,7 +74,9 @@ object OrtGenaiModule {
         OrtGenaiEngine(
             engineBuildId = engineBuildId,
             lock = lock,
-            backend = backend,
+            backend = backend ?: GenAiBackendFactory.create(
+                allowExploratoryExecute = allowUnprovenExecution,
+            ),
             allowUnprovenExecution = allowUnprovenExecution,
             measuredPhaseCancellation = measuredPhaseCancellation,
         )

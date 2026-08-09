@@ -101,7 +101,7 @@ class OrtGenaiEngine(
                     "library" to backend.libraryLabel(),
                     "backendAvailable" to backend.isAvailable().toString(),
                     "integrationShape" to "genai-runtime-api-plus-ep-adapter",
-                    "nativeWired" to "false",
+                    "nativeWired" to backend.isAvailable().toString(),
                     "abis" to device.abiList.joinToString(","),
                     "ortRuntimeDigest" to (lock.ortRuntimeArtifactDigest.orEmpty()),
                     "configSchemaDigest" to (lock.configSchemaDigest.orEmpty()),
