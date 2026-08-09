@@ -291,13 +291,9 @@ class OmniRuntimeFacade(
                     details = mapOf("requestId" to requestId.value),
                 ),
             )
-        val revision = try {
-            val hex = modelRaw.lowercase().let {
-                if (it.matches(Regex("^[0-9a-f]{64}$"))) it else IdentityHashing.sha256Hex("model|$it")
-            }
-            ModelRevisionId.parse(hex)
-        } catch (_: Exception) {
-            return listOf(
+        val revision = com.omnillm.android.runtimeservice.featurehost.FeatureRequestMapper
+            .normalizeRevision(modelRaw)
+            ?: return listOf(
                 metaEvent("accepted", model = request.model),
                 terminalFailedEvent(
                     code = OmniErrorCode.INVALID_REQUEST,
@@ -305,20 +301,12 @@ class OmniRuntimeFacade(
                     details = mapOf("requestId" to requestId.value, "model" to modelRaw),
                 ),
             )
-        }
 
-        val installation = ControlPlaneFeaturePorts.resolveInstallationOrNull(plane.modelManager, revision)
-            ?: return listOf(
-                metaEvent("accepted", model = request.model),
-                terminalFailedEvent(
-                    code = OmniErrorCode.CAPABILITY_UNSUPPORTED,
-                    message = "no installed model for requested revision (fail closed, ARC-06)",
-                    details = mapOf("requestId" to requestId.value, "model" to modelRaw),
-                ),
-            )
+        // ARC-12: shared request→candidate shaping (same authority as HTTP path).
         val device = DeviceExecutionFingerprint.parse("device-fp-aidl-runtime")
         val candidate = when (
-            val c = ControlPlaneFeaturePorts.buildCandidate(binding, revision, installation, device)
+            val c = com.omnillm.android.runtimeservice.featurehost.FeatureRequestMapper
+                .resolveCandidate(binding, plane.modelManager, revision, device)
         ) {
             is OmniResult.Err -> return listOf(
                 metaEvent("accepted", model = request.model),
@@ -327,21 +315,22 @@ class OmniRuntimeFacade(
             is OmniResult.Ok -> c.value
         }
 
-        val orchRequest = OrchestrationRequest(
-            requestId = requestId,
-            principalId = registration.principalId,
-            idempotencyKey = idempotencyKey,
-            operationKind = OP_CHAT,
-            canonicalRequestDigest = canonicalDigest,
-            requiredCapabilities = setOf(CapabilityId.TEXT_GENERATION),
-            requestedRevisionId = revision,
-            candidates = listOf(candidate),
-            routing = ControlPlaneFeaturePorts.exploratoryRouting(),
-            costClass = CostClassLabels.GENERATION,
-            runtimeEpoch = plane.identity.runtimeEpoch,
-            revocationEpoch = 0L,
-            deadlineMonotonic = Long.MAX_VALUE / 8,
-        )
+        val orchRequest = com.omnillm.android.runtimeservice.featurehost.FeatureRequestMapper
+            .orchestrationRequest(
+                requestId = requestId,
+                principalId = registration.principalId,
+                idempotencyKey = idempotencyKey,
+                operationKind = OP_CHAT,
+                canonicalRequestDigest = canonicalDigest,
+                requiredCapabilities = setOf(CapabilityId.TEXT_GENERATION),
+                requestedRevisionId = revision,
+                candidates = listOf(candidate),
+                routing = ControlPlaneFeaturePorts.exploratoryRouting(),
+                costClass = CostClassLabels.GENERATION,
+                runtimeEpoch = plane.identity.runtimeEpoch,
+                revocationEpoch = 0L,
+                deadlineMonotonic = Long.MAX_VALUE / 8,
+            )
 
         return when (val submitted = plane.orchestrator.submit(orchRequest)) {
             is OmniResult.Err -> listOf(
