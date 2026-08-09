@@ -90,6 +90,31 @@ val checkContractDrift by tasks.registering(Exec::class) {
     mustRunAfter(generateContracts)
 }
 
+// ---------------------------------------------------------------------------
+// AIDL drift gate (API-20): specs/aidl/omnillm-aidl.yaml → interfaces/aidl
+// ---------------------------------------------------------------------------
+val checkAidlDrift by tasks.registering(Exec::class) {
+    group = "verification"
+    description =
+        "Fail the build when committed .aidl files drift from specs/aidl/omnillm-aidl.yaml"
+    workingDir = rootDir
+    commandLine(
+        pythonExecutable(),
+        "tools/codegen/extract_aidl.py",
+        "--repo-root",
+        rootDir.absolutePath,
+        "--check",
+    )
+    // Inputs are the AIDL catalog + generator only. Committed .aidl files are
+    // read at execution time by the Python --check mode.
+    inputs.files(
+        file("specs/aidl/omnillm-aidl.yaml"),
+        file("tools/codegen/extract_aidl.py"),
+    )
+    // Independent of generateContracts: never dependsOn(generateContracts).
+    mustRunAfter(generateContracts)
+}
+
 // Alias: :tools:codegen equivalent at root (no tools Gradle project module).
 tasks.register("toolsCodegen") {
     group = "omnillm"
@@ -140,8 +165,9 @@ val checkDependencyEdges by tasks.registering(Exec::class) {
 tasks.register("check") {
     group = "verification"
     description =
-        "Root verification (contract drift + native 16 KB + packaged .so + dep edges)"
+        "Root verification (contract drift + AIDL drift + native 16 KB + packaged .so + dep edges)"
     dependsOn(checkContractDrift)
+    dependsOn(checkAidlDrift)
     dependsOn(checkNative16kb)
     dependsOn(checkDependencyEdges)
     // BLD-13: aggregate the native packaging proof (libomnillm_llama.so for

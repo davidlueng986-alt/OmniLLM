@@ -102,30 +102,33 @@ then
   exit 1
 fi
 
-echo "==> [5/11] Module dependency boundary gate (INV-001 / ADR-010)"
+echo "==> [5/12] AIDL drift gate (API-20)"
+"${GW[@]}" checkAidlDrift -Pomnillm.python="$PYTHON" --stacktrace
+
+echo "==> [6/12] Module dependency boundary gate (INV-001 / ADR-010)"
 "${GW[@]}" checkModuleDependencyRules -Pomnillm.python="$PYTHON" --stacktrace
 
-echo "==> [6/11] Dependency edges (Gradle task + script)"
+echo "==> [7/12] Dependency edges (Gradle task + script)"
 "${GW[@]}" checkDependencyEdges -Pomnillm.python="$PYTHON" --stacktrace
 
-echo "==> [7/11] Unit tests (JVM + Android testDebugUnitTest) - fail closed"
+echo "==> [8/12] Unit tests (JVM + Android testDebugUnitTest) - fail closed"
 "${GW[@]}" test -Pomnillm.python="$PYTHON" --stacktrace --continue
 
-echo "==> [8/11] Root check (drift + native 16 KB + dependency rules)"
+echo "==> [9/12] Root check (drift + native 16 KB + dependency rules)"
 "${GW[@]}" check -Pomnillm.python="$PYTHON" --stacktrace
 
 if [[ "$SKIP_LINT" -eq 0 ]]; then
-  echo "==> [9/11] Android lint (app modules); detekt intentionally skipped"
+  echo "==> [10/12] Android lint (app modules); detekt intentionally skipped"
   "${GW[@]}" \
     :android:app-ui:lintDebug \
     :android:companion-sandbox:lintDebug \
     -Pomnillm.python="$PYTHON" --stacktrace
 else
-  echo "==> [9/11] Android lint SKIPPED (--skip-lint)"
+  echo "==> [10/12] Android lint SKIPPED (--skip-lint)"
 fi
 
 if [[ "$SKIP_ASSEMBLE" -eq 0 ]]; then
-  echo "==> [10/11] assembleDebug (+ release unless --skip-release)"
+  echo "==> [11/12] assembleDebug (+ release unless --skip-release)"
   "${GW[@]}" \
     :android:app-ui:assembleDebug \
     :android:companion-sandbox:assembleDebug \
@@ -137,7 +140,7 @@ if [[ "$SKIP_ASSEMBLE" -eq 0 ]]; then
       -Pomnillm.python="$PYTHON" --stacktrace
   fi
 
-  echo "==> [11/11] Native 16 KB APK zip-align"
+  echo "==> [12/12] Native 16 KB APK zip-align"
   "$PYTHON" tools/ci/check_elf_16kb_alignment.py --min-align 16384
   shopt -s nullglob
   apks=(
@@ -155,7 +158,7 @@ if [[ "$SKIP_ASSEMBLE" -eq 0 ]]; then
     "$PYTHON" tools/ci/check_apk_16kb_zipalign.py "$apk"
   done
 else
-  echo "==> [9-10/10] assemble + APK 16 KB SKIPPED (--skip-assemble)"
+  echo "==> [10-11/12] assemble + APK 16 KB SKIPPED (--skip-assemble)"
   "$PYTHON" tools/ci/check_elf_16kb_alignment.py --min-align 16384
 fi
 

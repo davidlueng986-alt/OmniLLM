@@ -117,30 +117,33 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Write-Host "==> [5/11] Module dependency boundary gate (INV-001 / ADR-010)"
+Write-Host "==> [5/12] AIDL drift gate (API-20)"
+Invoke-Gradlew checkAidlDrift "-Pomnillm.python=$Python" --stacktrace
+
+Write-Host "==> [6/12] Module dependency boundary gate (INV-001 / ADR-010)"
 Invoke-Gradlew checkModuleDependencyRules "-Pomnillm.python=$Python" --stacktrace
 
-Write-Host "==> [6/11] Dependency edges (Gradle task + script)"
+Write-Host "==> [7/12] Dependency edges (Gradle task + script)"
 Invoke-Gradlew checkDependencyEdges "-Pomnillm.python=$Python" --stacktrace
 
-Write-Host "==> [7/11] Unit tests (JVM + Android testDebugUnitTest) - fail closed"
+Write-Host "==> [8/12] Unit tests (JVM + Android testDebugUnitTest) - fail closed"
 Invoke-Gradlew test "-Pomnillm.python=$Python" --stacktrace --continue
 
-Write-Host "==> [8/11] Root check (drift + native 16 KB + dependency rules)"
+Write-Host "==> [9/12] Root check (drift + native 16 KB + dependency rules)"
 Invoke-Gradlew check "-Pomnillm.python=$Python" --stacktrace
 
 if (-not $SkipLint) {
-    Write-Host "==> [9/11] Android lint (app modules); detekt intentionally skipped"
+    Write-Host "==> [10/12] Android lint (app modules); detekt intentionally skipped"
     Invoke-Gradlew `
         :android:app-ui:lintDebug `
         :android:companion-sandbox:lintDebug `
         "-Pomnillm.python=$Python" --stacktrace
 } else {
-    Write-Host "==> [9/11] Android lint SKIPPED (-SkipLint)"
+    Write-Host "==> [10/12] Android lint SKIPPED (-SkipLint)"
 }
 
 if (-not $SkipAssemble) {
-    Write-Host "==> [10/11] assembleDebug (+ release unless -SkipRelease)"
+    Write-Host "==> [11/12] assembleDebug (+ release unless -SkipRelease)"
     Invoke-Gradlew `
         :android:app-ui:assembleDebug `
         :android:companion-sandbox:assembleDebug `
@@ -152,7 +155,7 @@ if (-not $SkipAssemble) {
             "-Pomnillm.python=$Python" --stacktrace
     }
 
-    Write-Host "==> [11/11] Native 16 KB APK zip-align"
+    Write-Host "==> [12/12] Native 16 KB APK zip-align"
     Invoke-Python -Arguments @("tools/ci/check_elf_16kb_alignment.py", "--min-align", "16384")
 
     $apkGlobs = @(
@@ -173,7 +176,7 @@ if (-not $SkipAssemble) {
         Invoke-Python -Arguments @("tools/ci/check_apk_16kb_zipalign.py", $apk.FullName)
     }
 } else {
-    Write-Host "==> [9-10/10] assemble + APK 16 KB SKIPPED (-SkipAssemble)"
+    Write-Host "==> [10-11/12] assemble + APK 16 KB SKIPPED (-SkipAssemble)"
     Invoke-Python -Arguments @("tools/ci/check_elf_16kb_alignment.py", "--min-align", "16384")
 }
 
