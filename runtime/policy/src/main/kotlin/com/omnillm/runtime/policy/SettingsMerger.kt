@@ -211,6 +211,11 @@ object SettingsMerger {
         var forcedBool: Boolean? = null
         var clampReason: String? = null
         var current = selected
+        // Golden vector CFG-002: track the security-trust enum set separately so
+        // an exclusion by the trust authority fails closed with
+        // TRUST_PLACEMENT_REQUIRED (never a capacity ADMISSION_REJECTED, never a
+        // silent enum change).
+        var securityTrustEnum: Set<String>? = null
 
         for (c in constraints) {
             // Intersection: tighten min (raise floor), lower max (drop ceiling).
@@ -228,6 +233,10 @@ object SettingsMerger {
             }
             if (c.allowedEnumValues != null) {
                 enumAllow = (enumAllow ?: c.allowedEnumValues).intersect(c.allowedEnumValues)
+                if (c.authority == "security-trust") {
+                    securityTrustEnum = (securityTrustEnum ?: c.allowedEnumValues)
+                        .intersect(c.allowedEnumValues)
+                }
             }
             if (c.forcedBool != null) {
                 // Safety can force a boolean (e.g. lanEnabled=false); never force true over false safety.
@@ -308,6 +317,18 @@ object SettingsMerger {
                     ?: return OmniResult.err(OmniError.INVALID_REQUEST(message = "enum expected"))
                 val allow = enumAllow
                 if (allow != null && s !in allow) {
+                    // Golden vector CFG-002: an exact enum value excluded by the
+                    // security-trust hard constraint fails closed with
+                    // TRUST_PLACEMENT_REQUIRED (trust axis, 412) — not a
+                    // capacity ADMISSION_REJECTED (503).
+                    if (securityTrustEnum != null && s !in securityTrustEnum) {
+                        return OmniResult.err(
+                            OmniError.TRUST_PLACEMENT_REQUIRED(
+                                message = "enum value excluded by security-trust hard constraint",
+                                details = mapOf("key" to def.key, "value" to s),
+                            ),
+                        )
+                    }
                     return OmniResult.err(
                         OmniError.ADMISSION_REJECTED(
                             message = "enum value excluded by hard constraint",
