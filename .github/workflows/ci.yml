@@ -84,8 +84,8 @@ jobs:
       - name: Install Android SDK packages (API 36 / build-tools / NDK r28)
         run: |
           set -euo pipefail
-          # Licenses: fail closed if sdkmanager cannot install required packages.
-          yes | sdkmanager --licenses >/dev/null || true
+          # Licenses: fail closed if sdkmanager cannot accept required licenses.
+          yes | sdkmanager --licenses
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-${ANDROID_COMPILE_SDK}" \
@@ -239,14 +239,27 @@ jobs:
             --no-daemon --stacktrace
 
       # ------------------------------------------------------------------
-      # Native 16 KB packaging gates (ANDROID-16KB)
+      # Native 16 KB packaging gates (ANDROID-16KB) — fail closed
       # ------------------------------------------------------------------
+      - name: Native verification (libomnillm_llama.so for prod ABIs)
+        run: |
+          set -euo pipefail
+          # BLD-05: native packaging proof was never exercised in CI. This runs
+          # the same gate root `check` now aggregates (BLD-13).
+          ./gradlew :android:native:verifyNativeLibsPresent --no-daemon --stacktrace
+
       - name: Native 16 KB ELF alignment (*.so scan)
         run: |
           set -euo pipefail
-          # Pass when no .so present (skeleton). Fail when misaligned .so appear.
+          # Fail closed (BLD-05/BLD-13): no .so at all is a build break, and
+          # misaligned .so also fail. check_elf_16kb_alignment.py exits 1 when
+          # no .so are found; guard here as belt-and-suspenders.
           ./gradlew checkNative16kb --no-daemon --stacktrace
           python tools/ci/check_elf_16kb_alignment.py --min-align 16384
+          if ! find android/native -name '*.so' | grep -q .; then
+            echo "::error::No .so files found — native verification produced no shared libraries (fail closed)." >&2
+            exit 1
+          fi
 
       - name: APK 16 KB zip-align check
         run: |
@@ -313,3 +326,77 @@ jobs:
             **/build/reports/lint-results*.xml
           if-no-files-found: ignore
           retention-days: 7
+
+  # --------------------------------------------------------------------------
+  # Instrumented / connected tests on an emulator (BLD-05).
+  # Was never run in CI; runs fail-closed (continue-on-error: false) but in a
+  # separate job so a flaky emulator env cannot block artifact + unit gates.
+  # NOTE: :android:runtime-service:RealLlamaUpstreamInstrumentedTest loads the
+  # real libomnillm_llama.so, so this job builds the native lib (NDK) first.
+  # Needs network on the runner for SDK + emulator system image downloads
+  # (github-hosted ubuntu-latest provides hardware acceleration).
+  # --------------------------------------------------------------------------
+  connected-tests:
+    name: Instrumented tests (emulator API 34 x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    continue-on-error: false
+
+    permissions:
+      contents: read
+
+    env:
+      JAVA_VERSION: "17"
+      ANDROID_COMPILE_SDK: "36"
+      ANDROID_BUILD_TOOLS: "36.0.0"
+      ANDROID_NDK: "28.2.13676358"
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages (API 36 / build-tools / NDK r28)
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-${ANDROID_COMPILE_SDK}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "ndk;${ANDROID_NDK}"
+          echo "ANDROID_HOME=${ANDROID_HOME:-}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [ -n "${ANDROID_HOME:-}" ]; then
+            echo "ANDROID_SDK_ROOT=${ANDROID_HOME}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Start emulator and run instrumented tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: default
+          disable-animations: true
+          force-avd-creation: false
+          script: |
+            ./gradlew \
+              :android:app-ui:assembleDebug \
+              :android:runtime-service:assembleDebug \
+              --no-daemon --stacktrace
+            ./gradlew \
+              :android:runtime-service:connectedDebugAndroidTest \
+              :android:app-ui:connectedDebugAndroidTest \
+              --no-daemon --stacktrace
