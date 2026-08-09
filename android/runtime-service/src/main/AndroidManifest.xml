@@ -38,13 +38,17 @@
     <uses-permission android:name="com.omnillm.companion.permission.BIND_SANDBOX" />
 
     <!--
-      App-defined normal permission: discovery / intent filtering only.
-      NOT a security boundary (ANDROID-SERVICE §2). Real auth = calling UID +
-      Android user + approved ClientRegistration + scope/epoch.
+      App-defined signature permission: only APKs signed with the same key may
+      hold it. SEC-01: raised from normal → signature (the exported RuntimeBinding
+      service is guarded by this permission; normal level was explicitly NOT a
+      security boundary). Real auth remains calling UID + Android user + approved
+      ClientRegistration + scope/epoch — this permission only gates who can even
+      attempt the exported bind. Third-party pairing remains PENDING/TODO, so no
+      legitimate flow depends on the normal level.
     -->
     <permission
         android:name="com.omnillm.permission.BIND_RUNTIME"
-        android:protectionLevel="normal"
+        android:protectionLevel="signature"
         android:label="@string/permission_bind_runtime_label"
         android:description="@string/permission_bind_runtime_description" />
 
