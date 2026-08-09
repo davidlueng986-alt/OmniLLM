@@ -1,8 +1,14 @@
-# OmniLLM Android - signed release assemble (optional secrets)
+# OmniLLM Android - signed release assemble (fail closed)
 #
 # Trigger: manual workflow_dispatch or version tags (v*).
 # Signing material MUST live in GitHub Actions secrets - never commit keystores
 # or passwords. See tools/ci/README.md § Secrets.
+#
+# SEC-09 / BLD-07: a version-tag push REQUIRES all four signing secrets and
+# FAILS FAST if any is absent - unsigned artifacts are never produced for tag
+# releases. Signing properties are injected via ORG_GRADLE_PROJECT_* env vars
+# (never argv). Signed APKs are verified with apksigner, and a lightweight
+# SBOM is generated and uploaded with every release run.
 #
 # Produces signed APKs (and AAB when signing is configured) for:
 #   - :android:app-ui          (com.omnillm)
@@ -122,7 +128,7 @@ jobs:
       - name: Root check (drift + 16 KB + dep edges)
         run: ./gradlew check --no-daemon --stacktrace
 
-      - name: Decode release keystore (optional secrets)
+      - name: Decode release keystore (fail closed on tag push)
         id: keystore
         env:
           SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
@@ -135,10 +141,12 @@ jobs:
              [ -z "${SIGNING_STORE_PASSWORD:-}" ] || \
              [ -z "${SIGNING_KEY_ALIAS:-}" ] || \
              [ -z "${SIGNING_KEY_PASSWORD:-}" ]; then
+            if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+              echo "::error::Release tag push requires ALL signing secrets: SIGNING_KEYSTORE_BASE64, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS, SIGNING_KEY_PASSWORD (documented in tools/ci/README.md). Failing fast - unsigned release artifacts are never produced for tag releases."
+              exit 1
+            fi
             echo "signing=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Release signing secrets not fully configured. Building unsigned release."
-            echo "Required secrets: SIGNING_KEYSTORE_BASE64, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS, SIGNING_KEY_PASSWORD"
-            echo "Documented in tools/ci/README.md - never commit keystore material."
+            echo "::warning::Manual workflow_dispatch without signing secrets - producing unsigned APKs for smoke testing only (never for tags)."
             exit 0
           fi
           mkdir -p "$RUNNER_TEMP/omnillm-signing"
@@ -148,58 +156,66 @@ jobs:
           echo "signing=true" >> "$GITHUB_OUTPUT"
           echo "keystore_path=$KEYSTORE_PATH" >> "$GITHUB_OUTPUT"
 
-      - name: Assemble signed release (when secrets present)
+      - name: Assemble signed release (env-injected signing properties)
         if: steps.keystore.outputs.signing == 'true'
         env:
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_android.injected.signing.store.file: ${{ steps.keystore.outputs.keystore_path }}
+          ORG_GRADLE_PROJECT_android.injected.signing.store.password: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_android.injected.signing.key.alias: ${{ secrets.SIGNING_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_android.injected.signing.key.password: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          KS="${{ steps.keystore.outputs.keystore_path }}"
-          # AGP injected signing properties (no signingConfig required in build.gradle.kts)
-          SIGN_PROPS=(
-            "-Pandroid.injected.signing.store.file=$KS"
-            "-Pandroid.injected.signing.store.password=$SIGNING_STORE_PASSWORD"
-            "-Pandroid.injected.signing.key.alias=$SIGNING_KEY_ALIAS"
-            "-Pandroid.injected.signing.key.password=$SIGNING_KEY_PASSWORD"
-          )
+          # SEC-09: signing properties arrive as ORG_GRADLE_PROJECT_* env vars,
+          # never as -P argv (argv leaks into process listings / logs).
           ./gradlew \
             :android:app-ui:assembleRelease \
             :android:companion-sandbox:assembleRelease \
-            "${SIGN_PROPS[@]}" \
             --no-daemon --stacktrace
 
-      - name: Assemble unsigned release (no secrets)
-        if: steps.keystore.outputs.signing != 'true'
+      - name: Assemble unsigned release (manual dispatch only, fail-closed on tags)
+        if: steps.keystore.outputs.signing != 'true' && github.event_name != 'push'
         run: |
           set -euo pipefail
           ./gradlew \
             :android:app-ui:assembleRelease \
             :android:companion-sandbox:assembleRelease \
             --no-daemon --stacktrace
+
+      - name: Verify APK signatures (apksigner, fail closed)
+        if: steps.keystore.outputs.signing == 'true'
+        run: |
+          set -euo pipefail
+          APKSIGNER="${ANDROID_HOME}/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
+          test -x "$APKSIGNER" || { echo "::error::apksigner not found at $APKSIGNER"; exit 1; }
+          shopt -s nullglob
+          apks=(
+            android/app-ui/build/outputs/apk/release/*.apk
+            android/companion-sandbox/build/outputs/apk/release/*.apk
+          )
+          if [ ${#apks[@]} -eq 0 ]; then
+            echo "::error::No release APKs to verify (fail closed)."
+            exit 1
+          fi
+          for apk in "${apks[@]}"; do
+            echo "== apksigner verify --verbose --print-certs: $apk"
+            "$APKSIGNER" verify --verbose --print-certs "$apk"
+          done
+          echo "All signed APKs verified OK."
 
       - name: Bundle release AAB (signed, optional)
         if: |
           steps.keystore.outputs.signing == 'true' &&
           (github.event_name == 'push' || inputs.build_aab)
         env:
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_android.injected.signing.store.file: ${{ steps.keystore.outputs.keystore_path }}
+          ORG_GRADLE_PROJECT_android.injected.signing.store.password: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_android.injected.signing.key.alias: ${{ secrets.SIGNING_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_android.injected.signing.key.password: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          KS="${{ steps.keystore.outputs.keystore_path }}"
-          SIGN_PROPS=(
-            "-Pandroid.injected.signing.store.file=$KS"
-            "-Pandroid.injected.signing.store.password=$SIGNING_STORE_PASSWORD"
-            "-Pandroid.injected.signing.key.alias=$SIGNING_KEY_ALIAS"
-            "-Pandroid.injected.signing.key.password=$SIGNING_KEY_PASSWORD"
-          )
           ./gradlew \
             :android:app-ui:bundleRelease \
             :android:companion-sandbox:bundleRelease \
-            "${SIGN_PROPS[@]}" \
             --no-daemon --stacktrace
 
       - name: Native 16 KB gates
@@ -237,6 +253,82 @@ jobs:
             echo "OK release artifact(s): ${apks[*]}"
           done
 
+      - name: Generate lightweight SBOM (release dependencies + notices)
+        run: |
+          set -euo pipefail
+          mkdir -p sbom
+          ./gradlew :android:app-ui:dependencies --configuration releaseRuntimeClasspath \
+            > sbom/app-ui-deps.txt
+          ./gradlew :android:companion-sandbox:dependencies --configuration releaseRuntimeClasspath \
+            > sbom/companion-deps.txt
+          cp THIRD_PARTY_NOTICES.md sbom/THIRD_PARTY_NOTICES.md
+          python - <<'PY'
+          import json, os, re
+
+          # SPDX + attribution map mirrors THIRD_PARTY_NOTICES.md (BLD-03).
+          LICENSES = {
+              "io.ktor": "Apache-2.0",
+              "com.squareup.okhttp3": "Apache-2.0",
+              "app.cash.sqldelight": "Apache-2.0",
+              "org.jetbrains.kotlinx": "Apache-2.0",
+              "androidx": "Apache-2.0",
+              "io.netty": "Apache-2.0",
+          }
+
+          def extract(path):
+              found = {}
+              try:
+                  with open(path, encoding="utf-8") as fh:
+                      for line in fh:
+                          m = re.match(r"^[+|\\]\s*-+\s+([^ ]+)", line)
+                          if not m:
+                              continue
+                          coord = m.group(1)
+                          parts = coord.split(":")
+                          if len(parts) < 3:
+                              continue
+                          g, n = parts[0], parts[1]
+                          v = parts[2]
+                          if "->" in v:
+                              v = v.split("->")[1].strip()
+                          v = re.sub(r"\(\*\)$|\(c\)$|\(n\)$", "", v).strip()
+                          if v:
+                              found.setdefault(f"{g}:{n}", v)
+              except OSError as exc:
+                  raise SystemExit(f"cannot read {path}: {exc}")
+              return found
+
+          modules = ["app-ui", "companion-sandbox"]
+          deps = {}
+          for mod in modules:
+              for (g, n), v in extract(f"sbom/{mod}-deps.txt").items():
+                  deps[f"{g}:{n}"] = {"group": g, "name": n, "version": v}
+
+          sbom = {
+              "bomFormat": "CycloneDX",
+              "specVersion": "1.5",
+              "serialNumber": "urn:uuid:release-" + os.environ.get("GITHUB_REF_NAME", "unknown"),
+              "version": 1,
+              "metadata": {
+                  "component": {"type": "application", "name": "com.omnillm:omnillm-android", "version": os.environ.get("GITHUB_REF_NAME", "0.0.0")},
+              },
+              "components": [
+                  {
+                      "type": "library",
+                      "group": v["group"],
+                      "name": v["name"],
+                      "version": v["version"],
+                      "licenses": [{"license": {"id": LICENSES.get(v["group"], "unknown")}}],
+                  }
+                  for v in sorted(deps.values(), key=lambda d: (d["group"], d["name"]))
+              ],
+              "notes": "Lightweight SBOM generated from `gradlew :android:app-ui|:android:companion-sandbox:dependencies --configuration releaseRuntimeClasspath` + THIRD_PARTY_NOTICES.md. llama.cpp (MIT) is vendored (engines/llama-cpp/UPSTREAM.lock); Gemma GGUF model is downloaded per-device at runtime and is NOT packaged.",
+          }
+          with open("sbom/omnillm-sbom.json", "w", encoding="utf-8") as out:
+              json.dump(sbom, out, indent=2)
+          print(f"SBOM components: {len(sbom['components'])}")
+          PY
+
       - name: Upload release APK / AAB artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -246,6 +338,14 @@ jobs:
             android/app-ui/build/outputs/bundle/release/**/*.aab
             android/companion-sandbox/build/outputs/apk/release/**/*.apk
             android/companion-sandbox/build/outputs/bundle/release/**/*.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnillm-sbom-${{ github.ref_name }}-${{ github.sha }}
+          path: sbom/
           if-no-files-found: error
           retention-days: 30
 
