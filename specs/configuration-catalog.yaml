@@ -159,6 +159,81 @@ settings:
   allowedSources:
   - administrator-policy
   - product-default
+- key: product.researchModeEnabled
+  type: boolean
+  default: false
+  class: LOCAL_ADMIN
+  description: >
+    Research Mode: raw diagnostics + backend selection options. Fail-closed
+    by default — OFF unless an administrator explicitly enables it (FTR-03).
+  allowedSources:
+  - administrator-policy
+  - product-default
+  clampAllowed: false
+- key: product.riskyPerformanceModeEnabled
+  type: boolean
+  default: false
+  class: LOCAL_ADMIN
+  description: >
+    Risky Performance Mode: requires explicit per-use risk acknowledgment
+    (RiskAck) and enables the performance path. Fail-closed by default —
+    OFF unless an administrator explicitly enables it (FTR-03).
+  allowedSources:
+  - administrator-policy
+  - product-default
+  clampAllowed: false
+- key: resource.governorAnonMemoryCapBytes
+  type: integer
+  min: 1
+  default: 536870912
+  class: LOCAL_ADMIN
+  admissionBound: true
+  allowedSources:
+  - administrator-policy
+  - product-default
+  clampAllowed: true
+- key: resource.governorFileCacheCapBytes
+  type: integer
+  min: 1
+  default: 8589934592
+  class: LOCAL_ADMIN
+  admissionBound: true
+  allowedSources:
+  - administrator-policy
+  - product-default
+  clampAllowed: true
+- key: resource.governorThreadCap
+  type: integer
+  min: 1
+  default: 64
+  class: LOCAL_ADMIN
+  admissionBound: true
+  allowedSources:
+  - administrator-policy
+  - product-default
+  clampAllowed: true
+- key: resource.governorFdCap
+  type: integer
+  min: 1
+  default: 1024
+  class: LOCAL_ADMIN
+  admissionBound: true
+  allowedSources:
+  - administrator-policy
+  - product-default
+  clampAllowed: true
+- key: resource.probeDeadlineMs
+  type: integer
+  min: 1
+  default: 30000
+  class: LOCAL_ADMIN
+  description: >
+    Probe deadline in milliseconds. Note: monotonic clock wiring is pending;
+    current behavior retains the legacy deadline semantics.
+  allowedSources:
+  - administrator-policy
+  - product-default
+  clampAllowed: true
 invariants:
 - device-local settings cannot silently alter public wire semantics
 - resource-increasing changes require plan/reservation/commit
