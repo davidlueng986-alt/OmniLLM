@@ -17,7 +17,12 @@ android {
         versionCode = libs.versions.appVersionCode.get().toInt()
         versionName = libs.versions.appVersionName.get()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // Production ABI set (ANDROID-NATIVE / AbiPackaging.DEFAULT_ABIS).
+        // BLD-10 ABI strategy: ship arm64-v8a (all production devices) + x86_64
+        // (emulator/CI instrumentation). No 32-bit ABIs — native engines target
+        // 64-bit only, and omitting armeabi-v7a keeps the merged native payload
+        // (llama-cpp, litert, mlc, mllm, ort-genai) minimal for Play.
+        // AAB-level abi splits are enabled below (bundle.abi.enableSplit), so
+        // each device downloads only its own native library slice.
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
@@ -63,7 +68,7 @@ android {
             enableSplit = true
         }
         abi {
-            // ABI splits in AAB; abiFilters still constrain which ABIs are packaged.
+            // BLD-10: ABI splits in AAB; abiFilters still constrain which ABIs are packaged.
             enableSplit = true
         }
     }
