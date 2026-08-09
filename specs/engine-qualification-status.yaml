@@ -3,7 +3,10 @@ rule: A design may be BASELINE while every runtime cell remains UNQUALIFIED; onl
 engines:
 - engineId: llama.cpp
   designStatus: BASELINE
-  upstreamLockStatus: NOT_LOCKED
+  # FTR-04 (2026-08-09): engines/llama-cpp/UPSTREAM.lock is complete (lockState:
+  # LOCKED, pin note 2026-08-06). A complete supply-chain lock is NOT a SUPPORTED
+  # claim — runtime cells remain UNQUALIFIED.
+  upstreamLockStatus: LOCKED
   qualificationStatus: UNQUALIFIED
   registryExposure: UNKNOWN
   runtimeCapabilityDefault: UNKNOWN

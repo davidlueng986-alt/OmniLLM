@@ -74,3 +74,20 @@ evidenceStatusValues:
 - INVALIDATED
 defaultEvidenceStatus: NOT_EXECUTED
 defaultRuntimeCapability: UNKNOWN
+# Stage 2E extension (2026-08-09): engine agents publish integration progress
+# ahead of qualification evidence. All fields below are OPTIONAL on an engine
+# entry; absence means "not declared" (treat as NOT_INTEGRATED / no notes).
+#   integrationStatus:          NOT_INTEGRATED (no runtime binding; spec/design
+#                               only) | INTEGRATED (real runtime binding wired
+#                               and compiling — still never a SUPPORTED claim
+#                               while UNQUALIFIED) |
+#                               INTEGRATED_PENDING_QUALIFICATION (real binding
+#                               wired; device-verified inference evidence pending)
+#   integrationStatusDetail:    optional free-text note qualifying the status
+#   evidenceNotes:              optional list of free-text supply-chain /
+#                               integration evidence strings (never a SUPPORTED
+#                               projection by itself; see invariants)
+integrationStatusValues:
+- NOT_INTEGRATED
+- INTEGRATED
+- INTEGRATED_PENDING_QUALIFICATION
