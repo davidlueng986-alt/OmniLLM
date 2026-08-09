@@ -13,6 +13,14 @@ upstreamLockStatus: NOT_LOCKED
 qualificationStatus: UNQUALIFIED
 registryExposure: UNKNOWN
 runtimeCapabilityDefault: UNKNOWN
+# Stage 2E (2026-08-09): real runtime integration complete — StubRuntimeBackend
+# replaced by MlcEngineRuntimeBackend binding the official generated mlc4j
+# runtime (ai.mlc.mlcllm.MLCEngine) via MlcRuntimeBridge (pinned commit
+# 2f78caa4; see UPSTREAM.lock). Runtime code is REAL; no device-verified
+# inference ⇒ qualificationStatus stays UNQUALIFIED. Load requires a complete
+# lock (pinned artifact digests) — fail closed until human pin.
+integrationStatus: INTEGRATED
+integrationNotes: "Real mlc4j runtime binding (MlcRuntimeBridge + MlcEngineRuntimeBackend); PENDING_QUALIFICATION — no device inference evidence; model load gated on complete UPSTREAM.lock; stock runtime device=opencl"
 
 # Compiled model package (executable code + metadata + tokenizer + weights).
 formats:
@@ -25,15 +33,15 @@ backends:
   - id: cpu
     design: portable_candidate
     runtimeDefault: UNKNOWN
-    notes: "Pinned target/runtime only; never inherit from design prose"
+    notes: "Stock generated mlc4j does NOT ship a CPU target (device=opencl); no silent claims"
   - id: opencl
     design: accelerator_candidate
     runtimeDefault: UNKNOWN
-    notes: "Per device/driver/model/workload cell (ENGINE-MLC §3)"
+    notes: "Stock mlc4j device (Device.opencl()); per device/driver/model/workload cell (ENGINE-MLC §3)"
   - id: vulkan
     design: accelerator_candidate
     runtimeDefault: UNKNOWN
-    notes: "Per device/driver/model/workload cell; no silent CPU inheritance"
+    notes: "Not shipped by stock mlc4j; per device/driver/model/workload cell; no silent CPU inheritance"
 
 operations:
   - id: PROBE
@@ -102,7 +110,7 @@ phaseCancellation:
     expectedMode: COOPERATIVE
     measuredMode: UNKNOWN
     maxNonPreemptibleMs: null
-    notes: "Prefill/decode; GPU command may need worker kill when cancel unbounded"
+    notes: "Prefill/decode; cooperative cancel between stream deltas (mobile chat API has no abort); GPU command may need worker kill when cancel unbounded"
   - phase: CLOSE
     expectedMode: WORKER_KILL_ONLY
     measuredMode: UNKNOWN
@@ -260,6 +268,8 @@ unsupportedByDefault:
   - "Assuming old compiled artifact works with new runtime (ENGINE-MLC §9)"
   - "Silent ignore of unsupported chat/session/stream parameters"
   - "Offline compile inside ordinary inference request (must be Job)"
+  - "topK sampling (mobile chat API has no top_k — fail-closed UNSUPPORTED_PARAMETER)"
+  - "CPU/Vulkan execution claims on the stock opencl-only mlc4j runtime"
 
 resourceEnvelopeDimensions:
   - cpuFileBytes           # weights / packaged files

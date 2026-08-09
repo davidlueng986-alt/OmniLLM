@@ -34,6 +34,12 @@ object ParameterValidator {
         "generatedLibraryDigest",
         "runtimeArtifactDigest",
         "targetDigest",
+        // Broker-resolved compiled model bundle (real MLC runtime load)
+        "resolvedModelPath",
+        "modelLib",
+        // Optional UTF-8 prompt body + OpenAI-style stop sequences
+        "promptUtf8",
+        "stopSequences",
     )
 
     /**
@@ -102,6 +108,18 @@ object ParameterValidator {
                 ),
             )
         }
+        return OmniResult.ok(v)
+    }
+
+    fun parseOptionalFloat(attributes: Map<String, String>, key: String): OmniResult<Float?> {
+        val raw = attributes[key] ?: return OmniResult.ok(null)
+        val v = raw.toFloatOrNull()
+            ?: return OmniResult.err(
+                OmniError.INVALID_REQUEST(
+                    message = "invalid float for $key",
+                    details = mapOf("parameter" to key),
+                ),
+            )
         return OmniResult.ok(v)
     }
 }

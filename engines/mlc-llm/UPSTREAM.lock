@@ -1,4 +1,4 @@
-# OmniLLM Engine Pack — MLC-LLM UPSTREAM.lock (template)
+# OmniLLM Engine Pack — MLC-LLM UPSTREAM.lock
 # Authority: ENGINE-MLC §1, ENGINE-STANDARD §4
 #
 # Rules:
@@ -11,7 +11,21 @@
 # - Updating any lock field ⇒ new EngineBuildId; old evidence does not auto-carry.
 # - Compiler/runtime/generated artifact and dependencies keep separate license digests.
 #
-# Status of this file in-tree: NOT_LOCKED (template placeholders).
+# Pin note (2026-08-09, observed by mlc-engine-realizer):
+# - Distribution reality (verified from upstream docs + repo): MLC-LLM does NOT
+#   publish a Maven Central artifact or GitHub-release .aar for Android. The
+#   runtime ships as a generated Gradle subproject (dist/lib/mlc4j:
+#   libtvm4j_runtime_packed.so + tvm4j_core.jar + Kotlin ai.mlc.mlcllm.* API)
+#   produced per-app by `mlc_llm package` (Python toolchain + TVM compile).
+#   The Kotlin API surface pinned here is android/mlc4j/src/main/java/ai/mlc/mlcllm
+#   at the commit below (verified in-tree).
+# - sourceDigest = SHA-256 of the GitHub source tarball at the pinned commit
+#   (submodules excluded; TVM/relax submodule pinned separately via tvmCommit).
+# - This lock is intentionally NOT_LOCKED: compiler/generated/artifact/toolchain
+#   digests require a real `mlc_llm package` build (NDK + Rust + TVM) and are
+#   human-pin work. Until then the real backend refuses model load (fail closed).
+#
+# Status of this file in-tree: NOT_LOCKED (upstream pin complete; build digests pending).
 
 schemaVersion: 1
 engineId: MLC-LLM
@@ -20,18 +34,18 @@ lockState: NOT_LOCKED
 upstream:
   # Official repository (discovery / license source)
   repository: "https://github.com/mlc-ai/mlc-llm"
-  # Exact tag and/or full commit SHA (both preferred when available)
+  # No stable release tag carries the pinned mlc4j API; pinned main commit (2026-07-31)
   tag: ""
-  commit: ""
-  # SHA-256 of the pinned MLC-LLM source tree (tarball or git archive)
-  sourceDigest: ""
-  # TVM / Apache TVM commit used by this MLC pin (ENGINE-MLC §1 required lock)
-  tvmCommit: ""
+  commit: "2f78caa4db0f90730a11ee3bb5cbd5f23bf67f9f"
+  # SHA-256 of GitHub tarball at commit 2f78caa4 (submodules excluded) — captured 2026-08-09
+  sourceDigest: "2cff502f786092ba3dcbabe7f01a6bd37743e15d7ecb9308ad405ec5a7def147"
+  # mlc-ai/relax (3rdparty/tvm) submodule commit at that mlc-llm commit — captured 2026-08-09
+  tvmCommit: "837cb9de1127b48ce48e4cefe09e83215b9d4ba7"
   tvmSourceDigest: ""
   # SHA-256 of OmniLLM patch set applied on top of upstream (empty if none)
   patchDigest: ""
-  # When the lock fields above were observed (ISO-8601 UTC). Empty until locked.
-  observedAt: ""
+  # When the lock pin fields above were observed (ISO-8601 UTC)
+  observedAt: "2026-08-09T00:00:00Z"
 
 compiler:
   # Opaque digest of compiler config (target, opt level, dtype policy, …)
@@ -50,14 +64,17 @@ license:
   # SPDX or short name recorded at qualification time (runtime/compiler may differ)
   spdx: "Apache-2.0"
   licensePath: "LICENSE"
+  # SHA-256 of LICENSE bytes at the pinned commit — captured 2026-08-09
+  licenseDigest: "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
   # Separate digests for compiler / runtime / generated / dependencies (ENGINE-MLC §1)
-  licenseDigest: ""
   noticeDigest: ""
   dependencyReportDigest: ""
   generatedArtifactLicenseDigest: ""
 
 toolchain:
-  # Must match product ANDROID-NATIVE / platform-policy locks when building for Android
+  # Must match product ANDROID-NATIVE / platform-policy locks when building for Android.
+  # mlc4j upstream build.gradle: minSdk 22, compileSdk 34; docs build with NDK 27.
+  # Product baseline is NDK 28.2.13676358 — re-capture after an actual mlc4j build.
   ndkVersion: "28.2.13676358"
   cmakeVersion: "3.22.1"
   # Opaque digest of the full toolchain fingerprint (NDK+CMake+host+flags template)
@@ -68,12 +85,14 @@ toolchain:
 build:
   buildFlags: ""
   # ABIs included in this build (Android: arm64-v8a, x86_64, …)
-  abis: []
-  # Page-size / 16 KB packaging evidence pointer (digest or evidence id)
-  pageSizeEvidence: ""
+  abis: ["arm64-v8a"]
+  # Page-size / 16 KB packaging evidence pointer (digest or evidence id).
+  # PENDING: stock mlc4j (NDK 27 era) has no published 16 KB alignment claim;
+  # Stage-5 instrumentation must measure libtvm4j_runtime_packed.so ELF segments.
+  pageSizeEvidence: "PENDING — instrumented ELF scan on device build (see notes)"
   features:
-    cpu: true
-    opencl: false
+    cpu: false
+    opencl: true
     vulkan: false
     # Multimodal / vision / structured are unsupported-by-default until cell qualification
     multimodal: false
@@ -85,23 +104,30 @@ artifact:
   engineBuildId: ""
   # SHA-256 of packaged runtime + generated module artifacts
   artifactDigest: ""
-  # Runtime-only artifact (MLCEngine runtime library) when split from generated model lib
+  # Runtime-only artifact (MLCEngine runtime library) when split from generated model lib.
+  # Requires an actual mlc4j build (libtvm4j_runtime_packed.so) — human pin.
   runtimeArtifactDigest: ""
   symbolIndexDigest: ""
 
 testedProfile:
   # Labels only — evidence lives in EngineRegistry cells, not this lock alone
   platform: "android"
-  # Design candidates only; runtime remains UNKNOWN until per-device cells PASS
+  # Design candidates only; runtime remains UNKNOWN until per-device cells PASS.
+  # Stock generated mlc4j initializes the OpenCL device (Device.opencl()).
   backends: ["cpu", "opencl", "vulkan"]
   # Compiled model package (not a plain weight-only format)
   formats: ["mlc-model-lib"]
   profileId: ""
 
 notes:
-  integrationShape: "compiler + generated model library + runtime adapter (ENGINE-MLC §2)"
+  integrationShape: "generated mlc4j runtime binding + compiler + generated model library adapter (ENGINE-MLC §2)"
+  distribution: "No Maven/GitHub-release AAR. Runtime generated per-app by `mlc_llm package` (dist/lib/mlc4j); app must include that module — see README provisioning guide"
+  binding: "MlcRuntimeBridge binds ai.mlc.mlcllm.MLCEngine reflectively against the pinned API surface; fails closed when absent"
+  modelBundle: "Real inference needs a compiled model bundle: mlc-chat-config.json + weights + compiled lib (HF mlc-ai/*-MLC repos, e.g. Phi-3-mini / TinyLlama q4f16_1, ~0.7-2.3 GB)"
+  deviceSelection: "Stock mlc4j hardcodes Device.opencl(); cpu/vulkan targets not shipped by the generated runtime — no silent claims"
+  page16kb: "16 KB page-size alignment of libtvm4j_runtime_packed.so must be measured on the packaged build (Play 16 KB requirement, 2026)"
   lockEligibility: "NOT_QUALIFIED_UNTIL_UPSTREAM_LOCK"
   placementHint: "Untrusted generated code ⇒ different package/UID companion (ADR-007); isolated data-only worker is insufficient"
-  failClosed: "Incomplete lock ⇒ Registry exposure UNKNOWN; dry-load never elevates trust (INV-008)"
-  knownLimitations: "Unpinned backends UNKNOWN; GPU mem/cancel OEM-specific; prefix/embed/multimodal per-cell only"
-  humanPinChecklist: "Fill upstream tag/commit+sourceDigest+tvmCommit, compiler digests, generatedLibraryDigest, runtimeArtifactDigest, toolchainDigest, abis, engineBuildId, observedAt, licenseDigest — see README"
+  failClosed: "Incomplete lock ⇒ Registry exposure UNKNOWN; real backend refuses model load without pinned artifact digests; dry-load never elevates trust (INV-008)"
+  knownLimitations: "Unpinned backends UNKNOWN; topK not exposed by mobile chat API (fail-closed UNSUPPORTED_PARAMETER); GPU mem/cancel OEM-specific; prefix/embed/multimodal per-cell only"
+  humanPinChecklist: "Run `mlc_llm package` (or prepare_libs.py) for a pinned runtime: capture runtimeArtifactDigest + artifactDigest + toolchainDigest + generatedLibraryDigest per compiled model + pageSizeEvidence; then set engineBuildId + lockState: LOCKED"

@@ -6,10 +6,11 @@
 | **Design authority** | `ENGINE-MLC` (`docs/80-engines/mlc-llm.md`) |
 | **Integration standard** | `ENGINE-STANDARD` (`docs/80-engines/engine-integration-standard.md`) |
 | **designStatus** | `BASELINE` (design-complete) |
-| **upstreamLockStatus** | `NOT_LOCKED` (template placeholders only) |
+| **upstreamLockStatus** | `NOT_LOCKED` (upstream pin 2f78caa4 + TVM pin captured; build digests pending) |
 | **qualificationStatus** | `UNQUALIFIED` |
 | **registryExposure** | `UNKNOWN` |
 | **runtimeCapabilityDefault** | `UNKNOWN` |
+| **integrationStatus** | `INTEGRATED` (real mlc4j runtime binding; `PENDING_QUALIFICATION` — no device inference evidence yet) |
 
 > **Hard rule:** Design completion is **not** runtime support.  
 > Registry may project `SUPPORTED` only for cells with  
@@ -18,13 +19,21 @@
 
 ## Purpose
 
-Software-complete **compiler + generated model library + runtime** adapter scaffold
-that maps OmniLLM `OmniEngine` / `LoadedModelPort` onto MLC-LLM’s offline compile
-pipeline and on-device `MLCEngine` / chat stream surface.
+Software-complete **compiler + generated model library + runtime** adapter
+that maps OmniLLM `OmniEngine` / `LoadedModelPort` onto MLC-LLM’s offline
+compile pipeline and on-device `MLCEngine` / chat stream surface.
 
-Default execute path is **explicit `CAPABILITY_UNKNOWN`** via
-`StubRuntimeBackend(exploratoryDryRun = false)`. Exploratory dry-run is test-only
-and **never** elevates Registry cells or model trust (INV-008).
+Stage 2E (2026-08-09) replaced the exploratory stub with a **real runtime
+integration**: `MlcEngineRuntimeBackend` + `MlcRuntimeBridge` bind the official
+generated Android runtime (`ai.mlc.mlcllm.MLCEngine`, produced per-app by
+`mlc_llm package`). Host JVM tests exercise the full binding path against a
+faithful test double of the pinned API.
+
+Production attach is `MlcLlmModule.createEngineWithRuntimeOrNull()` — it
+**fail-closes** (returns null) when the mlc4j runtime is not on the classpath.
+`StubRuntimeBackend` remains **unit-test only** and is never substituted
+silently. Model load additionally fail-closes until `UPSTREAM.lock` is complete
+(pinned artifact digests) — no fake inference on unpinned artifacts.
 
 ## Integration shape (ENGINE-MLC §2)
 
@@ -50,17 +59,17 @@ and **never** elevates Registry cells or model trust (INV-008).
 ```text
 engines/mlc-llm/
   README.md                 # this file + human pin / native integration guide
-  UPSTREAM.lock             # lock template (NOT_LOCKED) — complete fields for human pin
+  UPSTREAM.lock             # upstream pin (2f78caa4 + TVM 837cb9de) captured; build digests pending
   capability-matrix.yaml    # design matrix + UNQUALIFIED cell placeholders
   build.gradle.kts
   src/main/kotlin/com/omnillm/engines/mlcllm/
-    MlcLlmModule.kt         # factory + EngineRegistry registration
+    MlcLlmModule.kt         # factory + EngineRegistry registration (+ createEngineWithRuntimeOrNull)
     MlcLlmEngine.kt         # OmniEngine adapter (Plan pure; execute via RuntimeBackend)
     MlcLlmLoadedModelPort.kt
     QualificationCells.kt   # UNQUALIFIED cell seed helpers
     lock/UpstreamLock.kt    # parse + isComplete() gate
     mapping/                # errors, phase cancel, parameters, event normalizer
-    runtime/                # RuntimeBackend SPI + fail-closed StubRuntimeBackend
+    runtime/                # RuntimeBackend SPI + real MlcEngineRuntimeBackend + bridge
     resource/               # ResourceEnvelope estimator (advisory Plan only)
 ```
 
@@ -68,13 +77,13 @@ engines/mlc-llm/
 
 | OmniLLM phase | MLC mapping (design) | Scaffold runtime |
 |---|---|---|
-| PROBE | package / target / runtime compatibility | Plan pure; execute → backend (`UNKNOWN` default) |
-| LOAD | runtime + generated module load | Plan pure; commit → backend; missing native ≠ success |
-| PLAN_INFERENCE | no KV mutation (ADR-002) | Pure envelope + digests |
-| COMMIT_INFERENCE | chat/session create, prompt prep | One-shot commit journal; session opaque token |
-| START / GENERATE | stream generation callbacks | EventNormalizer → catalog events; terminal unique |
+| PROBE | package / target / runtime compatibility | Plan pure; execute → real backend: runtime presence + honest backend availability (opencl shipped, cpu/vulkan not) |
+| LOAD | runtime + generated module load | Plan pure; commit → real backend: model dir + mlc-chat-config.json verified, `reload(modelPath, modelLib)`; **fail-closed until complete lock** |
+| PLAN_INFERENCE | no KV mutation (ADR-002) | Pure envelope + digests; sampling params (maxTokens/temp/topP/promptUtf8/stop) captured |
+| COMMIT_INFERENCE | chat/session create, prompt prep | One-shot commit journal; session = adapter-side message journal (MLC chat API is stateless per request) |
+| START / GENERATE | stream generation callbacks | `chat.completions.create` stream → delta/usage/stop events; cooperative cancel between deltas |
 | EMBED | pinned API only | Always `CAPABILITY_UNKNOWN` until cell PASS |
-| CLOSE / UNLOAD | session / module release | Best-effort; worker death invalidates tokens |
+| CLOSE / UNLOAD | session / module release | Best-effort; `unload()` on last model release |
 
 ## Phase cancellation (ENGINE-MLC §5)
 
@@ -84,7 +93,7 @@ engines/mlc-llm/
 | LOAD | WORKER_KILL_ONLY | UNKNOWN |
 | CREATE_SESSION / PLAN / COMMIT | COOPERATIVE | UNKNOWN |
 | START | INTERRUPTIBLE | UNKNOWN |
-| GENERATE | COOPERATIVE | UNKNOWN |
+| GENERATE | COOPERATIVE | UNKNOWN — real backend polls between stream deltas (mobile API has no abort) |
 | CLOSE / UNLOAD | WORKER_KILL_ONLY | UNKNOWN |
 
 UNKNOWN cancellation ⇒ full LoadedModel lifecycle on killable worker only.
@@ -164,7 +173,7 @@ val registry = EngineRegistry()
 val reg = MlcLlmModule.registerWith(registry, seedPlaceholderCells = false)
 MlcLlmModule.seedUnqualifiedPlaceholders(registry, deviceFingerprint, reg.engineBuildId)
 // reg.designStatus == "BASELINE"
-// reg.upstreamLocked == false (template lock)
+// reg.upstreamLocked == false (lock not complete)
 // cells: UNQUALIFIED + evidence NOT_EXECUTED → project UNKNOWN
 // never SUPPORTED without QUALIFIED_WITH_ENVELOPE + PASS
 ```
@@ -173,7 +182,7 @@ Unit / architecture wiring (not production attach):
 
 ```kotlin
 val engine = MlcLlmModule.createEngine(
-    backend = StubRuntimeBackend(exploratoryDryRun = false), // default: UNKNOWN execute
+    backend = StubRuntimeBackend(exploratoryDryRun = false), // host tests only
 )
 // Exploratory plumbing tests only:
 val dry = MlcLlmModule.createEngine(
@@ -181,31 +190,75 @@ val dry = MlcLlmModule.createEngine(
 )
 ```
 
-## Native / SDK integration guide (when human pins real artifacts)
+Production attach (real runtime — fails closed when mlc4j is absent):
 
-Real MLC Android SDK / runtime is **not** vendored in this monorepo. Complete the
-interfaces and wire a real backend as follows:
+```kotlin
+val engine = MlcLlmModule.createEngineWithRuntimeOrNull()  // null ⇒ no runtime
+```
 
-1. **Pin** complete `UPSTREAM.lock` (checklist above) and publish a new `EngineBuildId`.
-2. **Package** runtime + generated model libs under `:android:native` with NDK r28+
-   16 KB page-size alignment evidence; ABIs must match the lock.
-3. **Implement** `RuntimeBackend` (e.g. `JniMlcRuntimeBackend`) that:
-   - Loads only after privileged re-verify ticket + digest match
-   - Returns opaque tokens (never raw `jlong` pointers across process)
-   - Maps stream callbacks through `EventNormalizer`
-   - Maps driver/worker death to `NativeErrorCode.DRIVER_CRASH` / `WORKER_CRASH`
-   - On missing `.so` / ABI mismatch: return `NOT_AVAILABLE` / `UNKNOWN_CAPABILITY`
-     — **never** treat missing natives as success
-4. **Placement**: untrusted generated code → different package/UID companion
-   (`EXTERNAL_UID_ACCELERATED`). If companion lacks GPU, combination is
-   **unsupported** (no same-UID fallback).
-5. **Offline compile** of models is a **Job** (job-manager), never an implicit
-   inference request attribute (`offlineCompile` is unsupported-by-default).
-6. **Qualify** per backend × device × driver × model × workload cell with
+## Runtime integration (Stage 2E) — what is real vs pending
+
+**Real (in-tree, compiled + host-tested):**
+
+- `runtime/MlcRuntimeBridge.kt` — reflective binding to the official
+  `ai.mlc.mlcllm` Kotlin API (pinned commit 2f78caa4; strict load-time API
+  verification; fail-closed). Handles suspend `chat.completions.create` via a
+  continuation bridge and drains the streaming `ReceiveChannel`.
+- `runtime/MlcEngineRuntimeBackend.kt` — full `RuntimeBackend` implementation:
+  honest probe (opencl shipped by stock mlc4j; cpu/vulkan not), model-bundle
+  validation (`mlc-chat-config.json` + weights), `reload(modelPath, modelLib)`,
+  session journal with multi-turn replay, streaming deltas → `TOKEN_DELTA`
+  (SHA-256 of real delta text) + `USAGE` + `STOP`, cooperative cancellation,
+  error mapping (`MODEL_OPEN_FAILED`, `MODULE_LOAD_FAILED`, `CANCELLED`, …).
+- `MlcLlmModule.createEngineWithRuntimeOrNull()` production factory.
+- Sampling params (maxTokens / temperature / topP / promptUtf8 / stopSequences)
+  flow from request attributes through the port to the real backend.
+- Host tests (19) bind the bridge against a faithful test double of the pinned
+  API under `src/test/kotlin/ai/mlc/mlcllm/` (the real mlc4j artifact is
+  Android-only and generated per-app, so it cannot be a JVM test dependency).
+
+**Pending (Stage 5/6 — human/device work, honestly gated):**
+
+1. `UPSTREAM.lock` is `NOT_LOCKED`: upstream + TVM pins and source/license
+   digests are captured, but compiler/generated/toolchain/artifact digests
+   require an actual `mlc_llm package` build. Until then the real backend
+   **refuses model load** (`MODULE_LOAD_FAILED`).
+2. The generated mlc4j module (`libtvm4j_runtime_packed.so` + `tvm4j_core.jar`
+   + Kotlin API) must be produced by upstream tooling and included in the app —
+   no Maven/GitHub-release `.aar` exists (verified 2026-08-09).
+3. A compiled model bundle is required (e.g. HF `mlc-ai/TinyLlama-1.1B-Chat-v1.0-q4f16_1-MLC`
+   or `mlc-ai/Phi-3-mini-4k-instruct-q4f16_1-MLC`, ~0.7–2.3 GB).
+4. 16 KB page-size alignment of `libtvm4j_runtime_packed.so` must be measured
+   (Play requirement; upstream publishes no claim).
+5. Device/GPU inference + cancellation + resource-peak evidence → qualification
+   cells (`UNQUALIFIED` today).
+
+## Native / SDK integration guide (human pin steps)
+
+The real MLC Android runtime is **not** vendored in this monorepo and not
+published as an artifact; it is generated per-app. To go from `INTEGRATED`
+(now) to `PENDING_QUALIFICATION` → evidence:
+
+1. **Build the runtime**: clone mlc-llm at commit `2f78caa4` (see
+   `UPSTREAM.lock`), set up `ANDROID_NDK` / `TVM_NDK_CC` / `JAVA_HOME`, run
+   `mlc_llm package` (or `android/mlc4j/prepare_libs.py`) to produce
+   `dist/lib/mlc4j` (`libtvm4j_runtime_packed.so` + `tvm4j_core.jar` + Kotlin API).
+2. **Provision the model bundle**: compiled model directory (`mlc-chat-config.json`
+   + weights) from a HF `mlc-ai/*-MLC` repo (e.g. TinyLlama/Phi-3 q4f16_1),
+   and a compiled model library per backend.
+3. **Pin the lock**: capture `runtimeArtifactDigest` (the built
+   `libtvm4j_runtime_packed.so`), `artifactDigest`, `toolchainDigest`,
+   per-model `generatedLibraryDigest`, `pageSizeEvidence` (16 KB ELF scan) and
+   set `engineBuildId` + `lockState: LOCKED`. New `EngineBuildId` ⇒ re-pin.
+4. **Attach in the app**: include the generated mlc4j module in the APK
+   classpath (app-level dependency), then use
+   `MlcLlmModule.createEngineWithRuntimeOrNull()` — the bridge verifies the
+   pinned API surface and fail-closes on mismatch.
+5. **Qualify** per backend × device × driver × model × workload cell with
    measured cancellation + resource peaks; put `QUALIFIED_WITH_ENVELOPE` + `PASS`
-   only with real evidence packs.
-7. **EngineSelectionPolicy**: peer engines (including MLC-LLM) stay stub/UNKNOWN
-   until policy + evidence allow real native attach.
+   only with real evidence packs (device matrix is out of software scope).
+6. **EngineSelectionPolicy**: peer engines stay UNKNOWN until policy + evidence
+   allow real native attach.
 
 ## Known limitations / unsupported-by-default (ENGINE-MLC §10)
 
@@ -216,6 +269,8 @@ interfaces and wire a real backend as follows:
 5. Old compiled artifacts are not assumed compatible with a new runtime (ENGINE-MLC §9).
 6. Dry-load / exploratory stub **never** elevates model trust (INV-008).
 7. No silent cross-revision or cross-backend evidence inheritance.
+8. `topK` sampling is fail-closed `UNSUPPORTED_PARAMETER` (mobile chat API has no `top_k`).
+9. Stock generated mlc4j ships OpenCL only — CPU/Vulkan execution is not claimed.
 
 ## Hard adapter rules (ENGINE-STANDARD §3)
 
@@ -228,6 +283,7 @@ Adapters must **not**:
 - claim global support from a single device cell
 - mutate KV / load large resources during Plan (ADR-002)
 - claim `SUPPORTED` without QUALIFIED_WITH_ENVELOPE + PASS
+- substitute the unit-test stub for the real backend silently (INV-018)
 
 ## Tests
 
@@ -237,21 +293,29 @@ Adapters must **not**:
 
 Coverage includes:
 
-- Default stub → `CAPABILITY_UNKNOWN` on probe/load/start/embed
+- Default stub → `CAPABILITY_UNKNOWN` on probe/load/start/embed (host tests)
 - Exploratory CPU Plan→Commit→Start→Close→Unload plumbing
 - Accelerator backends remain UNKNOWN even in exploratory mode
 - Mapping (errors, sanitize, events, phase cancel, params)
 - Resource envelopes (CPU/GPU separation, conservative placeholders)
 - Upstream lock completeness + parse
 - Registry seed projects UNKNOWN, never SUPPORTED
+- **Real backend (19 tests)**: runtime binding against the pinned API test
+  double — honest probe, digest-gated load, model-bundle validation, streaming
+  deltas with real SHA-256 payload digests, usage/stop events, cooperative
+  cancel, multi-turn journal, path-leak-free errors, lifecycle release
+- Instrumented on-device inference (real mlc4j + compiled model) is a Stage-5
+  concern — not executable on the host JVM
 
 ## Remaining human-only work
 
-- [ ] Pin complete `UPSTREAM.lock` (MLC + TVM + digests + observedAt)
-- [ ] Real `RuntimeBackend` (JNI / official Android MLCEngine binding)
-- [ ] 16 KB page-size packaging evidence via `:android:native`
+- [x] Replace stub with real runtime binding (Stage 2E)
+- [ ] Build `mlc4j` from the pinned commit (NDK + Rust + TVM toolchain) — no
+      prebuilt `.aar` exists upstream
+- [ ] Provision a compiled model bundle (HF `mlc-ai/*-MLC`, e.g. TinyLlama/Phi-3 q4f16_1)
+- [ ] Complete `UPSTREAM.lock` (runtime/generated/toolchain digests + 16 KB evidence)
+- [ ] 16 KB page-size packaging evidence (ELF scan of `libtvm4j_runtime_packed.so`)
 - [ ] Per-backend/device/driver/model/workload qualification cells with PASS evidence
-- [ ] Compiler reproducibility + code-signing supply-chain evidence pack
 - [ ] Measured phase cancellation + resource peaks
 - [ ] Companion GPU path for untrusted accelerated inference (ADR-007)
 - [ ] Physical device / OEM matrix (out of software scaffold scope)

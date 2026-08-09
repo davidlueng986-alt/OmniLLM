@@ -32,6 +32,12 @@ engines:
   qualificationStatus: UNQUALIFIED
   registryExposure: UNKNOWN
   runtimeCapabilityDefault: UNKNOWN
+  # Stage 2E (2026-08-09): real runtime integration (MlcEngineRuntimeBackend +
+  # MlcRuntimeBridge binding the generated mlc4j runtime, pin 2f78caa4).
+  # INTEGRATED = code-complete real binding; PENDING_QUALIFICATION = no
+  # device-verified inference evidence yet (needs mlc4j build + device matrix).
+  integrationStatus: INTEGRATED
+  integrationStatusDetail: "PENDING_QUALIFICATION — real binding, no device evidence; model load fail-closed until complete UPSTREAM.lock (NOT_LOCKED)"
 - engineId: mllm
   designStatus: BASELINE
   # Stage 2E (2026-08-09): UPSTREAM.lock pinned to mllm 2.0.0 (commit c67485a3,

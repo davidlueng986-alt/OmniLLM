@@ -8,6 +8,7 @@ import com.omnillm.engines.api.EngineRegistration
 import com.omnillm.engines.api.EngineRegistry
 import com.omnillm.engines.mlcllm.lock.UpstreamLock
 import com.omnillm.engines.mlcllm.lock.UpstreamLockLoader
+import com.omnillm.engines.mlcllm.runtime.MlcEngineRuntimeBackend
 import com.omnillm.engines.mlcllm.runtime.RuntimeBackend
 import com.omnillm.engines.mlcllm.runtime.StubRuntimeBackend
 
@@ -23,7 +24,8 @@ import com.omnillm.engines.mlcllm.runtime.StubRuntimeBackend
  * - Plan has no domain mutation (ADR-002)
  * - Incomplete UPSTREAM.lock ⇒ exploratory only; Registry stays UNKNOWN
  * - designStatus BASELINE ≠ runtime SUPPORTED (ENGINE-QUALIFICATION-STATUS)
- * - Default [StubRuntimeBackend] returns CAPABILITY_UNKNOWN on execute
+ * - Production uses [MlcEngineRuntimeBackend]; [StubRuntimeBackend] is for unit
+ *   tests only (fail closed — never substitute a stub silently, INV-018).
  */
 object MlcLlmModule {
     const val MODULE_PATH: String = ":engines:mlc-llm"
@@ -40,9 +42,10 @@ object MlcLlmModule {
 
     /**
      * Factory for the Kotlin adapter. Default [RuntimeBackend] is [StubRuntimeBackend]
-     * with exploratory dry-run **off** (unproven ops → CAPABILITY_UNKNOWN).
+     * with exploratory dry-run **off** (unproven ops → CAPABILITY_UNKNOWN) — host
+     * tests only. Production must call [createEngineWithRuntimeOrNull].
      *
-     * Production [com.omnillm.android.runtimeservice.controlplane.EnginePackAttachment]
+     * [com.omnillm.android.runtimeservice.controlplane.EnginePackAttachment]
      * registers metadata only and does **not** attach a live exploratory engine.
      */
     fun createEngine(
@@ -58,6 +61,28 @@ object MlcLlmModule {
             runtime = backend,
             measuredPhaseCancellation = measuredPhaseCancellation,
         )
+
+    /**
+     * Production factory: binds the official generated MLC-LLM Android runtime
+     * (`ai.mlc.mlcllm.MLCEngine` from `mlc_llm package`; see [MlcRuntimeBridge]).
+     * Returns null when the runtime is absent from the classpath or the pinned
+     * API surface mismatches — **fail closed** (do not substitute
+     * [StubRuntimeBackend]).
+     */
+    fun createEngineWithRuntimeOrNull(
+        lock: UpstreamLock = UpstreamLockLoader.loadFromClasspathOrTemplate(),
+        engineBuildId: EngineBuildId = lock.resolvedEngineBuildId()
+            ?: defaultEngineBuildId(),
+        measuredPhaseCancellation: Map<String, String> = emptyMap(),
+    ): MlcLlmEngine? {
+        val backend = MlcEngineRuntimeBackend.createOrNull() ?: return null
+        return createEngine(
+            lock = lock,
+            backend = backend,
+            engineBuildId = engineBuildId,
+            measuredPhaseCancellation = measuredPhaseCancellation,
+        )
+    }
 
     /**
      * Register build metadata with [EngineRegistry]. Does **not** mark any cell

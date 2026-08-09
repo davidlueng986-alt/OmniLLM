@@ -160,6 +160,13 @@ data class NativeGenerateRequest(
     val topP: Float? = null,
     val topK: Int? = null,
     val stopSequenceCount: Int = 0,
+    /**
+     * Actual UTF-8 prompt body. Required by the real MLC runtime backend:
+     * `chat.completions.create` needs the message text, not only a digest.
+     */
+    val promptUtf8: String? = null,
+    /** Optional explicit stop sequences (OpenAI-style `stop` list). */
+    val stopSequences: List<String>? = null,
     val attributes: Map<String, String> = emptyMap(),
 ) {
     init {

@@ -16,6 +16,12 @@ dependencies {
     implementation(libs.kotlin.stdlib)
     api(libs.kotlinx.coroutines.core)
 
+    // NOTE (Stage 2E): MLC-LLM ships NO Maven Central / GitHub-release .aar for
+    // Android (verified 2026-08-09). The runtime (ai.mlc.mlcllm.* + libtvm4j_runtime_packed.so)
+    // is generated per-app by upstream `mlc_llm package` (dist/lib/mlc4j) and must be
+    // added at the app level; this module binds it reflectively via MlcRuntimeBridge
+    // and fail-closes when absent — no dependency to declare here, no silent stub.
+
     // Engine SPI (CORE-ENGINE / ENGINE-STANDARD)
     api(project(":engines:api"))
 

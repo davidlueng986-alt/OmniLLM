@@ -54,6 +54,7 @@ class MlcLlmLoadedModelPort(
 
     private val sessions = ConcurrentHashMap<String, SessionRecord>()
     private val startedOps = ConcurrentHashMap<String, OperationHandle>()
+    private val planParams = ConcurrentHashMap<String, PlanParams>()
     private val prepSeq = AtomicInteger(0)
     private val sessionSeq = AtomicInteger(0)
     private val unloaded = AtomicBoolean(false)
@@ -104,6 +105,39 @@ class MlcLlmLoadedModelPort(
             is OmniResult.Ok -> p.value
             is OmniResult.Err -> return p
         }
+        val temperature = when (
+            val p = ParameterValidator.parseOptionalFloat(input.attributes, "temperature")
+        ) {
+            is OmniResult.Ok -> p.value
+            is OmniResult.Err -> return p
+        }
+        val topP = when (
+            val p = ParameterValidator.parseOptionalFloat(input.attributes, "topP")
+        ) {
+            is OmniResult.Ok -> p.value
+            is OmniResult.Err -> return p
+        }
+        val topK = when (
+            val p = parseOptionalInt(input.attributes, "topK")
+        ) {
+            is OmniResult.Ok -> p.value
+            is OmniResult.Err -> return p
+        }
+        // Real runtime needs the prompt body, not only a digest (ENGINE-MLC §4).
+        val promptUtf8 = input.attributes["promptUtf8"]
+        val stopSequences = input.attributes["stopSequences"]
+            ?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?.takeIf { it.isNotEmpty() }
+        planParams[input.requestId.value] = PlanParams(
+            maxTokens = maxTokens,
+            temperature = temperature,
+            topP = topP,
+            topK = topK,
+            promptUtf8 = promptUtf8,
+            stopSequences = stopSequences,
+        )
 
         val envelope = ResourceEnvelopeEstimator.estimateInference(
             ResourceEnvelopeEstimator.EstimateInput(
@@ -188,9 +222,11 @@ class MlcLlmLoadedModelPort(
             "mlc-session-${sessionSeq.incrementAndGet()}",
         )
         val epoch = plan.sourceSessionEpoch ?: 0L
+        val params = planParams.remove(plan.requestId.value)
         sessions[sessionId.value] = SessionRecord(
             epoch = epoch,
             nativeToken = sessionToken,
+            params = params,
         )
 
         val prepared = PreparedOperation(
@@ -262,7 +298,13 @@ class MlcLlmLoadedModelPort(
         val genReq = NativeGenerateRequest(
             operationToken = op.operationId,
             promptDigestHex = prepared.canonicalInputDigest.hex,
-            maxTokens = 16,
+            maxTokens = session.params?.maxTokens ?: 16,
+            temperature = session.params?.temperature,
+            topP = session.params?.topP,
+            topK = session.params?.topK,
+            stopSequenceCount = session.params?.stopSequences?.size ?: 0,
+            promptUtf8 = session.params?.promptUtf8,
+            stopSequences = session.params?.stopSequences,
         )
         val genResult = engine.runtime.generate(
             session = session.nativeToken,
@@ -444,6 +486,7 @@ class MlcLlmLoadedModelPort(
         sessions.keys.toList().forEach { sid ->
             sessions.remove(sid)?.let { engine.runtime.closeSession(it.nativeToken) }
         }
+        planParams.clear()
         engine.runtime.unloadModel(bound.modelToken)
         engine.removeLoaded(loadedModelId)
         return OmniResult.ok(
@@ -458,8 +501,42 @@ class MlcLlmLoadedModelPort(
     override suspend fun queryCommit(commitId: CommitId): OmniResult<CommitQueryState> =
         engine.queryCommit(commitId)
 
+    /** Sampling + prompt parameters captured at plan time (one-shot per request). */
+    private data class PlanParams(
+        val maxTokens: Int,
+        val temperature: Float?,
+        val topP: Float?,
+        val topK: Int?,
+        val promptUtf8: String?,
+        val stopSequences: List<String>?,
+    )
+
+    private fun parseOptionalInt(
+        attributes: Map<String, String>,
+        key: String,
+    ): OmniResult<Int?> {
+        val raw = attributes[key] ?: return OmniResult.ok(null)
+        val v = raw.toIntOrNull()
+            ?: return OmniResult.err(
+                OmniError.INVALID_REQUEST(
+                    message = "invalid integer for $key",
+                    details = mapOf("parameter" to key),
+                ),
+            )
+        if (v <= 0) {
+            return OmniResult.err(
+                OmniError.INVALID_REQUEST(
+                    message = "$key must be positive",
+                    details = mapOf("parameter" to key),
+                ),
+            )
+        }
+        return OmniResult.ok(v)
+    }
+
     private data class SessionRecord(
         val epoch: Long,
         val nativeToken: NativeSessionToken,
+        val params: PlanParams?,
     )
 }
