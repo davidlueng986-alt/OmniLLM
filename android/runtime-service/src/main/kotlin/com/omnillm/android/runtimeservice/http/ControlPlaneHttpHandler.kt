@@ -1,7 +1,10 @@
 package com.omnillm.android.runtimeservice.http
 
+import com.omnillm.core.canonical.generated.AccessProfile
+import com.omnillm.core.canonical.generated.AccessScope
 import com.omnillm.core.canonical.generated.ModelRevisionId
 import com.omnillm.core.canonical.generated.OmniResult
+import com.omnillm.core.canonical.generated.PrincipalKind
 import com.omnillm.core.canonical.generated.Sha256Digest
 import com.omnillm.core.contracts.CommandId
 import com.omnillm.core.contracts.IdempotencyKey
@@ -79,6 +82,7 @@ import com.omnillm.runtime.job.JobRecord
 import com.omnillm.runtime.orchestrator.Orchestrator
 import com.omnillm.runtime.policy.PolicyManager
 import com.omnillm.runtime.policy.SettingValue
+import com.omnillm.runtime.policy.acl.AccessControlEnforcer
 import com.omnillm.runtime.requestregistry.ClaimOutcome
 import com.omnillm.runtime.requestregistry.CommandLedger
 import com.omnillm.runtime.requestregistry.RequestRegistry
@@ -100,6 +104,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.security.MessageDigest
 import java.time.Instant
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -120,9 +125,16 @@ class ControlPlaneHttpHandler(
     private val resourceVersion: () -> Long,
     private val requestRegistry: RequestRegistry,
     private val commandLedger: CommandLedger,
-    private val tokenService: LoopbackTokenService,
+    internal val tokenService: LoopbackTokenService,
     private val jobManager: JobManager = JobManager(),
     private val policyManager: PolicyManager = PolicyManager(),
+    /**
+     * API-50: principal/ACL enforcement (profile + transport + revocation epoch).
+     * Default is always-on; production injects the plane stack's enforcer so the
+     * revocation epoch manager is shared with the token service. The existing
+     * token-scope checks stay (defense in depth).
+     */
+    private val accessControl: AccessControlEnforcer = AccessControlEnforcer(),
     private val orchestrator: Orchestrator? = null,
     private val modelCatalog: () -> List<ModelInfoDto> = { emptyList() },
     private val metricSummary: () -> MetricSummaryDto = { MetricSummaryDto() },
@@ -173,6 +185,9 @@ class ControlPlaneHttpHandler(
         val maxBytes: Long,
         val expiresAtEpochMs: Long,
         var content: ByteArray? = null,
+        /** COR-23i: integrity facts validated at upload time, re-checked at commit. */
+        var validatedSha256: String? = null,
+        var validatedBytes: Long? = null,
     ) {
         fun isExpired(nowEpochMs: Long): Boolean = expiresAtEpochMs <= nowEpochMs
     }
@@ -202,8 +217,51 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         pageToken: String?,
     ): HttpHandlerResult<ModelPageDto> {
-        // Capabilities are projected on each ModelInfo (OpenAPI ModelInfo.capabilities).
-        return HttpHandlerResult.Ok(ModelPageDto(items = modelCatalog()))
+        enforceAccess(principal, "list-models", AccessScope.models_read)?.let { return it }
+        // COR-23a: real cursor pagination — pageToken is honored, never ignored.
+        val all = modelCatalog()
+        val from = decodePageCursor(pageToken)
+            ?: return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(message = "malformed page token"),
+            )
+        if (from > all.size) {
+            return HttpHandlerResult.Err(
+                OmniError.CURSOR_GONE(
+                    message = "models page cursor beyond catalog",
+                    details = mapOf("cursor" to from.toString()),
+                ),
+            )
+        }
+        val page = all.drop(from).take(MODELS_PAGE_SIZE)
+        val nextToken = if (from + page.size < all.size) {
+            encodePageCursor(from + page.size)
+        } else {
+            null
+        }
+        return HttpHandlerResult.Ok(ModelPageDto(items = page, nextPageToken = nextToken))
+    }
+
+    /**
+     * Opaque cursor: `base64url("models-v1:<index>")`. Unparseable tokens fail
+     * closed with INVALID_REQUEST (never silently treated as page one).
+     */
+    private fun encodePageCursor(index: Int): String {
+        val raw = "models-v1:$index".toByteArray(Charsets.UTF_8)
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(raw)
+    }
+
+    private fun decodePageCursor(token: String?): Int? {
+        if (token == null || token.isBlank()) return 0
+        val raw = try {
+            Base64.getUrlDecoder().decode(token)
+        } catch (_: IllegalArgumentException) {
+            return null
+        }
+        val text = String(raw, Charsets.UTF_8)
+        if (!text.startsWith("models-v1:")) return null
+        val index = text.removePrefix("models-v1:").toIntOrNull() ?: return null
+        if (index < 0) return null
+        return index
     }
 
     // ----- Inference ---------------------------------------------------------
@@ -214,6 +272,7 @@ class ControlPlaneHttpHandler(
         requestIdHeader: String?,
         idempotencyKeyHeader: String?,
     ): HttpHandlerResult<ChatCompletionResponseDto> {
+        enforceAccess(principal, "chat", AccessScope.inference_create)?.let { return it }
         if (orchestrator == null) {
             return HttpHandlerResult.Err(
                 OmniError.CAPABILITY_UNSUPPORTED(
@@ -348,6 +407,8 @@ class ControlPlaneHttpHandler(
         idempotencyKeyHeader: String?,
     ): SseHandlerResult {
         // Pre-stream error (HTTP) — stream not committed (CORE-INTERFACE §4).
+        enforceAccess(principal, "chat-stream", AccessScope.inference_create)
+            ?.let { return SseHandlerResult.PreStreamError((it as HttpHandlerResult.Err).error) }
         if (orchestrator == null) {
             return SseHandlerResult.PreStreamError(
                 OmniError.CAPABILITY_UNSUPPORTED(message = "inference orchestrator not attached"),
@@ -653,18 +714,21 @@ class ControlPlaneHttpHandler(
         request: OpenAIEmbeddingRequestDto,
         requestIdHeader: String?,
         idempotencyKeyHeader: String?,
-    ): HttpHandlerResult<EmbeddingResponseDto> =
-        HttpHandlerResult.Err(
+    ): HttpHandlerResult<EmbeddingResponseDto> {
+        enforceAccess(principal, "embedding", AccessScope.inference_create)?.let { return it }
+        return HttpHandlerResult.Err(
             OmniError.CAPABILITY_UNSUPPORTED(
                 message = "embeddings require READY model candidates",
                 details = mapOf("model" to request.model),
             ),
         )
+    }
 
     override suspend fun createAsyncInferenceRequest(
         principal: HttpPrincipal,
         request: AsyncInferenceRequestDto,
     ): HttpHandlerResult<AcceptedRequestDto> {
+        enforceAccess(principal, "create-request", AccessScope.inference_create)?.let { return it }
         // API-16: durable requests are claim + EXECUTE. Without an orchestrator the
         // claim could never run — fail closed honestly instead of 202-never-execute.
         val orch = orchestrator
@@ -810,6 +874,12 @@ class ControlPlaneHttpHandler(
                     details = mapOf("requestId" to requestId),
                 ),
             )
+        enforceAccess(
+            principal,
+            "query-own-request",
+            AccessScope.inference_read_own,
+            resourceOwnerPrincipalId = row.principalId,
+        )?.let { return it }
         if (row.principalId != principal.principalId && !principal.hasScope("jobs.read-all")) {
             // Own-only by default (inference.read-own).
             return HttpHandlerResult.Err(
@@ -844,6 +914,8 @@ class ControlPlaneHttpHandler(
         requestId: String,
         command: CommandRequestDto,
     ): HttpHandlerResult<CommandResultDto> {
+        enforceAccess(principal, "cancel-own-request", AccessScope.inference_cancel)
+            ?.let { return it }
         // CORE-INTERFACE durable Command: non-create mutations require expectedVersion.
         if (command.expectedVersion == null) {
             return HttpHandlerResult.Err(
@@ -953,6 +1025,12 @@ class ControlPlaneHttpHandler(
             ?: return SseHandlerResult.PreStreamError(
                 OmniError.NOT_FOUND(message = "request not found", details = mapOf("requestId" to requestId)),
             )
+        enforceAccess(
+            principal,
+            "resume-own-stream",
+            AccessScope.inference_read_own,
+            resourceOwnerPrincipalId = row.principalId,
+        )?.let { return SseHandlerResult.PreStreamError((it as HttpHandlerResult.Err).error) }
         if (row.principalId != principal.principalId) {
             return SseHandlerResult.PreStreamError(
                 OmniError.FORBIDDEN(message = "not owner of request"),
@@ -1027,6 +1105,12 @@ class ControlPlaneHttpHandler(
                     details = mapOf("commandId" to commandId),
                 ),
             )
+        enforceAccess(
+            principal,
+            "query-own-command-result",
+            AccessScope.commands_read_own,
+            resourceOwnerPrincipalId = row.principalId,
+        )?.let { return it }
         if (row.principalId != principal.principalId) {
             return HttpHandlerResult.Err(OmniError.FORBIDDEN(message = "not owner of command"))
         }
@@ -1046,6 +1130,8 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         request: AssetCreateRequestDto,
     ): HttpHandlerResult<AssetInfoDto> {
+        enforceAccess(principal, "create-upload-handle", AccessScope.assets_create)
+            ?.let { return it }
         if (!ClaimShapeOk.command(request.command)) {
             return HttpHandlerResult.Err(OmniError.INVALID_REQUEST(message = "invalid command claim"))
         }
@@ -1096,6 +1182,7 @@ class ControlPlaneHttpHandler(
         expectedSha256: String?,
         expectedBytes: Long?,
     ): HttpHandlerResult<CommandResultDto> {
+        enforceAccess(principal, "upload", AccessScope.assets_create)?.let { return it }
         // API-06: multipart uploads carry a CommandRequest (idempotency claim) and
         // optional expected_bytes / expected_sha256 integrity assertions.
         val claimedCommandId: String? = if (command != null) {
@@ -1156,6 +1243,10 @@ class ControlPlaneHttpHandler(
         rec.content = body
         assets[assetId] = rec.copy(
             info = rec.info.copy(state = "UPLOADING", bytes = body.size.toLong()),
+            // COR-23i: record the integrity facts validated at upload time so
+            // commitAsset can re-validate against them (TOCTOU guard).
+            validatedSha256 = expectedSha256?.lowercase() ?: sha256Hex(body),
+            validatedBytes = expectedBytes ?: body.size.toLong(),
         )
         val cmdId = claimedCommandId ?: UUID.randomUUID().toString()
         if (claimedCommandId != null) {
@@ -1179,6 +1270,12 @@ class ControlPlaneHttpHandler(
         if (claim is HttpHandlerResult.Err) return claim
         val rec = assets[assetId]
             ?: return HttpHandlerResult.Err(OmniError.NOT_FOUND(message = "asset not found"))
+        enforceAccess(
+            principal,
+            "commit",
+            AccessScope.assets_create,
+            resourceOwnerPrincipalId = rec.ownerPrincipalId,
+        )?.let { return it }
         if (rec.isExpired(clock().toEpochMilli())) {
             // Non-destructive: the record stays until admission-time eviction
             // (evictExpiredAssets) so every op reports ASSET_EXPIRED, not NOT_FOUND.
@@ -1194,7 +1291,24 @@ class ControlPlaneHttpHandler(
         }
         val bytes = rec.content
             ?: return HttpHandlerResult.Err(OmniError.ASSET_NOT_READY(message = "no content uploaded"))
+        // COR-23i: TOCTOU guard — the bytes being committed must still match the
+        // integrity facts validated at upload time. A content mutation between
+        // upload and commit fails closed instead of being committed.
         val digest = sha256Hex(bytes)
+        if (rec.validatedSha256 != null && digest != rec.validatedSha256) {
+            return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "content sha256 changed since upload (commit rejected)",
+                ),
+            )
+        }
+        if (rec.validatedBytes != null && bytes.size.toLong() != rec.validatedBytes) {
+            return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "content size changed since upload (commit rejected)",
+                ),
+            )
+        }
         assets[assetId] = rec.copy(
             info = rec.info.copy(
                 state = "READY",
@@ -1223,6 +1337,12 @@ class ControlPlaneHttpHandler(
     ): HttpHandlerResult<AssetInfoDto> {
         val rec = assets[assetId]
             ?: return HttpHandlerResult.Err(OmniError.NOT_FOUND(message = "asset not found"))
+        enforceAccess(
+            principal,
+            "query-own-asset",
+            AccessScope.assets_read_own,
+            resourceOwnerPrincipalId = rec.ownerPrincipalId,
+        )?.let { return it }
         if (rec.isExpired(clock().toEpochMilli())) {
             // Read-only probe: keep the record (eviction happens at admission via
             // evictExpiredAssets) so every op reports ASSET_EXPIRED, not NOT_FOUND.
@@ -1259,6 +1379,12 @@ class ControlPlaneHttpHandler(
                 )
                 return HttpHandlerResult.Err(OmniError.NOT_FOUND(message = "asset not found"))
             }
+        enforceAccess(
+            principal,
+            "delete-own-asset",
+            AccessScope.assets_delete_own,
+            resourceOwnerPrincipalId = rec.ownerPrincipalId,
+        )?.let { return it }
         if (rec.isExpired(clock().toEpochMilli())) {
             // Non-destructive: the record stays until admission-time eviction
             // (evictExpiredAssets) so every op reports ASSET_EXPIRED, not NOT_FOUND.
@@ -1326,6 +1452,7 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         request: JobSpecDto,
     ): HttpHandlerResult<JobInfoDto> {
+        enforceAccess(principal, "create-control-jobs", AccessScope.jobs_manage)?.let { return it }
         val kind = JobKind.fromCatalogName(request.kind)
             ?: return HttpHandlerResult.Err(
                 OmniError.INVALID_REQUEST(message = "unknown job kind", details = mapOf("kind" to request.kind)),
@@ -1361,6 +1488,7 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         pageToken: String?,
     ): HttpHandlerResult<JobPageDto> {
+        enforceAccess(principal, "read-own-jobs", AccessScope.jobs_read_own)?.let { return it }
         val items = jobManager.listOwn(PrincipalId.parse(principal.principalId)).map { toJobInfo(it) }
         return HttpHandlerResult.Ok(JobPageDto(items = items))
     }
@@ -1369,6 +1497,13 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         jobId: String,
     ): HttpHandlerResult<JobInfoDto> {
+        enforceAccess(
+            principal,
+            "read-own-jobs",
+            AccessScope.jobs_read_own,
+            resourceOwnerPrincipalId = jobManager.query(JobId(jobId))
+                ?.let { if (it is OmniResult.Ok) it.value.identity.principalId.value else null },
+        )?.let { return it }
         return when (val q = jobManager.query(JobId(jobId))) {
             is OmniResult.Ok -> {
                 if (q.value.identity.principalId.value != principal.principalId) {
@@ -1386,6 +1521,7 @@ class ControlPlaneHttpHandler(
         jobId: String,
         command: CommandRequestDto,
     ): HttpHandlerResult<CommandResultDto> {
+        enforceAccess(principal, "create-control-jobs", AccessScope.jobs_manage)?.let { return it }
         val claim = claimCommand(principal, "CANCEL_JOB", command)
         if (claim is HttpHandlerResult.Err) return claim
         // COR-04: verify the job exists + ownership BEFORE the cancel side-effect,
@@ -1441,13 +1577,21 @@ class ControlPlaneHttpHandler(
 
     // ----- Metrics / settings / clients --------------------------------------
 
-    override suspend fun getMetricSummary(principal: HttpPrincipal): HttpHandlerResult<MetricSummaryDto> =
-        HttpHandlerResult.Ok(metricSummary())
+    override suspend fun getMetricSummary(principal: HttpPrincipal): HttpHandlerResult<MetricSummaryDto> {
+        enforceAccess(principal, "read-redacted-summary", AccessScope.metrics_read_summary)
+            ?.let { return it }
+        return HttpHandlerResult.Ok(metricSummary())
+    }
 
-    override suspend fun getMetricDetail(principal: HttpPrincipal): HttpHandlerResult<MetricSummaryDto> =
-        HttpHandlerResult.Ok(metricDetail())
+    override suspend fun getMetricDetail(principal: HttpPrincipal): HttpHandlerResult<MetricSummaryDto> {
+        enforceAccess(principal, "read-local-detailed-metrics", AccessScope.metrics_read_detail)
+            ?.let { return it }
+        return HttpHandlerResult.Ok(metricDetail())
+    }
 
     override suspend fun getSettings(principal: HttpPrincipal): HttpHandlerResult<SettingsSnapshotDto> {
+        enforceAccess(principal, "read-effective-settings", AccessScope.settings_read)
+            ?.let { return it }
         val snap = policyManager.settingsSnapshot()
         return HttpHandlerResult.Ok(
             SettingsSnapshotDto(
@@ -1461,6 +1605,7 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         request: SettingsPatchDto,
     ): HttpHandlerResult<CommandResultDto> {
+        enforceAccess(principal, "change-settings", AccessScope.settings_write)?.let { return it }
         val claim = claimCommand(principal, "PATCH_SETTINGS", request.command)
         if (claim is HttpHandlerResult.Err) return claim
         val changes = request.changes.mapValues { (_, v) -> jsonToSettingValue(v) }
@@ -1497,14 +1642,19 @@ class ControlPlaneHttpHandler(
     override suspend fun listClients(
         principal: HttpPrincipal,
         pageToken: String?,
-    ): HttpHandlerResult<ClientPageDto> =
-        HttpHandlerResult.Ok(ClientPageDto(items = clients.values.toList()))
+    ): HttpHandlerResult<ClientPageDto> {
+        enforceAccess(principal, "list-client-registrations", AccessScope.clients_read)
+            ?.let { return it }
+        return HttpHandlerResult.Ok(ClientPageDto(items = clients.values.toList()))
+    }
 
     override suspend fun revokeClient(
         principal: HttpPrincipal,
         clientId: String,
         command: CommandRequestDto,
     ): HttpHandlerResult<CommandResultDto> {
+        enforceAccess(principal, "approve-suspend-revoke-clients", AccessScope.clients_manage)
+            ?.let { return it }
         val claim = claimCommand(principal, "REVOKE_CLIENT", command)
         if (claim is HttpHandlerResult.Err) return claim
         val existing = clients[clientId]
@@ -1531,6 +1681,8 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         request: LanEnableRequestDto,
     ): HttpHandlerResult<CommandResultDto> {
+        enforceAccess(principal, "enable-disable-configure-lan", AccessScope.lan_manage)
+            ?.let { return it }
         val claim = claimCommand(principal, "ENABLE_LAN", request.command)
         if (claim is HttpHandlerResult.Err) return claim
         val ports = lanPorts
@@ -1567,6 +1719,8 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         request: LanEnableRequestDto,
     ): HttpHandlerResult<CommandResultDto> {
+        enforceAccess(principal, "enable-disable-configure-lan", AccessScope.lan_manage)
+            ?.let { return it }
         val claim = claimCommand(principal, "DISABLE_LAN", request.command)
         if (claim is HttpHandlerResult.Err) return claim
         val ports = lanPorts
@@ -1603,6 +1757,8 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         request: LanPairingChallengeCreateRequestDto,
     ): HttpHandlerResult<JsonRawBody> {
+        enforceAccess(principal, "enable-disable-configure-lan", AccessScope.lan_manage)
+            ?.let { return it }
         val ports = lanPorts
             ?: return HttpHandlerResult.Err(
                 OmniError.CAPABILITY_UNSUPPORTED(message = "LAN feature pack not attached"),
@@ -1779,6 +1935,8 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         request: DiagnosticExportRequestDto,
     ): HttpHandlerResult<JobInfoDto> {
+        enforceAccess(principal, "create-redacted-diagnostic-export", AccessScope.diagnostics_export)
+            ?.let { return it }
         val claim = claimCommand(principal, "DIAGNOSTIC_EXPORT", request.command)
         if (claim is HttpHandlerResult.Err) return claim
         // diagnosticsApi is plane-hosted (LOCAL_UI composition); HTTP creates the same
@@ -1817,6 +1975,8 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         request: ContentReportProposalRequestDto,
     ): HttpHandlerResult<ContentReportInfoDto> {
+        enforceAccess(principal, "create-ai-output-report-proposal", AccessScope.content_reports_propose)
+            ?.let { return it }
         val claim = claimCommand(principal, "CONTENT_REPORT_PROPOSE", request.command)
         if (claim is HttpHandlerResult.Err) return claim
         val api = contentReportApi
@@ -1881,6 +2041,8 @@ class ControlPlaneHttpHandler(
             ?: return HttpHandlerResult.Err(
                 OmniError.CAPABILITY_UNSUPPORTED(message = "content report pack not attached"),
             )
+        enforceAccess(principal, "read-own-content-report-status", AccessScope.content_reports_read_own)
+            ?.let { return it }
         return when (
             val r = api.getReport(PrincipalId.parse(principal.principalId), reportId)
         ) {
@@ -1894,6 +2056,8 @@ class ControlPlaneHttpHandler(
         reportId: String,
         command: CommandRequestDto,
     ): HttpHandlerResult<CommandResultDto> {
+        enforceAccess(principal, "cancel-own-content-report", AccessScope.content_reports_manage_own)
+            ?.let { return it }
         val claim = claimCommand(principal, "CONTENT_REPORT_CANCEL", command)
         if (claim is HttpHandlerResult.Err) return claim
         val api = contentReportApi
@@ -1946,6 +2110,8 @@ class ControlPlaneHttpHandler(
         reportId: String,
         command: CommandRequestDto,
     ): HttpHandlerResult<CommandResultDto> {
+        enforceAccess(principal, "discard-own-content-report", AccessScope.content_reports_manage_own)
+            ?.let { return it }
         val claim = claimCommand(principal, "CONTENT_REPORT_DISCARD", command)
         if (claim is HttpHandlerResult.Err) return claim
         val api = contentReportApi
@@ -2000,6 +2166,8 @@ class ControlPlaneHttpHandler(
             ?: return HttpHandlerResult.Err(
                 OmniError.CAPABILITY_UNSUPPORTED(message = "content report pack not attached"),
             )
+        enforceAccess(principal, "read-own-content-report-receipt", AccessScope.content_reports_read_own)
+            ?.let { return it }
         return when (
             val r = api.getReceipt(PrincipalId.parse(principal.principalId), reportId)
         ) {
@@ -2037,6 +2205,8 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         request: TokenIssueRequestDto,
     ): HttpHandlerResult<TokenIssueResultDto> {
+        enforceAccess(principal, "issue-rotate-revoke-tokens", AccessScope.tokens_manage)
+            ?.let { return it }
         val claim = claimCommand(principal, "ISSUE_TOKEN", request.command)
         if (claim is HttpHandlerResult.Err) return claim
         val scopes = request.scopes.ifEmpty { LoopbackTokenService.BOOTSTRAP_SCOPES.toList() }.toSet()
@@ -2075,6 +2245,8 @@ class ControlPlaneHttpHandler(
         principal: HttpPrincipal,
         pageToken: String?,
     ): HttpHandlerResult<TokenPageDto> {
+        enforceAccess(principal, "issue-rotate-revoke-tokens", AccessScope.tokens_manage)
+            ?.let { return it }
         val now = clock()
         val items = tokenService.listMetadata().map {
             val state = when {
@@ -2101,9 +2273,20 @@ class ControlPlaneHttpHandler(
         tokenId: String,
         command: CommandRequestDto,
     ): HttpHandlerResult<CommandResultDto> {
+        enforceAccess(principal, "issue-rotate-revoke-tokens", AccessScope.tokens_manage)
+            ?.let { return it }
         val claim = claimCommand(principal, "REVOKE_TOKEN", command)
         if (claim is HttpHandlerResult.Err) return claim
-        if (!tokenService.revoke(tokenId)) {
+        // COR-23f: ownership before the revoke side-effect — self (the token's
+        // own principal) or an admin (tokens.manage scope) may revoke; anyone
+        // else gets FORBIDDEN and the token is NOT revoked.
+        val rec = tokenService.get(tokenId)
+            ?: return HttpHandlerResult.Err(OmniError.NOT_FOUND(message = "token not found"))
+        val admin = principal.hasScope("tokens.manage")
+        if (rec.principalId != principal.principalId && !admin) {
+            return HttpHandlerResult.Err(OmniError.FORBIDDEN(message = "not owner of token"))
+        }
+        if (!tokenService.revokeAs(tokenId, principal.principalId)) {
             return HttpHandlerResult.Err(OmniError.NOT_FOUND(message = "token not found"))
         }
         commandLedger.recordResult(
@@ -2151,6 +2334,59 @@ class ControlPlaneHttpHandler(
         ) {
             is ClaimOutcome.Conflict -> HttpHandlerResult.Err(c.error)
             is ClaimOutcome.Existing, is ClaimOutcome.New -> null // proceed
+        }
+    }
+
+    /**
+     * API-50: principal/ACL enforcement on the HTTP authorization path.
+     * Runs AFTER the token was verified (the gateway authenticator) and BEFORE
+     * any domain side-effect, using the AccessControlEnforcer's public API with
+     * the transport/profile/epoch derived from the authenticated principal.
+     * Returns an [HttpHandlerResult.Err] on denial (null = authorized).
+     *
+     * Defense in depth: the existing token-scope / ownership checks below stay.
+     */
+    private fun enforceAccess(
+        principal: HttpPrincipal,
+        operationId: String,
+        requiredScope: AccessScope,
+        resourceOwnerPrincipalId: String? = null,
+    ): HttpHandlerResult<Nothing>? {
+        if (principal.scopes.isEmpty()) {
+            // Fail closed: a principal with no granted scopes cannot be admitted.
+            return HttpHandlerResult.Err(
+                OmniError.FORBIDDEN(message = "no granted scopes (fail closed)"),
+            )
+        }
+        val loopback = principal.loopbackOnly
+        val ctx = AccessControlEnforcer.PrincipalContext(
+            principalId = PrincipalId.parse(principal.principalId),
+            kind = if (loopback) PrincipalKind.HTTP_LOCAL_ADMIN else PrincipalKind.HTTP_LAN,
+            profile = if (loopback) AccessProfile.LOCAL_ADMIN_HTTP else AccessProfile.LAN_CLIENT,
+            grantedScopes = principal.scopes,
+            revocationEpoch = principal.revocationEpoch,
+            transport = if (loopback) {
+                AccessControlEnforcer.AccessTransport.LOOPBACK_HTTP
+            } else {
+                AccessControlEnforcer.AccessTransport.LAN_TLS_HTTP
+            },
+            registrationId = principal.clientId,
+            tokenId = principal.tokenId,
+            loopbackOnlyToken = loopback,
+        )
+        return when (
+            val r = accessControl.authorize(
+                ctx,
+                AccessControlEnforcer.OperationRequest(
+                    operationId = operationId,
+                    requiredScope = requiredScope,
+                    resourceOwnerPrincipalId = resourceOwnerPrincipalId,
+                    observedRevocationEpoch = principal.revocationEpoch,
+                ),
+            )
+        ) {
+            is OmniResult.Err -> HttpHandlerResult.Err(r.error)
+            is OmniResult.Ok -> null
         }
     }
 
@@ -2219,6 +2455,9 @@ class ControlPlaneHttpHandler(
 
     private fun jsonToSettingValue(el: JsonElement): SettingValue? = when (el) {
         is JsonPrimitive -> when {
+            // COR-23b: JSON strings ALWAYS stay strings — never numeric/boolean
+            // coercion of "0123" / "true" (the JSON type is the wire authority).
+            el.isString -> SettingValue.StringValue(el.content)
             el.booleanOrNull != null -> SettingValue.BoolValue(el.booleanOrNull!!)
             el.longOrNull != null -> SettingValue.IntValue(el.longOrNull!!)
             el.doubleOrNull != null -> SettingValue.NumberValue(el.doubleOrNull!!)
@@ -2263,6 +2502,9 @@ class ControlPlaneHttpHandler(
 
         /** COR-17/SEC-06: upper bound for the in-memory asset store. */
         const val MAX_ASSETS: Int = 256
+
+        /** COR-23a: listModels page size (cursor-paginated). */
+        const val MODELS_PAGE_SIZE: Int = 50
 
         /** REQUEST states treated as stream-terminal for SSE projection. */
         private val STREAM_TERMINAL_STATES: Set<String> = setOf(

@@ -178,6 +178,24 @@ class LoopbackTokenService(
         }
     }
 
+    /**
+     * Revoke as an explicit actor (COR-23f). Callers MUST verify ownership or
+     * admin scope before calling — this performs the durable revoke only.
+     */
+    fun revokeAs(tokenId: String, actorPrincipalId: String): Boolean {
+        return when (
+            tokens.revoke(
+                tokenId = tokenId,
+                actor = PrincipalId.parse(actorPrincipalId),
+                reason = "owner-or-admin-revoke",
+                authorised = true,
+            )
+        ) {
+            is OmniResult.Ok -> true
+            is OmniResult.Err -> false
+        }
+    }
+
     fun get(tokenId: String): TokenRecord? {
         val rec = tokens.get(tokenId) ?: return null
         return TokenRecord(
