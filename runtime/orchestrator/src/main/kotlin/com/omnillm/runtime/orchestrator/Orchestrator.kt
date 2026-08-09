@@ -140,18 +140,20 @@ class Orchestrator(
         applyOrFail(request.requestId, "PLAN_READY")?.let { return it }
 
         val head = planning.viable.first()
-        val work = scheduler.enqueue(
-            requestId = request.requestId,
-            principalId = request.principalId,
-            planned = head,
-            request = request,
-        )
-
-        synchronized(lock) {
+        // COR-11: enqueue + active-snapshot insert must be atomic — a pump
+        // racing between the two would otherwise fail a legitimate request
+        // with INTERNAL "missing planning snapshot".
+        val work = synchronized(lock) {
+            val scheduled = scheduler.enqueue(
+                requestId = request.requestId,
+                principalId = request.principalId,
+                planned = head,
+                request = request,
+            )
             active[request.requestId.value] = ActiveRequest(
                 request = request,
                 planning = planning,
-                scheduled = work,
+                scheduled = scheduled,
                 selected = head,
                 actualRouting = null,
                 reservation = null,
@@ -160,6 +162,7 @@ class Orchestrator(
                 prepared = null,
                 state = "QUEUED",
             )
+            scheduled
         }
 
         return OmniResult.ok(
@@ -264,10 +267,14 @@ class Orchestrator(
         val requestId = work.requestId
 
         // Try viable candidates in plan order until one reserves (atomic admission).
+        // COR-11: never fail a scheduled request on a missing snapshot — backfill
+        // by re-planning (pure, ADR-002) and retry; fail closed only when the
+        // request cannot be planned at all.
         val planning = activeSnapshot(requestId)?.planning
+            ?: backfillPlanningSnapshot(work)
             ?: return failQueued(
                 requestId,
-                OmniError.INTERNAL(message = "missing planning snapshot"),
+                OmniError.INTERNAL(message = "missing planning snapshot; backfill plan failed"),
             )
 
         var lastError: OmniError? = null
@@ -751,6 +758,46 @@ class Orchestrator(
         return when (val r = lifecycle.apply(requestId, event)) {
             is OmniResult.Err -> r
             is OmniResult.Ok -> null
+        }
+    }
+
+    /**
+     * COR-11 defense-in-depth: scheduled work without an active snapshot can only
+     * appear via a recovered/re-injected scheduler. Re-plan (pure envelope,
+     * ADR-002 — no domain mutation), re-bind the durable aggregate when missing,
+     * publish a fresh snapshot and retry the normal pipeline. Never clobbers a
+     * snapshot another thread already installed. Returns null when planning
+     * cannot produce a viable candidate (caller fails closed via [failQueued]).
+     */
+    private suspend fun backfillPlanningSnapshot(work: ScheduledWork): PlanningResult? {
+        val planning = when (val p = planner.plan(work.request)) {
+            is OmniResult.Err -> return null
+            is OmniResult.Ok -> p.value
+        }
+        if (planning.viable.isEmpty()) return null
+        val head = planning.viable.first()
+        return synchronized(lock) {
+            active[work.requestId.value]?.let { return it.planning }
+            if (lifecycle.getAggregate(work.requestId) == null) {
+                lifecycle.bindFromClaim(
+                    requestId = work.requestId,
+                    principalId = work.request.principalId.value,
+                    state = registry.queryRequest(work.requestId)?.state ?: "QUEUED",
+                )
+            }
+            active[work.requestId.value] = ActiveRequest(
+                request = work.request,
+                planning = planning,
+                scheduled = work,
+                selected = head,
+                actualRouting = null,
+                reservation = null,
+                plan = null,
+                commit = null,
+                prepared = null,
+                state = "QUEUED",
+            )
+            planning
         }
     }
 
