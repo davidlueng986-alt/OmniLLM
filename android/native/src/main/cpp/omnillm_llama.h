@@ -159,8 +159,21 @@ int32_t omnillm_llama_embed(
     const char* operation_token,
     const char* input_digest_hex);
 
+/**
+ * Logically closes [session_token]. The session is detached from the registry
+ * immediately; native handles are freed once no in-flight generate holds the
+ * session (reference-counted, COR-01). Safe to call while a generate using the
+ * same session is running — cancel must be requested via
+ * omnillm_llama_request_cancel for the running operation.
+ */
 int32_t omnillm_llama_close_session(const char* session_token);
 
+/**
+ * Logically unloads [model_token]: all its sessions and the model are detached
+ * from the registry; native llama_context / llama_model destruction is deferred
+ * until in-flight generates (and the last session) release their references
+ * (reference-counted, COR-01). Safe to call concurrently with generates.
+ */
 int32_t omnillm_llama_unload_model(const char* model_token);
 
 /** Best-effort cooperative cancel for an in-flight generate. */

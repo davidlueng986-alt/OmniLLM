@@ -36,6 +36,13 @@ void stream_cb(
     if (sink->cancelAtomic != nullptr && sink->atomicGet != nullptr &&
         sink->cancelFlag != nullptr) {
         const jint v = sink->env->CallIntMethod(sink->cancelAtomic, sink->atomicGet);
+        if (sink->env->ExceptionCheck()) {
+            // Pending Java exception (e.g. cancelled object): clear it and stop
+            // generation cooperatively — never continue JNI calls in undefined state.
+            sink->env->ExceptionClear();
+            *sink->cancelFlag = 1;
+            return;
+        }
         *sink->cancelFlag = static_cast<int32_t>(v);
     }
     if (sink->callback == nullptr || sink->onEvent == nullptr) {
@@ -48,6 +55,13 @@ void stream_cb(
         ? sink->env->NewStringUTF(attributes_kv)
         : sink->env->NewStringUTF("");
     sink->env->CallVoidMethod(sink->callback, sink->onEvent, kind, jDigest, jAttrs);
+    if (sink->env->ExceptionCheck()) {
+        // A Java-side throw from the stream callback must not leave a pending
+        // exception across further native calls (JNI undefined state): clear it
+        // and stop generation cooperatively.
+        sink->env->ExceptionClear();
+        if (sink->cancelFlag != nullptr) *sink->cancelFlag = 1;
+    }
     if (jDigest != nullptr) sink->env->DeleteLocalRef(jDigest);
     if (jAttrs != nullptr) sink->env->DeleteLocalRef(jAttrs);
 }
@@ -214,6 +228,10 @@ Java_com_omnillm_engines_llamacpp_native_JniNativeBridge_nativeGenerate(
             sink.atomicGet = env->GetMethodID(atomicCls, "get", "()I");
             if (sink.atomicGet != nullptr) {
                 cancel_local = env->CallIntMethod(cancelFlagObj, sink.atomicGet);
+                if (env->ExceptionCheck()) {
+                    // Never enter the native loop with a pending exception.
+                    env->ExceptionClear();
+                }
             }
         }
     }
