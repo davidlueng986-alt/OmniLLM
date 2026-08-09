@@ -16,11 +16,12 @@ import com.omnillm.interfaces.http.AcceptedRequestDto
 import com.omnillm.interfaces.http.AssetCreateRequestDto
 import com.omnillm.interfaces.http.AssetInfoDto
 import com.omnillm.interfaces.http.AsyncInferenceRequestDto
+import com.omnillm.interfaces.http.AssistantMessageDto
 import com.omnillm.interfaces.http.ChatCompletionChoiceDto
 import com.omnillm.interfaces.http.ChatCompletionResponseDto
 import com.omnillm.interfaces.http.ChatMessageDto
+import com.omnillm.interfaces.http.ClientInfoDto
 import com.omnillm.interfaces.http.ClientPageDto
-import com.omnillm.interfaces.http.ClientSummaryDto
 import com.omnillm.interfaces.http.CommandRequestDto
 import com.omnillm.interfaces.http.CommandResultDto
 import com.omnillm.interfaces.http.ContentReportInfoDto
@@ -37,11 +38,13 @@ import com.omnillm.interfaces.http.JobSpecDto
 import com.omnillm.interfaces.http.JsonRawBody
 import com.omnillm.interfaces.http.LanEnableRequestDto
 import com.omnillm.interfaces.http.LanPairingChallengeCreateRequestDto
-import com.omnillm.interfaces.http.MetricSummaryDto
+import com.omnillm.interfaces.http.MetricSampleDto
+import com.omnillm.interfaces.http.MetricSnapshotDto
 import com.omnillm.interfaces.http.ModelInfoDto
 import com.omnillm.interfaces.http.ModelPageDto
 import com.omnillm.interfaces.http.NativeChatPayloadDto
 import com.omnillm.interfaces.http.NativeEmbeddingPayloadDto
+import com.omnillm.interfaces.http.OmniExecutionInfoDto
 import com.omnillm.interfaces.http.OmniHttpHandlerPort
 import com.omnillm.interfaces.http.OpenAIChatRequestDto
 import com.omnillm.interfaces.http.OpenAIEmbeddingRequestDto
@@ -54,6 +57,7 @@ import com.omnillm.interfaces.http.TokenInfoDto
 import com.omnillm.interfaces.http.TokenIssueRequestDto
 import com.omnillm.interfaces.http.TokenIssueResultDto
 import com.omnillm.interfaces.http.TokenPageDto
+import com.omnillm.interfaces.http.UsageDto
 import com.omnillm.interfaces.http.auth.HttpPrincipal
 import com.omnillm.interfaces.http.sse.SseFraming
 import com.omnillm.features.benchmark.api.BenchmarkApi
@@ -70,7 +74,6 @@ import com.omnillm.features.lan.api.CreatePairingChallengeSpec
 import com.omnillm.features.lan.api.DisableLanSpec
 import com.omnillm.features.lan.api.EnableLanSpec
 import com.omnillm.features.lan.api.LanCommandIdentity
-import com.omnillm.features.lan.domain.LanScopePolicy
 import com.omnillm.features.lan.ports.LanRuntimePorts
 import com.omnillm.features.routing.api.RoutingApi
 import com.omnillm.features.tools.api.ToolsApi
@@ -137,8 +140,12 @@ class ControlPlaneHttpHandler(
     private val accessControl: AccessControlEnforcer = AccessControlEnforcer(),
     private val orchestrator: Orchestrator? = null,
     private val modelCatalog: () -> List<ModelInfoDto> = { emptyList() },
-    private val metricSummary: () -> MetricSummaryDto = { MetricSummaryDto() },
-    private val metricDetail: () -> MetricSummaryDto = { MetricSummaryDto() },
+    private val metricSummary: () -> MetricSnapshotDto = {
+        MetricSnapshotDto(snapshotVersion = resourceVersion())
+    },
+    private val metricDetail: () -> MetricSnapshotDto = {
+        MetricSnapshotDto(snapshotVersion = resourceVersion())
+    },
     private val clock: () -> Instant = { Instant.now() },
     private val lanPorts: LanRuntimePorts? = null,
     private val diagnosticsApi: DiagnosticsApi? = null,
@@ -170,7 +177,7 @@ class ControlPlaneHttpHandler(
 ) : OmniHttpHandlerPort {
 
     private val assets = ConcurrentHashMap<String, AssetRecord>()
-    private val clients = ConcurrentHashMap<String, ClientSummaryDto>()
+    private val clients = ConcurrentHashMap<String, ClientInfoDto>()
 
     /**
      * API-16: background pump coroutines drive durable-request execution through
@@ -238,7 +245,15 @@ class ControlPlaneHttpHandler(
         } else {
             null
         }
-        return HttpHandlerResult.Ok(ModelPageDto(items = page, nextPageToken = nextToken))
+        // API-07: ModelPage requires snapshot_version — honest monotonic version
+        // (runtime epoch) when the catalog source exposes no own version.
+        return HttpHandlerResult.Ok(
+            ModelPageDto(
+                items = page,
+                nextPageToken = nextToken,
+                snapshotVersion = resourceVersion(),
+            ),
+        )
     }
 
     /**
@@ -273,6 +288,17 @@ class ControlPlaneHttpHandler(
         idempotencyKeyHeader: String?,
     ): HttpHandlerResult<ChatCompletionResponseDto> {
         enforceAccess(principal, "chat", AccessScope.inference_create)?.let { return it }
+        // API-09: response_format/tools/tool_choice are modeled on the wire DTO
+        // but not executable on this path (no structured/tool pipeline here) —
+        // fail closed honestly instead of silently ignoring them.
+        unsupportedChatParamError(request)?.let { return HttpHandlerResult.Err(it) }
+        val stop = parseStopSequences(request.stop)
+            ?: return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "stop must be a string or an array of strings",
+                    details = mapOf("parameter" to "stop"),
+                ),
+            )
         if (orchestrator == null) {
             return HttpHandlerResult.Err(
                 OmniError.CAPABILITY_UNSUPPORTED(
@@ -332,6 +358,8 @@ class ControlPlaneHttpHandler(
                         )
                     },
                     stream = false,
+                    // API-09: wire `stop` into the engine request (stopSequences).
+                    stop = stop,
                 )
                 return when (
                     val r = port.startChat(
@@ -362,6 +390,9 @@ class ControlPlaneHttpHandler(
                                     ),
                                 )
                             } else {
+                                // API-07/12: response carries usage + omnillm and the
+                                // spec AssistantMessage shape (content nullable,
+                                // tool_calls, no asset_ids).
                                 HttpHandlerResult.Ok(
                                     ChatCompletionResponseDto(
                                         id = "chatcmpl-$requestId",
@@ -370,12 +401,22 @@ class ControlPlaneHttpHandler(
                                         choices = listOf(
                                             ChatCompletionChoiceDto(
                                                 index = 0,
-                                                message = ChatMessageDto(
+                                                message = AssistantMessageDto(
                                                     role = "assistant",
                                                     content = text,
                                                 ),
                                                 finishReason = "stop",
                                             ),
+                                        ),
+                                        // No token accounting exists on the control-plane
+                                        // stream API — honest zeros, never invented counts.
+                                        usage = UsageDto(),
+                                        omnillm = OmniExecutionInfoDto(
+                                            requestId = requestId,
+                                            actualModelRevisionId = handle.actualModelRevisionId,
+                                            engineBuildId = handle.engineBuildId,
+                                            backend = handle.backend,
+                                            degradations = handle.degradedReasons,
                                         ),
                                     ),
                                 )
@@ -409,6 +450,15 @@ class ControlPlaneHttpHandler(
         // Pre-stream error (HTTP) — stream not committed (CORE-INTERFACE §4).
         enforceAccess(principal, "chat-stream", AccessScope.inference_create)
             ?.let { return SseHandlerResult.PreStreamError((it as HttpHandlerResult.Err).error) }
+        // API-09: same honest fail-closed for unsupported chat parameters.
+        unsupportedChatParamError(request)?.let { return SseHandlerResult.PreStreamError(it) }
+        val stop = parseStopSequences(request.stop)
+            ?: return SseHandlerResult.PreStreamError(
+                OmniError.INVALID_REQUEST(
+                    message = "stop must be a string or an array of strings",
+                    details = mapOf("parameter" to "stop"),
+                ),
+            )
         if (orchestrator == null) {
             return SseHandlerResult.PreStreamError(
                 OmniError.CAPABILITY_UNSUPPORTED(message = "inference orchestrator not attached"),
@@ -463,6 +513,8 @@ class ControlPlaneHttpHandler(
                         )
                     },
                     stream = true,
+                    // API-09: wire `stop` into the engine request (stopSequences).
+                    stop = stop,
                 )
                 return when (
                     val r = port.startChat(
@@ -1479,7 +1531,10 @@ class ControlPlaneHttpHandler(
     ): HttpHandlerResult<JobPageDto> {
         enforceAccess(principal, "read-own-jobs", AccessScope.jobs_read_own)?.let { return it }
         val items = jobManager.listOwn(PrincipalId.parse(principal.principalId)).map { toJobInfo(it) }
-        return HttpHandlerResult.Ok(JobPageDto(items = items))
+        // API-07: JobPage requires snapshot_version — monotonic runtime epoch.
+        return HttpHandlerResult.Ok(
+            JobPageDto(items = items, snapshotVersion = resourceVersion()),
+        )
     }
 
     override suspend fun getJob(
@@ -1566,13 +1621,13 @@ class ControlPlaneHttpHandler(
 
     // ----- Metrics / settings / clients --------------------------------------
 
-    override suspend fun getMetricSummary(principal: HttpPrincipal): HttpHandlerResult<MetricSummaryDto> {
+    override suspend fun getMetricSummary(principal: HttpPrincipal): HttpHandlerResult<MetricSnapshotDto> {
         enforceAccess(principal, "read-redacted-summary", AccessScope.metrics_read_summary)
             ?.let { return it }
         return HttpHandlerResult.Ok(metricSummary())
     }
 
-    override suspend fun getMetricDetail(principal: HttpPrincipal): HttpHandlerResult<MetricSummaryDto> {
+    override suspend fun getMetricDetail(principal: HttpPrincipal): HttpHandlerResult<MetricSnapshotDto> {
         enforceAccess(principal, "read-local-detailed-metrics", AccessScope.metrics_read_detail)
             ?.let { return it }
         return HttpHandlerResult.Ok(metricDetail())
@@ -1634,7 +1689,32 @@ class ControlPlaneHttpHandler(
     ): HttpHandlerResult<ClientPageDto> {
         enforceAccess(principal, "list-client-registrations", AccessScope.clients_read)
             ?.let { return it }
-        return HttpHandlerResult.Ok(ClientPageDto(items = clients.values.toList()))
+        // API-07: prefer the REAL LAN client registry (display_name +
+        // revocation_epoch come from CLIENT_REGISTRATION) when the LAN pack is
+        // attached; fall back to the in-memory map otherwise (never fabricated).
+        val lanItems = lanPorts?.let { ports ->
+            when (
+                val r = ports.clients.listClients(PrincipalId.parse(principal.principalId))
+            ) {
+                is OmniResult.Err -> null
+                is OmniResult.Ok -> r.value.map { v ->
+                    ClientInfoDto(
+                        clientId = v.clientId,
+                        displayName = v.displayName,
+                        state = v.state,
+                        scopes = v.scopes.toList(),
+                        lastSeenAt = v.lastSeenAtEpochMs?.let {
+                            Instant.ofEpochMilli(it).toString()
+                        },
+                        revocationEpoch = v.revocationEpoch,
+                    )
+                }
+            }
+        }
+        val items = lanItems ?: clients.values.toList()
+        return HttpHandlerResult.Ok(
+            ClientPageDto(items = items, snapshotVersion = resourceVersion()),
+        )
     }
 
     override suspend fun revokeClient(
@@ -1752,24 +1832,56 @@ class ControlPlaneHttpHandler(
             ?: return HttpHandlerResult.Err(
                 OmniError.CAPABILITY_UNSUPPORTED(message = "LAN feature pack not attached"),
             )
-        val scopes = request.scopes.toSet().ifEmpty { LanScopePolicy.DEFAULT_INFER_SCOPES }
-        val challengeId = UUID.randomUUID().toString()
+        // API-10: the wire contract requires the CLIENT-generated challenge_id
+        // (spec :2775-2799) — never fabricate one server-side. The challenge is
+        // the pairing identity the client proves later in the exchange.
+        if (!CLAIM_UUID.matches(request.challengeId)) {
+            return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "challenge_id must be a client-generated UUID (spec required)",
+                    details = mapOf("parameter" to "challenge_id"),
+                ),
+            )
+        }
+        if (request.requestedScopes.isEmpty()) {
+            return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "requested_scopes must be non-empty (spec minItems 1)",
+                    details = mapOf("parameter" to "requested_scopes"),
+                ),
+            )
+        }
+        if (request.ttlSeconds != null &&
+            request.ttlSeconds != com.omnillm.features.lan.LanFeatureModule.PAIRING_TTL_SECONDS
+        ) {
+            return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "ttl_seconds must be " +
+                        com.omnillm.features.lan.LanFeatureModule.PAIRING_TTL_SECONDS +
+                        " (spec const)",
+                    details = mapOf("parameter" to "ttl_seconds"),
+                ),
+            )
+        }
         val spec = CreatePairingChallengeSpec(
             command = LanCommandIdentity(
                 commandId = request.command.commandId,
                 idempotencyKey = request.command.idempotencyKey,
             ),
-            challengeId = challengeId,
-            requestedScopes = scopes,
-            explicitlyApprovedScopes = scopes,
+            challengeId = request.challengeId,
+            requestedScopes = request.requestedScopes.toSet(),
+            explicitlyApprovedScopes = request.requestedScopes.toSet(),
+            clientDisplayHint = request.clientDisplayHint,
         )
         return when (
             val r = ports.pairing.createChallenge(PrincipalId.parse(principal.principalId), spec)
         ) {
             is OmniResult.Ok -> {
                 val v = r.value
-                // SEC-10: build the wire body through the JSON codec — every field
-                // escaped, key order preserved, null semantics explicit.
+                // API-10: LanPairingChallengeSecret is additionalProperties:false
+                // (spec :2800-2837) — state/attempts_remaining are NOT part of the
+                // contract and are deliberately not emitted. Pairing status remains
+                // observable through LAN service status / UI surfaces.
                 val body = HttpJson.codec.encodeToString(
                     JsonElement.serializer(),
                     JsonObject(
@@ -1787,8 +1899,6 @@ class ControlPlaneHttpHandler(
                             ),
                             "qr_payload" to
                                 (v.qrPayload?.let { JsonPrimitive(it) } ?: JsonNull),
-                            "state" to JsonPrimitive(v.state),
-                            "attempts_remaining" to JsonPrimitive(v.attemptsRemaining),
                         ),
                     ),
                 )
@@ -2254,7 +2364,10 @@ class ControlPlaneHttpHandler(
                 lastSeenAt = it.lastSeenAt?.toString(),
             )
         }
-        return HttpHandlerResult.Ok(TokenPageDto(items = items))
+        // API-07: TokenPage requires snapshot_version — monotonic runtime epoch.
+        return HttpHandlerResult.Ok(
+            TokenPageDto(items = items, snapshotVersion = resourceVersion()),
+        )
     }
 
     override suspend fun revokeToken(
@@ -2475,6 +2588,45 @@ class ControlPlaneHttpHandler(
     private fun chatMessageDigest(messages: List<ChatMessageDto>): String =
         sha256Hex(messages.joinToString(separator = "\u0000") { m -> "${m.role}\u0000${m.content}" })
 
+    /**
+     * API-09: response_format / tools / tool_choice are part of the OpenAPI
+     * request contract but the sync/SSE OpenAI chat path has no structured or
+     * tool-calling pipeline — reject them explicitly (never silently ignore).
+     */
+    private fun unsupportedChatParamError(request: OpenAIChatRequestDto): OmniError? = when {
+        request.responseFormat != null -> unsupportedChatParam("response_format")
+        !request.tools.isNullOrEmpty() -> unsupportedChatParam("tools")
+        request.toolChoice != null -> unsupportedChatParam("tool_choice")
+        else -> null
+    }
+
+    private fun unsupportedChatParam(name: String): OmniError =
+        OmniError.CAPABILITY_UNSUPPORTED(
+            message = "$name is not supported on the sync/SSE OpenAI chat path — " +
+                "use the structured/tool-calling pipeline or durable /omni/v1/requests",
+            details = mapOf("parameter" to name),
+        )
+
+    /**
+     * API-09: spec `stop` is oneOf string | array<string> (:1971-1979).
+     * Returns the normalized stop sequences, or null on an invalid shape
+     * (caller fails closed with INVALID_REQUEST). Numbers/booleans/objects are
+     * rejected — only JSON strings (or arrays of strings) are valid.
+     */
+    private fun parseStopSequences(stop: JsonElement?): List<String>? = when (stop) {
+        null -> emptyList()
+        is JsonPrimitive -> if (stop.isString) listOf(stop.content) else null
+        is JsonArray -> {
+            val out = mutableListOf<String>()
+            for (el in stop) {
+                val s = (el as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+                out += s
+            }
+            out
+        }
+        else -> null
+    }
+
     private fun JsonObject.string(key: String): String? =
         (this[key] as? JsonPrimitive)?.contentOrNull
 
@@ -2494,6 +2646,10 @@ class ControlPlaneHttpHandler(
 
         /** COR-23a: listModels page size (cursor-paginated). */
         const val MODELS_PAGE_SIZE: Int = 50
+
+        /** API-10: LAN pairing challenge_id is a client-generated UUID. */
+        internal val CLAIM_UUID =
+            Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
         /** REQUEST states treated as stream-terminal for SSE projection. */
         private val STREAM_TERMINAL_STATES: Set<String> = setOf(
@@ -2540,3 +2696,25 @@ private object ClaimShapeOk {
         return true
     }
 }
+
+/**
+ * API-08: map the runtime observability [MetricSnapshot] onto the OpenAPI
+ * `MetricSnapshot` wire shape. Evidence labels and sampledAt come from the
+ * measurement catalog semantics (LAST_SAMPLED for aggregated series, the
+ * recorded label for gauge/last series) — never invented.
+ */
+fun com.omnillm.runtime.observability.MetricSnapshot.toWireDto(): MetricSnapshotDto =
+    MetricSnapshotDto(
+        snapshotVersion = snapshotVersion,
+        samples = samples.map { s ->
+            MetricSampleDto(
+                name = s.name,
+                value = s.value,
+                unit = s.unit,
+                evidenceLabel = s.evidenceLabel,
+                sampledAt = java.time.Instant.ofEpochMilli(s.sampledAtEpochMs).toString(),
+                dimensions = s.dimensions,
+            )
+        },
+        nextPageToken = nextPageToken,
+    )

@@ -65,8 +65,8 @@ class HttpRouteContractSurfaceTest {
         ): HttpHandlerResult<ModelPageDto> =
             HttpHandlerResult.Ok(ModelPageDto(items = emptyList()))
 
-        override suspend fun getMetricDetail(principal: HttpPrincipal): HttpHandlerResult<MetricSummaryDto> =
-            HttpHandlerResult.Ok(MetricSummaryDto(resourceVersion = 1))
+        override suspend fun getMetricDetail(principal: HttpPrincipal): HttpHandlerResult<MetricSnapshotDto> =
+            HttpHandlerResult.Ok(MetricSnapshotDto(snapshotVersion = 1))
 
         override suspend fun getSettings(principal: HttpPrincipal): HttpHandlerResult<SettingsSnapshotDto> =
             HttpHandlerResult.Ok(SettingsSnapshotDto(resourceVersion = 0))

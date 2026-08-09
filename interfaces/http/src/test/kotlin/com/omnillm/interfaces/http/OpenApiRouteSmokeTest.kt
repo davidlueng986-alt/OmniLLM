@@ -64,7 +64,11 @@ class OpenApiRouteSmokeTest {
                             modelRevisionId = digest64,
                             displayName = "smoke",
                             capabilities = listOf(
-                                CapabilityEntryDto(id = "chat.completions", state = "SUPPORTED"),
+                                CapabilityEntryDto(
+                                    capabilityId = com.omnillm.core.canonical.generated.CapabilityId.TEXT_GENERATION,
+                                    state = com.omnillm.core.canonical.generated.CapabilityState.SUPPORTED,
+                                    evidenceLabel = com.omnillm.core.canonical.generated.EvidenceLabel.REPORTED,
+                                ),
                             ),
                             installationState = "READY",
                         ),
@@ -99,13 +103,19 @@ class OpenApiRouteSmokeTest {
 
         override suspend fun getMetricSummary(
             principal: HttpPrincipal,
-        ): HttpHandlerResult<MetricSummaryDto> =
+        ): HttpHandlerResult<MetricSnapshotDto> =
             HttpHandlerResult.Ok(
-                MetricSummaryDto(
-                    series = listOf(
-                        MetricPointDto(id = "ttft_ms", value = 12.0, sampledAt = "2026-08-04T00:00:00Z"),
+                MetricSnapshotDto(
+                    snapshotVersion = 1,
+                    samples = listOf(
+                        MetricSampleDto(
+                            name = "request.ttft_ms",
+                            value = 12.0,
+                            unit = "ms",
+                            evidenceLabel = com.omnillm.core.canonical.generated.EvidenceLabel.LAST_SAMPLED,
+                            sampledAt = "2026-08-04T00:00:00Z",
+                        ),
                     ),
-                    resourceVersion = 1,
                 ),
             )
 
@@ -142,10 +152,11 @@ class OpenApiRouteSmokeTest {
                     model = request.model,
                     choices = listOf(
                         ChatCompletionChoiceDto(
-                            message = ChatMessageDto(role = "assistant", content = "ok"),
+                            message = AssistantMessageDto(role = "assistant", content = "ok"),
                             finishReason = "stop",
                         ),
                     ),
+                    omnillm = OmniExecutionInfoDto(requestId = "smoke-request"),
                 ),
             )
     }

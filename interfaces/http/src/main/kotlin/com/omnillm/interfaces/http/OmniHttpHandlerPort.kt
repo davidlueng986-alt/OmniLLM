@@ -142,9 +142,9 @@ interface OmniHttpHandlerPort {
     ): HttpHandlerResult<CommandResultDto>
 
     // --- Metrics / settings / clients (admin-ish HTTP projection) ---
-    suspend fun getMetricSummary(principal: HttpPrincipal): HttpHandlerResult<MetricSummaryDto>
+    suspend fun getMetricSummary(principal: HttpPrincipal): HttpHandlerResult<MetricSnapshotDto>
 
-    suspend fun getMetricDetail(principal: HttpPrincipal): HttpHandlerResult<MetricSummaryDto>
+    suspend fun getMetricDetail(principal: HttpPrincipal): HttpHandlerResult<MetricSnapshotDto>
 
     suspend fun getSettings(principal: HttpPrincipal): HttpHandlerResult<SettingsSnapshotDto>
 

@@ -66,7 +66,11 @@ class GatewayAuthAndRoutesTest {
                             modelRevisionId = "a".repeat(64),
                             displayName = "demo",
                             capabilities = listOf(
-                                CapabilityEntryDto(id = "chat.completions", state = "SUPPORTED"),
+                                CapabilityEntryDto(
+                                    capabilityId = com.omnillm.core.canonical.generated.CapabilityId.TEXT_GENERATION,
+                                    state = com.omnillm.core.canonical.generated.CapabilityState.SUPPORTED,
+                                    evidenceLabel = com.omnillm.core.canonical.generated.EvidenceLabel.REPORTED,
+                                ),
                             ),
                             installationState = "READY",
                         ),

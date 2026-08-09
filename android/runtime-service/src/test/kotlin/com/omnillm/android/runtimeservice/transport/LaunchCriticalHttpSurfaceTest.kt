@@ -108,8 +108,9 @@ class LaunchCriticalHttpSurfaceTest {
                         displayName = "fixture-model",
                         capabilities = listOf(
                             com.omnillm.interfaces.http.CapabilityEntryDto(
-                                id = "chat.completions",
-                                state = "UNKNOWN",
+                                capabilityId = com.omnillm.core.canonical.generated.CapabilityId.TEXT_GENERATION,
+                                state = com.omnillm.core.canonical.generated.CapabilityState.UNKNOWN,
+                                evidenceLabel = com.omnillm.core.canonical.generated.EvidenceLabel.UNKNOWN,
                             ),
                         ),
                         installationState = "READY",
@@ -117,15 +118,17 @@ class LaunchCriticalHttpSurfaceTest {
                 )
             },
             metricSummary = {
-                com.omnillm.interfaces.http.MetricSummaryDto(
-                    series = listOf(
-                        com.omnillm.interfaces.http.MetricPointDto(
-                            id = "ttft_ms",
+                com.omnillm.interfaces.http.MetricSnapshotDto(
+                    snapshotVersion = 1,
+                    samples = listOf(
+                        com.omnillm.interfaces.http.MetricSampleDto(
+                            name = "request.ttft_ms",
                             value = 1.0,
+                            unit = "ms",
+                            evidenceLabel = com.omnillm.core.canonical.generated.EvidenceLabel.LAST_SAMPLED,
                             sampledAt = "2026-08-04T00:00:00Z",
                         ),
                     ),
-                    resourceVersion = 1,
                 )
             },
             lanPorts = host.lanPorts,
@@ -155,10 +158,13 @@ class LaunchCriticalHttpSurfaceTest {
 
         val models = h.listModels(principal, null) as HttpHandlerResult.Ok
         assertEquals(1, models.body.items.size)
-        assertEquals("UNKNOWN", models.body.items[0].capabilities[0].state)
+        assertEquals(
+            com.omnillm.core.canonical.generated.CapabilityState.UNKNOWN,
+            models.body.items[0].capabilities[0].state,
+        )
 
         val metrics = h.getMetricSummary(principal) as HttpHandlerResult.Ok
-        assertTrue(metrics.body.series.any { it.id == "ttft_ms" })
+        assertTrue(metrics.body.samples.any { it.name == "request.ttft_ms" })
 
         val settings = h.getSettings(principal) as HttpHandlerResult.Ok
         assertTrue(settings.body.resourceVersion >= 0)

@@ -1,5 +1,8 @@
 package com.omnillm.interfaces.http
 
+import com.omnillm.core.canonical.generated.CapabilityId
+import com.omnillm.core.canonical.generated.CapabilityState
+import com.omnillm.core.canonical.generated.EvidenceLabel
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -26,11 +29,17 @@ data class HealthDto(
     @SerialName("degraded_reasons") val degradedReasons: List<String> = emptyList(),
 )
 
+/**
+ * OpenAPI `CapabilityEntry` (:3002-3030): capability_id / state /
+ * evidence_label required, reason_code optional. Enum-typed so unknown
+ * capability IDs and labels fail closed at construction (INV-018).
+ */
 @Serializable
 data class CapabilityEntryDto(
-    val id: String,
-    val state: String,
-    val version: String? = null,
+    @SerialName("capability_id") val capabilityId: CapabilityId,
+    val state: CapabilityState,
+    @SerialName("evidence_label") val evidenceLabel: EvidenceLabel,
+    @SerialName("reason_code") val reasonCode: String? = null,
 )
 
 @Serializable
@@ -45,6 +54,8 @@ data class ModelInfoDto(
 data class ModelPageDto(
     val items: List<ModelInfoDto> = emptyList(),
     @SerialName("next_page_token") val nextPageToken: String? = null,
+    /** API-07: required by ModelPage spec (:2366-2368) — monotonic snapshot version. */
+    @SerialName("snapshot_version") val snapshotVersion: Long = 0,
 )
 
 @Serializable
@@ -58,11 +69,39 @@ data class RequestStateDto(
     @SerialName("terminal_error") val terminalError: OmniErrorDto? = null,
 )
 
+/** OpenAPI `ChatMessage` (:1419-1440) — request-side message (role/content/asset_ids). */
 @Serializable
 data class ChatMessageDto(
     val role: String,
     val content: String,
     @SerialName("asset_ids") val assetIds: List<String> = emptyList(),
+)
+
+/**
+ * OpenAPI `AssistantMessage` (:2146-2161) — response-side message:
+ * additionalProperties:false, content nullable, tool_calls optional.
+ * Deliberately NOT ChatMessageDto (asset_ids would violate the contract).
+ */
+@Serializable
+data class AssistantMessageDto(
+    val role: String,
+    val content: String? = null,
+    @SerialName("tool_calls") val toolCalls: List<ToolCallDto> = emptyList(),
+)
+
+/** OpenAPI `ToolCall` (:2123-2145). */
+@Serializable
+data class ToolCallDto(
+    val id: String,
+    val type: String = "function",
+    val function: ToolCallFunctionDto,
+)
+
+/** OpenAPI `ToolCall.function` (:2136-2145). */
+@Serializable
+data class ToolCallFunctionDto(
+    val name: String,
+    val arguments: String,
 )
 
 @Serializable
@@ -79,9 +118,48 @@ data class OpenAIChatRequestDto(
     @SerialName("max_tokens") val maxTokens: Int? = null,
     val temperature: Double? = null,
     @SerialName("top_p") val topP: Double? = null,
+    /** API-09: spec oneOf string | array<string> (:1971-1979). */
+    val stop: JsonElement? = null,
+    /** API-09: spec ResponseFormat (:1980-1981). */
+    @SerialName("response_format") val responseFormat: ResponseFormatDto? = null,
+    /** API-09: spec ToolDefinition list (:1982-1986). */
+    val tools: List<ToolDefinitionDto>? = null,
+    /** API-09: spec oneOf string enum | NamedToolChoice (:1987-1994). */
+    @SerialName("tool_choice") val toolChoice: JsonElement? = null,
     val user: String? = null,
     @SerialName("omnillm_fallback") val omnillmFallback: FallbackDto? = null,
     @SerialName("omnillm_deadline_ms") val omnillmDeadlineMs: Long? = null,
+)
+
+/** OpenAPI `ResponseFormat` (:2040-2053). */
+@Serializable
+data class ResponseFormatDto(
+    val type: String,
+    @SerialName("json_schema") val jsonSchema: JsonSchemaResponseFormatDto? = null,
+)
+
+/** OpenAPI `JsonSchemaResponseFormat` (:2054-2074). */
+@Serializable
+data class JsonSchemaResponseFormatDto(
+    val name: String,
+    val description: String? = null,
+    val strict: Boolean? = null,
+    val schema: JsonObject = JsonObject(emptyMap()),
+)
+
+/** OpenAPI `ToolDefinition` (:2093-2103). */
+@Serializable
+data class ToolDefinitionDto(
+    val type: String = "function",
+    val function: ToolFunctionDefinitionDto,
+)
+
+/** OpenAPI `ToolFunctionDefinition` (:2075-2092). */
+@Serializable
+data class ToolFunctionDefinitionDto(
+    val name: String,
+    val description: String? = null,
+    val parameters: JsonObject = JsonObject(emptyMap()),
 )
 
 @Serializable
@@ -97,7 +175,7 @@ data class OpenAIEmbeddingRequestDto(
 @Serializable
 data class ChatCompletionChoiceDto(
     val index: Int = 0,
-    val message: ChatMessageDto,
+    val message: AssistantMessageDto,
     @SerialName("finish_reason") val finishReason: String? = null,
 )
 
@@ -108,6 +186,25 @@ data class UsageDto(
     @SerialName("total_tokens") val totalTokens: Int = 0,
 )
 
+/**
+ * OpenAPI `OmniExecutionInfo` (:2179-2209) — required on chat/embedding
+ * responses. request_id is always populated; routing facts are omitted
+ * (not fabricated) when the engine does not expose them.
+ */
+@Serializable
+data class OmniExecutionInfoDto(
+    @SerialName("request_id") val requestId: String,
+    @SerialName("actual_model_revision_id") val actualModelRevisionId: String? = null,
+    @SerialName("engine_build_id") val engineBuildId: String? = null,
+    val backend: String? = null,
+    val degradations: List<String> = emptyList(),
+    @SerialName("evidence_label") val evidenceLabel: EvidenceLabel? = null,
+)
+
+/**
+ * API-07: ChatCompletionResponse requires usage + omnillm (:2210-2261).
+ * additionalProperties:false — no extra envelope fields.
+ */
 @Serializable
 data class ChatCompletionResponseDto(
     val id: String,
@@ -115,7 +212,8 @@ data class ChatCompletionResponseDto(
     val created: Long,
     val model: String,
     val choices: List<ChatCompletionChoiceDto>,
-    val usage: UsageDto? = null,
+    val usage: UsageDto = UsageDto(),
+    val omnillm: OmniExecutionInfoDto,
 )
 
 @Serializable
@@ -125,13 +223,18 @@ data class EmbeddingDataDto(
     val embedding: List<Double> = emptyList(),
 )
 
+/**
+ * API-07: EmbeddingResponse requires usage + omnillm (:2262-2311).
+ * Embedding usage schema only requires prompt_tokens/total_tokens.
+ */
 @Serializable
 data class EmbeddingResponseDto(
     val id: String? = null,
     @SerialName("object") val objectType: String = "list",
     val model: String,
     val data: List<EmbeddingDataDto>,
-    val usage: UsageDto? = null,
+    val usage: UsageDto = UsageDto(),
+    val omnillm: OmniExecutionInfoDto,
 )
 
 @Serializable
@@ -204,6 +307,8 @@ data class JobInfoDto(
 data class JobPageDto(
     val items: List<JobInfoDto> = emptyList(),
     @SerialName("next_page_token") val nextPageToken: String? = null,
+    /** API-07: required by JobPage spec (:2382-2384). */
+    @SerialName("snapshot_version") val snapshotVersion: Long = 0,
 )
 
 @Serializable
@@ -214,17 +319,30 @@ data class JobSpecDto(
     val parameters: JsonObject = JsonObject(emptyMap()),
 )
 
+/**
+ * API-08: OpenAPI `MetricSnapshot` (:2466-2481) — snapshot_version / samples
+ * / next_page_token (the old `resource_version`/`series` names dropped data).
+ */
 @Serializable
-data class MetricSummaryDto(
-    val series: List<MetricPointDto> = emptyList(),
-    @SerialName("resource_version") val resourceVersion: Long = 0,
+data class MetricSnapshotDto(
+    @SerialName("snapshot_version") val snapshotVersion: Long = 0,
+    val samples: List<MetricSampleDto> = emptyList(),
+    @SerialName("next_page_token") val nextPageToken: String? = null,
 )
 
+/**
+ * API-08: OpenAPI `MetricSample` (:2435-2465) — name/value/unit/
+ * evidence_label/sampled_at required; evidence_label follows the
+ * measurement-catalog semantics (MEASURED/ESTIMATED/REPORTED/
+ * LAST_SAMPLED/UNKNOWN).
+ */
 @Serializable
-data class MetricPointDto(
-    val id: String,
+data class MetricSampleDto(
+    val name: String,
     val value: Double,
-    @SerialName("sampled_at") val sampledAt: String? = null,
+    val unit: String,
+    @SerialName("evidence_label") val evidenceLabel: EvidenceLabel,
+    @SerialName("sampled_at") val sampledAt: String,
     val dimensions: Map<String, String> = emptyMap(),
 )
 
@@ -240,18 +358,27 @@ data class SettingsPatchDto(
     val changes: Map<String, JsonElement>,
 )
 
+/**
+ * API-07: OpenAPI `ClientInfo` (:2385-2418) — client_id/display_name/state/
+ * scopes/revocation_epoch required (the old summary shape dropped
+ * display_name + revocation_epoch).
+ */
 @Serializable
-data class ClientSummaryDto(
+data class ClientInfoDto(
     @SerialName("client_id") val clientId: String,
+    @SerialName("display_name") val displayName: String,
     val state: String,
     val scopes: List<String> = emptyList(),
     @SerialName("last_seen_at") val lastSeenAt: String? = null,
+    @SerialName("revocation_epoch") val revocationEpoch: Long = 0,
 )
 
 @Serializable
 data class ClientPageDto(
-    val items: List<ClientSummaryDto> = emptyList(),
+    val items: List<ClientInfoDto> = emptyList(),
     @SerialName("next_page_token") val nextPageToken: String? = null,
+    /** API-07: required by ClientPage spec (:2432-2434). */
+    @SerialName("snapshot_version") val snapshotVersion: Long = 0,
 )
 
 @Serializable
@@ -336,6 +463,8 @@ data class TokenInfoDto(
 data class TokenPageDto(
     val items: List<TokenInfoDto> = emptyList(),
     @SerialName("next_page_token") val nextPageToken: String? = null,
+    /** API-07: required by TokenPage spec (:2772-2774). */
+    @SerialName("snapshot_version") val snapshotVersion: Long = 0,
 )
 
 @Serializable
@@ -343,10 +472,19 @@ data class LanEnableRequestDto(
     val command: CommandRequestDto,
 )
 
+/**
+ * API-10: OpenAPI `LanPairingChallengeCreateRequest` (:2775-2799) —
+ * challenge_id (client-generated) / requested_scopes required;
+ * client_display_hint optional; ttl_seconds const 300.
+ * The old `scopes` name and handler-fabricated challengeId violated the contract.
+ */
 @Serializable
 data class LanPairingChallengeCreateRequestDto(
     val command: CommandRequestDto,
-    val scopes: List<String> = emptyList(),
+    @SerialName("challenge_id") val challengeId: String,
+    @SerialName("requested_scopes") val requestedScopes: List<String> = emptyList(),
+    @SerialName("client_display_hint") val clientDisplayHint: String? = null,
+    @SerialName("ttl_seconds") val ttlSeconds: Int? = null,
 )
 
 /**

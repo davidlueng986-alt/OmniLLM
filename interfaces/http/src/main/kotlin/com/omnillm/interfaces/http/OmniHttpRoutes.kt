@@ -931,10 +931,10 @@ object NotImplementedHttpHandler : OmniHttpHandlerPort {
     ) = unsupported<CommandResultDto>("cancelJob")
 
     override suspend fun getMetricSummary(principal: HttpPrincipal) =
-        unsupported<MetricSummaryDto>("getMetricSummary")
+        unsupported<MetricSnapshotDto>("getMetricSummary")
 
     override suspend fun getMetricDetail(principal: HttpPrincipal) =
-        unsupported<MetricSummaryDto>("getMetricDetail")
+        unsupported<MetricSnapshotDto>("getMetricDetail")
 
     override suspend fun getSettings(principal: HttpPrincipal) =
         unsupported<SettingsSnapshotDto>("getSettings")
