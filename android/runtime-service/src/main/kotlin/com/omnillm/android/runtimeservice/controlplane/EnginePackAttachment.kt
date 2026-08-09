@@ -250,11 +250,14 @@ class EnginePackAttachment private constructor(
             // when the adapter is wired (see EngineSelectionPolicy / SHIP_BACKLOG E3-E6).
             val complianceOnly = !buildMode.allowAllEnginesNative()
 
-            // LiteRT-LM
+            // LiteRT-LM — cells must live under the SAME engineBuildId as the
+            // registration (INV-018: catalog cells exist, status UNKNOWN; the packaged
+            // UPSTREAM.lock resolves a real build id, so defaults must not diverge).
             val litertReg = LitertLmModule.registerWith(registry = registry)
             LitertLmModule.seedUnqualifiedPlaceholders(
                 registry = registry,
                 deviceFingerprint = deviceFingerprint,
+                engineBuildId = litertReg.engineBuildId,
                 driverFingerprint = DRIVER_PLACEHOLDER,
             )
             out[LitertLmModule.ENGINE_ID] = litertReg

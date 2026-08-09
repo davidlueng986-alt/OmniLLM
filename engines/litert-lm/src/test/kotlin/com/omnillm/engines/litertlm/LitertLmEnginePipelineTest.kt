@@ -258,14 +258,17 @@ class LitertLmEnginePipelineTest {
     @Test
     fun seedUnqualifiedPlaceholders_projectUnknownNeverSupported() {
         val reg = EngineRegistry()
-        LitertLmModule.registerWith(reg)
+        val registration = LitertLmModule.registerWith(reg)
         val cells = LitertLmModule.seedUnqualifiedPlaceholders(reg, device)
         assertTrue(cells.isNotEmpty())
+        // INV-018 catalog completeness: seeded cells live under the REGISTERED build id
+        // (a locked UPSTREAM.lock resolves a real engineBuildId — defaults must not diverge).
+        assertTrue(cells.all { it.engineBuildId == registration.engineBuildId })
         assertTrue(cells.all { it.qualificationStatus == EngineQualificationCellStatus.UNQUALIFIED })
         assertTrue(cells.all { it.evidenceStatus == EvidenceStatusLabels.NOT_EXECUTED })
 
         val key = EngineQualificationCellKey(
-            engineBuildId = LitertLmModule.defaultEngineBuildId(),
+            engineBuildId = registration.engineBuildId,
             backend = "cpu",
             phase = EnginePhases.GENERATE,
             platform = "android",

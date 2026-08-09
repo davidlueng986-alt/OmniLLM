@@ -44,6 +44,15 @@ object LitertLmModule {
         EngineBuildId.parse(DEFAULT_ENGINE_BUILD_ID)
 
     /**
+     * Same build-id resolution as [registerWith]'s default: the classpath UPSTREAM.lock
+     * when it pins an engineBuildId, else the placeholder. Keeps registration and
+     * seeded cells on the same engineBuildId (INV-018 catalog completeness).
+     */
+    private fun resolvedDefaultEngineBuildId(): EngineBuildId =
+        UpstreamLockLoader.loadFromClasspathOrTemplate().resolvedEngineBuildId()
+            ?: defaultEngineBuildId()
+
+    /**
      * Factory for the Kotlin adapter.
      *
      * Default [SdkBackend] is [StubSdkBackend] for **host unit tests** only.
@@ -114,13 +123,19 @@ object LitertLmModule {
      * All cells are [EngineQualificationCellStatus.UNQUALIFIED] with
      * [EvidenceStatusLabels.NOT_EXECUTED] and [CancellationModes.UNKNOWN].
      *
+     * The default [engineBuildId] resolves from the classpath UPSTREAM.lock exactly like
+     * [registerWith] — cells must live under the **registered** build id, otherwise the
+     * catalog appears empty for the engine (INV-018: cells exist, status UNKNOWN, never
+     * silently absent). Callers with an explicit lock should pass the same build id to
+     * both [registerWith] and this function.
+     *
      * Projected runtime capability remains [com.omnillm.core.canonical.generated.CapabilityState.UNKNOWN].
      * Never invents SUPPORTED.
      */
     fun seedUnqualifiedPlaceholders(
         registry: EngineRegistry,
         deviceFingerprint: DeviceExecutionFingerprint,
-        engineBuildId: EngineBuildId = defaultEngineBuildId(),
+        engineBuildId: EngineBuildId = resolvedDefaultEngineBuildId(),
         driverFingerprint: String = "unknown-driver",
         platform: String = "android",
         modelEnvelope: String = "*",
