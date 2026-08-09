@@ -778,35 +778,24 @@ class ControlPlaneHttpHandler(
         val digest = sha256Hex(
             "${request.requestId}|${request.idempotencyKey}|${request.operation}|$canonicalPayload",
         )
-        val revisionHex = payload.model.lowercase().let {
-            if (it.matches(Regex("^[0-9a-f]{64}$"))) it
-            else com.omnillm.core.canonical.IdentityHashing.sha256Hex("model|${payload.model}")
-        }
-        val revision = try {
-            ModelRevisionId.parse(revisionHex)
-        } catch (_: Exception) {
-            return HttpHandlerResult.Err(
+        val revision = com.omnillm.android.runtimeservice.featurehost.FeatureRequestMapper
+            .normalizeRevision(payload.model)
+            ?: return HttpHandlerResult.Err(
                 OmniError.INVALID_REQUEST(message = "invalid model in chat payload"),
             )
+        val candidate = when (
+            val c = com.omnillm.android.runtimeservice.featurehost.FeatureRequestMapper
+                .resolveCandidate(
+                    binding = source.binding,
+                    modelManager = source.modelManager,
+                    revision = revision,
+                    deviceFingerprint = com.omnillm.core.contracts.DeviceExecutionFingerprint
+                        .parse("device-fp-http-durable"),
+                )
+        ) {
+            is OmniResult.Err -> return HttpHandlerResult.Err(c.error)
+            is OmniResult.Ok -> c.value
         }
-        val installation = com.omnillm.android.runtimeservice.featurehost.ControlPlaneFeaturePorts
-            .resolveInstallationOrNull(source.modelManager, revision)
-            ?: return HttpHandlerResult.Err(
-                OmniError.CAPABILITY_UNSUPPORTED(
-                    message = "no installed model for requested revision (fail closed, ARC-06)",
-                    details = mapOf("modelRevisionId" to revision.hex),
-                ),
-            )
-        val candidate = com.omnillm.android.runtimeservice.featurehost.ControlPlaneFeaturePorts
-            .buildCandidate(
-                binding = source.binding,
-                revision = revision,
-                installationId = installation,
-                device = com.omnillm.core.contracts.DeviceExecutionFingerprint
-                    .parse("device-fp-http-durable"),
-            )
-        if (candidate is OmniResult.Err) return HttpHandlerResult.Err(candidate.error)
-        val candidateValue = (candidate as OmniResult.Ok).value
         val orchestrationRequest = com.omnillm.runtime.orchestrator.OrchestrationRequest(
             requestId = RequestId.parse(request.requestId),
             principalId = PrincipalId.parse(principal.principalId),
@@ -817,7 +806,7 @@ class ControlPlaneHttpHandler(
                 com.omnillm.core.canonical.generated.CapabilityId.TEXT_GENERATION,
             ),
             requestedRevisionId = revision,
-            candidates = listOf(candidateValue),
+            candidates = listOf(candidate),
             routing = com.omnillm.android.runtimeservice.featurehost.ControlPlaneFeaturePorts
                 .exploratoryRouting(),
             costClass = com.omnillm.runtime.orchestrator.CostClassLabels.GENERATION,
