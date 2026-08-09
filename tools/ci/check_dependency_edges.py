@@ -21,6 +21,12 @@ PROJECT_DEP = re.compile(
     r"""(?:api|implementation|compileOnly|runtimeOnly|testImplementation|androidTestImplementation)\s*\(\s*project\s*\(\s*["']([^"']+)["']\s*\)"""
 )
 
+# Main (production) configurations only — test-scoped fixtures to :data:*
+# are integration-test edges and do not reach shipped classpaths.
+MAIN_PROJECT_DEP = re.compile(
+    r"""(?:api|implementation|compileOnly|runtimeOnly)\s*\(\s*project\s*\(\s*["']([^"']+)["']\s*\)"""
+)
+
 # Direct edges that must never appear (from_module_path_prefix → forbidden dependency).
 # Keys are module paths as written in settings/include (":android:app-ui").
 FORBIDDEN: List[Tuple[str, str, str]] = [
@@ -55,14 +61,9 @@ WARNINGS: List[Tuple[str, str, str]] = [
         "UI depends on runtime-service for process/manifest merge; ensure no UI-process control plane attach",
     ),
     (
-        ":interfaces:admin",
-        ":data:persistence",
-        "Admin API imports claim-row types from persistence; prefer request-registry projection only",
-    ),
-    (
         ":features:modelhub",
         ":data:model-store",
-        "Feature Pack touches model-store types; host only via control-plane ports in :runtime",
+        "Feature Pack touches model-store types; host only via control-plane ports in :runtime (ARC-02 documented debt)",
     ),
 ]
 
@@ -93,9 +94,24 @@ def collect_edges(root: Path) -> Dict[str, Set[str]]:
     return edges
 
 
+def collect_main_edges(root: Path) -> Dict[str, Set[str]]:
+    """Direct edges declared in production configurations only (ARC-02 gate)."""
+    edges: Dict[str, Set[str]] = {}
+    for build in root.rglob("build.gradle.kts"):
+        if any(p == "build" for p in build.relative_to(root).parts[:-1]):
+            continue
+        text = build.read_text(encoding="utf-8")
+        mod = module_path_from_build_file(root, build)
+        deps = set(MAIN_PROJECT_DEP.findall(text))
+        if deps:
+            edges[mod] = deps
+    return edges
+
+
 def main() -> int:
     root = Path(__file__).resolve().parents[2]
     edges = collect_edges(root)
+    main_edges = collect_main_edges(root)
     failures: List[str] = []
     warns: List[str] = []
 
@@ -123,6 +139,23 @@ def main() -> int:
             failures.append(
                 f"FORBIDDEN :android:app-ui → {d}: UI must not depend on data/* (INV-001)"
             )
+
+    # Feature Packs / transport facades must not compile against :data:* writers
+    # (ARC-02 / AGENTS.md dependency rules). Production configurations only;
+    # test-only fixtures are integration edges and stay allowed.
+    for mod, deps in main_edges.items():
+        if mod.startswith(":features:") or mod.startswith(":interfaces:"):
+            for d in sorted(deps):
+                if d == ":data:persistence":
+                    failures.append(
+                        f"FORBIDDEN {mod} → {d}: feature/interface must not depend on "
+                        f"data writers (ARC-02 / INV-001); consume :core:ports or :runtime ports"
+                    )
+                elif d == ":data:model-store":
+                    warns.append(
+                        f"WARN {mod} → {d}: model-store types on feature classpath "
+                        f"(ARC-02 documented debt; host via control-plane ports)"
+                    )
 
     for src, dst, reason in WARNINGS:
         if dst in edges.get(src, set()):

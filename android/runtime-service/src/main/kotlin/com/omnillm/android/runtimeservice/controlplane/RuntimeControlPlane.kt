@@ -20,9 +20,9 @@ import com.omnillm.data.modelstore.ModelStorePort
 import com.omnillm.data.modelstore.StorageLayout
 import com.omnillm.data.persistence.CommitReconcileResult
 import com.omnillm.data.persistence.ControlPlaneDatabase
-import com.omnillm.data.persistence.ControlPlaneWriter
+import com.omnillm.core.ports.ledger.ControlPlaneWriter
 import com.omnillm.data.persistence.OmniLlmDatabase
-import com.omnillm.data.persistence.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
 import com.omnillm.runtime.modelmanager.DefaultPrivilegedLoadReverify
 import com.omnillm.features.admin.usecase.AdminFeatureApi
 import com.omnillm.features.autosetup.api.AutoSetupApi

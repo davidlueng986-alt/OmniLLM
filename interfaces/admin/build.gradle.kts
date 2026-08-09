@@ -25,7 +25,8 @@ dependencies {
     implementation(project(":runtime:request-registry"))
     implementation(project(":runtime:job-manager"))
     implementation(project(":runtime:policy"))
-    implementation(project(":data:persistence"))
+    // Command claim rows come from :core:ports (ARC-02); never :data:* writers.
+    implementation(project(":core:ports"))
 
     testImplementation(libs.junit)
 }

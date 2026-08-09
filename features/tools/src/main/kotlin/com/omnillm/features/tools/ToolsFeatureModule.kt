@@ -1,7 +1,7 @@
 package com.omnillm.features.tools
 
 import com.omnillm.core.canonical.generated.CapabilityId
-import com.omnillm.data.persistence.ToolProposalLedgerPorts
+import com.omnillm.core.ports.ledger.ToolProposalLedgerPorts
 import com.omnillm.features.tools.api.ToolsApi
 import com.omnillm.features.tools.ports.DurableToolProposalLedger
 import com.omnillm.features.tools.ports.InMemoryToolProposalLedger

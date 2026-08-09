@@ -9,7 +9,7 @@ import com.omnillm.core.state.domain.ModelInstallationAggregate
 import com.omnillm.data.modelstore.QuarantineKey
 import com.omnillm.data.persistence.InstallationLedgerPorts
 import com.omnillm.data.persistence.InstallationRecordRow
-import com.omnillm.data.persistence.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
 import com.omnillm.runtime.modelmanager.domain.EvaluationDimensions
 import com.omnillm.runtime.modelmanager.domain.InstallationSnapshot
 import com.omnillm.runtime.modelmanager.ports.InstallationRepository

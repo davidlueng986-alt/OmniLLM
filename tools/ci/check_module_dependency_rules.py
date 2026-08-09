@@ -200,6 +200,32 @@ def main() -> int:
                 )
 
     # ------------------------------------------------------------------
+    # 3b) Feature Packs / transport facades must not depend on :data:persistence
+    # (ARC-02 gate). Main configurations only; test-scoped fixtures (features:admin
+    # integration tests) are allowed. :data:model-store is a soft WARN (modelhub
+    # documented debt — host via control-plane ports in :runtime).
+    # ------------------------------------------------------------------
+    MAIN_CFGS = {"api", "implementation", "compileOnly", "runtimeOnly"}
+    for mod in sorted(
+        m for m in modules if m.startswith(":features:") or m.startswith(":interfaces:")
+    ):
+        for cfg, dep in graph.get(mod, []):
+            if cfg not in MAIN_CFGS:
+                continue
+            if dep == ":data:persistence":
+                hard.append(
+                    f"{cfg.upper()} {mod} → {dep} "
+                    f"(forbidden: feature/interface → data writers; consume :core:ports "
+                    f"or :runtime ports, ARC-02 / INV-001)"
+                )
+            elif dep == ":data:model-store":
+                soft.append(
+                    f"{cfg.upper()} {mod} → {dep} "
+                    f"(debt: model-store types on feature classpath; host via "
+                    f"control-plane ports in :runtime, ARC-02)"
+                )
+
+    # ------------------------------------------------------------------
     # 4–5) app-ui api-propagated paths
     # ------------------------------------------------------------------
     if app_ui in modules:

@@ -29,6 +29,8 @@ dependencies {
     api(project(":data:model-store"))
     // SQLDelight installation / revision-lease ledger ports (ADR-010 sole writer).
     api(project(":data:persistence"))
+    // Shared ledger ports (SingleWriterPolicy / ControlPlaneWriter) in :core:ports (ARC-01).
+    implementation(project(":core:ports"))
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.core)

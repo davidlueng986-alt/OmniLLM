@@ -6,11 +6,11 @@ import com.omnillm.core.canonical.generated.ContentReportState
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.errors.ErrorMapping
 import com.omnillm.core.errors.generated.OmniError
-import com.omnillm.data.persistence.ContentReportGrantRow
-import com.omnillm.data.persistence.ContentReportLedgerPorts
-import com.omnillm.data.persistence.ContentReportReceiptRow
-import com.omnillm.data.persistence.ContentReportRecordRow
-import com.omnillm.data.persistence.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.ContentReportGrantRow
+import com.omnillm.core.ports.ledger.ContentReportLedgerPorts
+import com.omnillm.core.ports.ledger.ContentReportReceiptRow
+import com.omnillm.core.ports.ledger.ContentReportRecordRow
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
 import com.omnillm.features.contentreport.domain.ConsentGrant
 import com.omnillm.features.contentreport.domain.ConsentGrantState
 import com.omnillm.features.contentreport.domain.ContentReportPayload

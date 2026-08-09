@@ -1,7 +1,7 @@
 package com.omnillm.features.contentreport
 
 import com.omnillm.core.canonical.generated.CapabilityId
-import com.omnillm.data.persistence.ContentReportLedgerPorts
+import com.omnillm.core.ports.ledger.ContentReportLedgerPorts
 import com.omnillm.features.contentreport.api.ContentReportApi
 import com.omnillm.features.contentreport.ports.CapabilityAvailabilityPort
 import com.omnillm.features.contentreport.ports.ContentReportEndpointPort

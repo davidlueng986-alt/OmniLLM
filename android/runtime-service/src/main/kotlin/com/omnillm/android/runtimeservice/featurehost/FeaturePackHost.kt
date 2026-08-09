@@ -26,7 +26,7 @@ import com.omnillm.runtime.observability.ObservabilityFacade
 import com.omnillm.runtime.policy.PolicyManager
 import com.omnillm.runtime.policy.security.InMemorySecretBroker
 import com.omnillm.runtime.policy.security.SecretBroker
-import com.omnillm.data.persistence.ToolProposalLedgerPorts
+import com.omnillm.core.ports.ledger.ToolProposalLedgerPorts
 
 /**
  * Wave-B Feature Pack host attached to the runtime control plane (ADR-010).

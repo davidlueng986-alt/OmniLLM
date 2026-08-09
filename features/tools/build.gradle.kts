@@ -30,7 +30,9 @@ dependencies {
 
     // Durable tool proposal ledger (ADR-010). implementation — do not api()-reexport
     // SQLite writers into app-ui (INV-001). Production opens via control plane only.
-    implementation(project(":data:persistence"))
+    // Tool proposal ledger ports live in :core:ports (ARC-02); the SQLite
+    // adapter stays control-plane only (ADR-010 / INV-001).
+    implementation(project(":core:ports"))
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.core)

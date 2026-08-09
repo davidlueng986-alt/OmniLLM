@@ -8,8 +8,8 @@ import com.omnillm.core.contracts.IdempotencyKey
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniError
 import com.omnillm.core.state.domain.JobId
-import com.omnillm.data.persistence.CommandLedgerStates
-import com.omnillm.data.persistence.IdempotentCommandClaimRow
+import com.omnillm.core.ports.ledger.CommandLedgerStates
+import com.omnillm.core.ports.ledger.IdempotentCommandClaimRow
 import com.omnillm.runtime.job.JobIdentity
 import com.omnillm.runtime.job.JobKind
 import com.omnillm.runtime.job.JobManager

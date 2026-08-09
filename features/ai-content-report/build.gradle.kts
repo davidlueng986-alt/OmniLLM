@@ -31,11 +31,15 @@ dependencies {
 
     // Durable ContentReport ledger (ADR-010). implementation — do not api()-reexport
     // SQLite writers into app-ui (INV-001). Production opens via control plane only.
-    implementation(project(":data:persistence"))
+    // Durable ContentReport ledger ports (ADR-010). Ports live in :core:ports
+    // (ARC-02); the SQLite adapter stays control-plane only (INV-001).
+    implementation(project(":core:ports"))
 
     // Secret Broker REPORT_QUEUE_ENCRYPTION for draft/queue payload seal (FEAT-AI-CONTENT-REPORT §6).
     implementation(project(":runtime:policy"))
 
+    // Integration test opens the SQLite adapter via ControlPlaneDatabase.
+    testImplementation(project(":data:persistence"))
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.core)
 }

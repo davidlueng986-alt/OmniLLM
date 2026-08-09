@@ -26,7 +26,9 @@ dependencies {
 
     // Wire through Orchestrator ports only (AGENTS.md Feature Pack / ADR-010).
     api(project(":runtime:orchestrator"))
-    api(project(":engines:api"))
+    // engines:api stays implementation (ARC-02): routing internals use
+    // PlacementClassLabels but must not re-export the engine SPI to app-ui.
+    implementation(project(":engines:api"))
 
     // LOCAL_UI principal for UI-facing API.
     api(project(":interfaces:admin"))

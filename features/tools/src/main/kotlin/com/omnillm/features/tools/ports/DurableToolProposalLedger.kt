@@ -1,9 +1,9 @@
 package com.omnillm.features.tools.ports
 
-import com.omnillm.data.persistence.SingleWriterPolicy
-import com.omnillm.data.persistence.ToolProposalLedgerPorts
-import com.omnillm.data.persistence.ToolProposalRow
-import com.omnillm.data.persistence.ToolResultClaimRow
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.ToolProposalLedgerPorts
+import com.omnillm.core.ports.ledger.ToolProposalRow
+import com.omnillm.core.ports.ledger.ToolResultClaimRow
 import com.omnillm.features.tools.domain.ToolProposal
 import com.omnillm.features.tools.domain.ToolProposalState
 import com.omnillm.features.tools.policy.StoredToolResultClaim

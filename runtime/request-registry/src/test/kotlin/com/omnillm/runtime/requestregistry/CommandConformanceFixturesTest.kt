@@ -6,7 +6,7 @@ import com.omnillm.core.contracts.CommandId
 import com.omnillm.core.contracts.IdempotencyKey
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniErrorCode
-import com.omnillm.data.persistence.IdempotentCommandClaimRow
+import com.omnillm.core.ports.ledger.IdempotentCommandClaimRow
 import com.omnillm.runtime.RequestRegistryModule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

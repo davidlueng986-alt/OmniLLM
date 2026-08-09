@@ -13,7 +13,7 @@ import com.omnillm.data.persistence.CommitRecordRow
 import com.omnillm.data.persistence.CommitResourceBindingRow
 import com.omnillm.data.persistence.PreparedOperationLedgerStates
 import com.omnillm.data.persistence.PreparedOperationRow
-import com.omnillm.data.persistence.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
 import java.security.MessageDigest
 
 /**

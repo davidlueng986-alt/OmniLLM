@@ -22,6 +22,9 @@ dependencies {
     implementation(project(":core:state"))
     // Claim/commit ledger types appear in public registry APIs — api, not implementation.
     api(project(":data:persistence"))
+    // Shared ledger port rows (CommandLedgerStates / IdempotentCommandClaimRow /
+    // SingleWriterPolicy) live in :core:ports (ARC-02).
+    implementation(project(":core:ports"))
 
     testImplementation(libs.junit)
 }

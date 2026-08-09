@@ -9,7 +9,7 @@ import com.omnillm.data.persistence.JobAttemptLedgerRow
 import com.omnillm.data.persistence.JobEventLedgerRow
 import com.omnillm.data.persistence.JobLedgerPorts
 import com.omnillm.data.persistence.JobLedgerRow
-import com.omnillm.data.persistence.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
 import java.time.Instant
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull

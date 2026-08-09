@@ -9,7 +9,7 @@ import com.omnillm.core.state.domain.RevisionLeaseAggregate
 import com.omnillm.core.state.domain.RevisionLeaseId
 import com.omnillm.data.persistence.RevisionLeaseLedgerPorts
 import com.omnillm.data.persistence.RevisionLeaseRecordRow
-import com.omnillm.data.persistence.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
 import com.omnillm.runtime.modelmanager.domain.RevisionLeaseSnapshot
 import com.omnillm.runtime.modelmanager.ports.RevisionLeaseRepository
 import java.time.Instant

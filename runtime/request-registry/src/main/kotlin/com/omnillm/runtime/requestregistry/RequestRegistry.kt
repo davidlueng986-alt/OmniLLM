@@ -12,7 +12,7 @@ import com.omnillm.data.persistence.InferenceRequestClaimRow
 import com.omnillm.data.persistence.RequestAttemptRow
 import com.omnillm.data.persistence.RequestLedgerStates
 import com.omnillm.data.persistence.RequestTerminalRow
-import com.omnillm.data.persistence.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
 
 /**
  * Request Registry — durable inference claim ledger (CORE-ORCHESTRATOR §1, ADR-004/005).

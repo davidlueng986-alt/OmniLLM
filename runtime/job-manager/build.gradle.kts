@@ -15,6 +15,9 @@ kotlin {
 dependencies {
     implementation(libs.kotlin.stdlib)
     implementation(project(":core:canonical"))
+    // Shared ledger ports (SingleWriterPolicy / ControlPlaneWriter) in
+    // :core:ports (ARC-01).
+    implementation(project(":core:ports"))
     implementation(project(":core:contracts"))
     implementation(project(":core:errors"))
     implementation(project(":core:state"))
