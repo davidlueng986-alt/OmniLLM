@@ -6,6 +6,7 @@ import com.omnillm.features.contentreport.api.ContentReportCommandIdentity
 import com.omnillm.features.contentreport.api.CreateProposalSpec
 import com.omnillm.features.contentreport.api.GrantConsentSpec
 import com.omnillm.features.contentreport.domain.ContentReportPolicy.CallerSurface
+import com.omnillm.features.contentreport.ports.ContentReportEndpointPort
 import com.omnillm.features.contentreport.ports.ContentReportFeaturePorts
 import com.omnillm.features.contentreport.ports.ContentReportStorePort
 import com.omnillm.features.contentreport.ports.DefaultCapabilityAvailabilityPort
@@ -84,7 +85,7 @@ class ClockControl(start: Long = 1_700_000_000_000L) {
 
 fun ports(
     store: ContentReportStorePort = InMemoryContentReportStore(),
-    endpoint: FakeContentReportEndpoint = FakeContentReportEndpoint(),
+    endpoint: ContentReportEndpointPort = FakeContentReportEndpoint(),
     clock: ClockControl = ClockControl(),
     endpointConfigured: Boolean = true,
 ): ContentReportFeaturePorts =
