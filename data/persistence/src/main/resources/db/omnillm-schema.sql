@@ -1,5 +1,21 @@
 PRAGMA foreign_keys = ON;
 
+-- ===========================================================================
+-- OmniLLM control-plane authority schema (API-40..44 sync, 2026-08-09).
+--
+-- Table status legend:
+--   -- STATUS: IMPLEMENTED                        → SQLDelight .sq projection
+--     exists under data/persistence/src/main/sqldelight/ (see the named .sq).
+--   -- STATUS: PLANNED (not yet implemented)      → spec-only; no .sq
+--     projection exists yet. Do NOT treat as available storage surface.
+--
+-- Authority flows ONE way: implementations project from this file. The .sq
+-- files are the implemented truth for the tables they cover; this file has
+-- been realigned to match them (columns, nullability, defaults, timestamps
+-- as epoch_ms INTEGER, explicit composite PKs).
+-- ===========================================================================
+
+-- STATUS: IMPLEMENTED — SQLDelight .sq: SchemaMetadata.sq
 CREATE TABLE schema_metadata (
   singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1),
   current_version INTEGER NOT NULL CHECK(current_version>=1),
@@ -9,6 +25,7 @@ CREATE TABLE schema_metadata (
   updated_at TEXT NOT NULL
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: SchemaMigrationAttempts.sq
 CREATE TABLE schema_migration_attempts (
   migration_id TEXT PRIMARY KEY,
   from_version INTEGER NOT NULL CHECK(from_version>=1),
@@ -20,6 +37,7 @@ CREATE TABLE schema_migration_attempts (
   error_code TEXT
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: SchemaMigrationHistory.sq
 CREATE TABLE schema_migration_history (
   migration_id TEXT PRIMARY KEY,
   from_version INTEGER NOT NULL,
@@ -46,6 +64,7 @@ END;
 INSERT INTO schema_metadata(singleton_id,current_version,min_readable_version,min_writable_version,state,updated_at)
 VALUES(1,2,2,2,'ACTIVE','2026-08-02T00:00:00Z');
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE runtime_instances (
   runtime_instance_id TEXT PRIMARY KEY,
   boot_id TEXT NOT NULL,
@@ -57,6 +76,7 @@ CREATE TABLE runtime_instances (
   UNIQUE (boot_id, runtime_epoch)
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE blobs (
   blob_id TEXT PRIMARY KEY CHECK(length(blob_id)=64),
   byte_length INTEGER NOT NULL CHECK(byte_length>=0),
@@ -64,6 +84,7 @@ CREATE TABLE blobs (
   created_at TEXT NOT NULL
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE artifact_packages (
   artifact_package_id TEXT PRIMARY KEY CHECK(length(artifact_package_id)=64),
   schema_version INTEGER NOT NULL CHECK(schema_version>0),
@@ -71,6 +92,7 @@ CREATE TABLE artifact_packages (
   created_at TEXT NOT NULL
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE artifact_files (
   artifact_package_id TEXT NOT NULL,
   role TEXT NOT NULL,
@@ -82,6 +104,7 @@ CREATE TABLE artifact_files (
   FOREIGN KEY (blob_id) REFERENCES blobs(blob_id) ON DELETE RESTRICT
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE model_revisions (
   revision_id TEXT PRIMARY KEY CHECK(length(revision_id)=64),
   schema_version INTEGER NOT NULL CHECK(schema_version=1),
@@ -97,20 +120,33 @@ CREATE TABLE model_revisions (
   FOREIGN KEY (artifact_package_id) REFERENCES artifact_packages(artifact_package_id) ON DELETE RESTRICT
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: Installations.sq
 CREATE TABLE installations (
   installation_id TEXT PRIMARY KEY,
   revision_id TEXT NOT NULL,
+  artifact_package_id TEXT NOT NULL,
   state TEXT NOT NULL,
   storage_root_key TEXT NOT NULL UNIQUE,
   trust_epoch INTEGER NOT NULL DEFAULT 0 CHECK(trust_epoch>=0),
   template_epoch INTEGER NOT NULL DEFAULT 0 CHECK(template_epoch>=0),
   tokenizer_epoch INTEGER NOT NULL DEFAULT 0 CHECK(tokenizer_epoch>=0),
+  quarantine_job_id TEXT,
+  quarantine_attempt_id TEXT,
+  authenticity_ok INTEGER,
+  license_ok INTEGER,
+  compatibility_ok INTEGER,
+  performance_recorded INTEGER,
+  placement_class TEXT,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  reject_reason TEXT,
+  resource_version INTEGER NOT NULL DEFAULT 0 CHECK(resource_version>=0),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (installation_id, revision_id),
   FOREIGN KEY (revision_id) REFERENCES model_revisions(revision_id) ON DELETE RESTRICT
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE source_assertions (
   assertion_id TEXT PRIMARY KEY,
   source_type TEXT NOT NULL,
@@ -125,6 +161,7 @@ CREATE TABLE source_assertions (
   created_at TEXT NOT NULL
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE revision_assertions (
   revision_id TEXT NOT NULL,
   assertion_id TEXT NOT NULL,
@@ -133,6 +170,7 @@ CREATE TABLE revision_assertions (
   FOREIGN KEY (assertion_id) REFERENCES source_assertions(assertion_id) ON DELETE RESTRICT
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE installation_attestations (
   installation_id TEXT NOT NULL,
   revision_id TEXT NOT NULL,
@@ -145,6 +183,7 @@ CREATE TABLE installation_attestations (
   FOREIGN KEY (revision_id, assertion_id) REFERENCES revision_assertions(revision_id, assertion_id) ON DELETE RESTRICT
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE license_terms (
   terms_id TEXT PRIMARY KEY,
   terms_digest TEXT NOT NULL UNIQUE CHECK(length(terms_digest)=64),
@@ -156,6 +195,7 @@ CREATE TABLE license_terms (
   created_at TEXT NOT NULL
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE license_events (
   event_id TEXT PRIMARY KEY,
   principal_id TEXT NOT NULL,
@@ -170,6 +210,7 @@ CREATE TABLE license_events (
   FOREIGN KEY (terms_id) REFERENCES license_terms(terms_id) ON DELETE RESTRICT
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE template_overrides (
   revision_id TEXT NOT NULL,
   version INTEGER NOT NULL CHECK(version>0),
@@ -181,6 +222,7 @@ CREATE TABLE template_overrides (
   FOREIGN KEY (revision_id) REFERENCES model_revisions(revision_id) ON DELETE CASCADE
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE reservations (
   reservation_id TEXT PRIMARY KEY,
   issuer_boot_id TEXT NOT NULL,
@@ -196,6 +238,7 @@ CREATE TABLE reservations (
   FOREIGN KEY (issuer_boot_id, runtime_epoch) REFERENCES runtime_instances(boot_id, runtime_epoch) ON DELETE RESTRICT
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE allocations (
   allocation_id TEXT PRIMARY KEY,
   reservation_id TEXT NOT NULL,
@@ -209,6 +252,7 @@ CREATE TABLE allocations (
   FOREIGN KEY (reservation_id) REFERENCES reservations(reservation_id) ON DELETE RESTRICT
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE loaded_models (
   loaded_model_id TEXT PRIMARY KEY,
   installation_id TEXT NOT NULL,
@@ -225,21 +269,38 @@ CREATE TABLE loaded_models (
   FOREIGN KEY (allocation_id) REFERENCES allocations(allocation_id) ON DELETE RESTRICT
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: Sessions.sq
 CREATE TABLE sessions (
   session_id TEXT PRIMARY KEY,
-  loaded_model_id TEXT NOT NULL,
-  principal_id TEXT NOT NULL,
   session_epoch INTEGER NOT NULL CHECK(session_epoch>=0),
-  state TEXT NOT NULL,
+  owner_key TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  loaded_model_id TEXT NOT NULL,
+  model_revision_id TEXT NOT NULL,
+  engine_build_id TEXT NOT NULL,
+  backend TEXT NOT NULL,
+  device_execution_fingerprint TEXT NOT NULL,
+  template_epoch INTEGER NOT NULL,
+  tokenizer_epoch INTEGER NOT NULL,
+  load_configuration_digest TEXT NOT NULL,
+  tokenizer_digest TEXT NOT NULL,
+  context_config TEXT NOT NULL,
   committed_token_fingerprint TEXT,
-  delivered_seq INTEGER NOT NULL DEFAULT 0 CHECK(delivered_seq>=0),
+  state TEXT NOT NULL,
   allocation_id TEXT NOT NULL,
+  revocation_epoch INTEGER NOT NULL,
+  runtime_epoch INTEGER NOT NULL,
+  recovery_disposition TEXT NOT NULL,
+  healthy INTEGER NOT NULL DEFAULT 1 CHECK(healthy IN (0,1)),
+  pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),
+  delivered_seq INTEGER NOT NULL DEFAULT 0 CHECK(delivered_seq>=0),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (loaded_model_id) REFERENCES loaded_models(loaded_model_id) ON DELETE RESTRICT,
   FOREIGN KEY (allocation_id) REFERENCES allocations(allocation_id) ON DELETE RESTRICT
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: RevisionLeases.sq
 CREATE TABLE revision_leases (
   lease_id TEXT PRIMARY KEY,
   revision_id TEXT NOT NULL,
@@ -247,11 +308,16 @@ CREATE TABLE revision_leases (
   principal_id TEXT NOT NULL,
   runtime_epoch INTEGER NOT NULL,
   state TEXT NOT NULL,
+  installation_id TEXT,
+  reference_count INTEGER NOT NULL DEFAULT 1 CHECK(reference_count>=1),
   expires_at TEXT,
+  expires_at_monotonic INTEGER,
   created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
   FOREIGN KEY (revision_id) REFERENCES model_revisions(revision_id) ON DELETE RESTRICT
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: InferenceRequests.sq
 CREATE TABLE inference_requests (
   request_id TEXT PRIMARY KEY,
   principal_id TEXT NOT NULL,
@@ -267,6 +333,7 @@ CREATE TABLE inference_requests (
   FOREIGN KEY (revision_id) REFERENCES model_revisions(revision_id) ON DELETE RESTRICT
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: RequestAttempts.sq
 CREATE TABLE request_attempts (
   request_id TEXT NOT NULL,
   attempt_no INTEGER NOT NULL CHECK(attempt_no>=1),
@@ -279,6 +346,7 @@ CREATE TABLE request_attempts (
   FOREIGN KEY (request_id) REFERENCES inference_requests(request_id) ON DELETE CASCADE
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE request_events (
   request_id TEXT NOT NULL,
   seq_from INTEGER NOT NULL CHECK(seq_from>=0),
@@ -290,6 +358,7 @@ CREATE TABLE request_events (
   FOREIGN KEY (request_id) REFERENCES inference_requests(request_id) ON DELETE CASCADE
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: RequestTerminals.sq
 CREATE TABLE request_terminals (
   request_id TEXT PRIMARY KEY,
   terminal_state TEXT NOT NULL,
@@ -300,6 +369,7 @@ CREATE TABLE request_terminals (
   FOREIGN KEY (request_id) REFERENCES inference_requests(request_id) ON DELETE CASCADE
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: CommitRecords.sq
 CREATE TABLE commit_records (
   commit_id TEXT PRIMARY KEY,
   request_id TEXT NOT NULL,
@@ -327,6 +397,7 @@ CREATE TABLE commit_records (
   FOREIGN KEY (issuer_boot_id, runtime_epoch) REFERENCES runtime_instances(boot_id, runtime_epoch) ON DELETE RESTRICT
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: PreparedOperations.sq
 CREATE TABLE prepared_operations (
   prepared_operation_id TEXT PRIMARY KEY,
   operation_id TEXT NOT NULL UNIQUE,
@@ -359,6 +430,7 @@ CREATE TABLE prepared_operations (
   FOREIGN KEY (target_session_id) REFERENCES sessions(session_id) ON DELETE RESTRICT
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: CommitResourceBindings.sq
 CREATE TABLE commit_resource_bindings (
   commit_id TEXT NOT NULL,
   allocation_id TEXT NOT NULL,
@@ -371,6 +443,7 @@ CREATE TABLE commit_resource_bindings (
   FOREIGN KEY (allocation_id) REFERENCES allocations(allocation_id) ON DELETE RESTRICT
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: IdempotentCommands.sq
 CREATE TABLE idempotent_commands (
   command_id TEXT PRIMARY KEY,
   principal_id TEXT NOT NULL,
@@ -390,6 +463,7 @@ CREATE TABLE idempotent_commands (
   UNIQUE (principal_id, operation_kind, idempotency_key)
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: Jobs.sq
 CREATE TABLE jobs (
   job_id TEXT PRIMARY KEY,
   principal_id TEXT NOT NULL,
@@ -404,6 +478,7 @@ CREATE TABLE jobs (
   UNIQUE (principal_id, job_kind, idempotency_key)
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: JobAttempts.sq
 CREATE TABLE job_attempts (
   job_id TEXT NOT NULL,
   attempt_no INTEGER NOT NULL CHECK(attempt_no>=1),
@@ -414,17 +489,22 @@ CREATE TABLE job_attempts (
   FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: JobEvents.sq
+-- event_id is explicitly assigned by JobManager (not AUTOINCREMENT-only);
+-- PK is (event_id, job_id) per the implemented projection.
 CREATE TABLE job_events (
-  event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id INTEGER NOT NULL,
   job_id TEXT NOT NULL,
   attempt_no INTEGER,
   event_kind TEXT NOT NULL,
   payload_json TEXT,
   occurred_at TEXT NOT NULL,
+  PRIMARY KEY (event_id, job_id),
   FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE CASCADE,
   FOREIGN KEY (job_id, attempt_no) REFERENCES job_attempts(job_id, attempt_no) ON DELETE CASCADE
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE assets (
   asset_id TEXT PRIMARY KEY,
   principal_id TEXT NOT NULL,
@@ -442,6 +522,7 @@ CREATE TABLE assets (
   updated_at TEXT NOT NULL
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE asset_references (
   asset_id TEXT NOT NULL,
   owner_kind TEXT NOT NULL,
@@ -452,6 +533,7 @@ CREATE TABLE asset_references (
   FOREIGN KEY (asset_id) REFERENCES assets(asset_id) ON DELETE CASCADE
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE download_attempts (
   attempt_id TEXT PRIMARY KEY,
   job_id TEXT NOT NULL,
@@ -464,6 +546,7 @@ CREATE TABLE download_attempts (
   FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE download_parts (
   attempt_id TEXT NOT NULL,
   file_key TEXT NOT NULL,
@@ -486,6 +569,7 @@ BEGIN
   SELECT RAISE(ABORT, 'overlapping download range');
 END;
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE compatibility_evidence (
   evidence_id TEXT PRIMARY KEY,
   profile_id TEXT NOT NULL,
@@ -497,6 +581,7 @@ CREATE TABLE compatibility_evidence (
   expires_at TEXT NOT NULL
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE measurement_runs (
   run_id TEXT PRIMARY KEY,
   measurement_profile_id TEXT NOT NULL,
@@ -512,6 +597,7 @@ CREATE TABLE measurement_runs (
   FOREIGN KEY (revision_id) REFERENCES model_revisions(revision_id) ON DELETE RESTRICT
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE client_registrations (
   registration_id TEXT PRIMARY KEY,
   principal_id TEXT NOT NULL,
@@ -525,23 +611,28 @@ CREATE TABLE client_registrations (
   updated_at TEXT NOT NULL
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: AccessTokens.sq
 CREATE TABLE access_tokens (
   token_id TEXT PRIMARY KEY,
   registration_id TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
   state TEXT NOT NULL CHECK(state IN ('ISSUING','ACTIVE','REVOCATION_REQUESTED','DRAINING','REVOKED','EXPIRED','FAILED')),
   verifier BLOB NOT NULL,
-  verifier_algorithm TEXT NOT NULL DEFAULT 'HMAC-SHA-256' CHECK(verifier_algorithm='HMAC-SHA-256'),
+  verifier_algorithm TEXT NOT NULL,
   verifier_key_version INTEGER NOT NULL CHECK(verifier_key_version>0),
   transport_constraint TEXT NOT NULL CHECK(transport_constraint IN ('LOOPBACK_ONLY','LAN_ONLY')),
   scope_json TEXT NOT NULL,
-  revocation_epoch INTEGER NOT NULL DEFAULT 0 CHECK(revocation_epoch>=0),
-  issued_at TEXT NOT NULL,
-  expires_at TEXT NOT NULL,
-  last_seen_at TEXT,
-  updated_at TEXT NOT NULL,
+  revocation_epoch INTEGER NOT NULL CHECK(revocation_epoch>=0),
+  issued_at_epoch_ms INTEGER NOT NULL,
+  expires_at_epoch_ms INTEGER NOT NULL,
+  last_seen_at_epoch_ms INTEGER,
+  label TEXT,
+  client_id TEXT,
+  updated_at_epoch_ms INTEGER NOT NULL,
   FOREIGN KEY (registration_id) REFERENCES client_registrations(registration_id) ON DELETE CASCADE
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: PairingChallenges.sq
 CREATE TABLE pairing_challenges (
   challenge_id TEXT PRIMARY KEY,
   challenge_kind TEXT NOT NULL CHECK(challenge_kind IN ('AIDL_REGISTRATION','LAN_HMAC')),
@@ -553,19 +644,21 @@ CREATE TABLE pairing_challenges (
   requested_scope_json TEXT NOT NULL,
   server_spki_sha256 TEXT CHECK(server_spki_sha256 IS NULL OR length(server_spki_sha256)=64),
   connection_epoch INTEGER CHECK(connection_epoch IS NULL OR connection_epoch>=0),
+  server_nonce TEXT,
   secret_ciphertext BLOB,
   secret_nonce BLOB,
   secret_key_version INTEGER CHECK(secret_key_version IS NULL OR secret_key_version>0),
+  secret_expires_at_epoch_ms INTEGER,
+  secret_schema_version INTEGER,
   attempts_remaining INTEGER NOT NULL CHECK(attempts_remaining>=0 AND attempts_remaining<=5),
-  expires_at TEXT NOT NULL,
-  approved_at TEXT,
-  consumed_at TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  CHECK((challenge_kind='LAN_HMAC' AND protocol_label='OmniLLM-LAN-Pairing-1' AND secret_ciphertext IS NOT NULL AND secret_nonce IS NOT NULL AND secret_key_version IS NOT NULL)
-     OR (challenge_kind='AIDL_REGISTRATION' AND secret_ciphertext IS NULL AND secret_nonce IS NULL))
+  expires_at_epoch_ms INTEGER NOT NULL,
+  approved_at_epoch_ms INTEGER,
+  consumed_at_epoch_ms INTEGER,
+  created_at_epoch_ms INTEGER NOT NULL,
+  updated_at_epoch_ms INTEGER NOT NULL
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE token_issue_receipts (
   issuance_key TEXT PRIMARY KEY,
   token_id TEXT NOT NULL,
@@ -579,6 +672,7 @@ CREATE TABLE token_issue_receipts (
   FOREIGN KEY (token_id) REFERENCES access_tokens(token_id) ON DELETE CASCADE
 );
 
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE pairing_exchanges (
   exchange_id TEXT PRIMARY KEY,
   challenge_id TEXT NOT NULL,
@@ -594,6 +688,32 @@ CREATE TABLE pairing_exchanges (
   FOREIGN KEY (issuance_key) REFERENCES token_issue_receipts(issuance_key) ON DELETE RESTRICT
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: SecretBrokerKeys.sq
+CREATE TABLE secret_broker_keys (
+  purpose TEXT NOT NULL,
+  key_version INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  created_at_epoch_ms INTEGER NOT NULL,
+  rotation_reason TEXT,
+  key_storage TEXT NOT NULL,
+  keystore_alias TEXT,
+  key_ciphertext BLOB,
+  PRIMARY KEY (purpose, key_version)
+);
+
+-- STATUS: IMPLEMENTED — SQLDelight .sq: RevocationSubjects.sq
+CREATE TABLE revocation_subjects (
+  scope_key TEXT NOT NULL PRIMARY KEY,
+  subject_kind TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  epoch INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  reason TEXT,
+  actor_principal_id TEXT,
+  updated_at_epoch_ms INTEGER NOT NULL
+);
+
+-- STATUS: IMPLEMENTED — SQLDelight .sq: ContentReports.sq
 CREATE TABLE content_reports (
   report_id TEXT PRIMARY KEY,
   principal_id TEXT NOT NULL,
@@ -615,12 +735,18 @@ CREATE TABLE content_reports (
   cancel_pending INTEGER NOT NULL DEFAULT 0 CHECK(cancel_pending IN (0,1)),
   expires_at TEXT NOT NULL,
   error_code TEXT,
+  active_grant_id TEXT,
+  receipt_id TEXT,
+  receipt_accepted_at TEXT,
+  receipt_status_url TEXT,
+  payload_created_at TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (principal_id, idempotency_key),
   FOREIGN KEY (proposal_command_id) REFERENCES idempotent_commands(command_id) ON DELETE RESTRICT
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: ContentReportConsentGrants.sq
 CREATE TABLE content_report_consent_grants (
   grant_id TEXT PRIMARY KEY,
   report_id TEXT NOT NULL,
@@ -638,6 +764,7 @@ CREATE TABLE content_report_consent_grants (
   CHECK((state='CONSUMED' AND consumed_at IS NOT NULL) OR (state!='CONSUMED' AND consumed_at IS NULL))
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: ContentReportReceipts.sq
 CREATE TABLE content_report_receipts (
   receipt_id TEXT PRIMARY KEY,
   report_id TEXT NOT NULL UNIQUE,
@@ -648,6 +775,31 @@ CREATE TABLE content_report_receipts (
   FOREIGN KEY (report_id) REFERENCES content_reports(report_id) ON DELETE CASCADE
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: ToolProposals.sq
+CREATE TABLE tool_proposals (
+  proposal_id TEXT NOT NULL PRIMARY KEY,
+  request_id TEXT NOT NULL,
+  tool_id TEXT NOT NULL,
+  schema_digest TEXT NOT NULL,
+  arguments_json TEXT NOT NULL,
+  attempt INTEGER NOT NULL DEFAULT 1,
+  state TEXT NOT NULL,
+  created_at_epoch_ms INTEGER NOT NULL
+);
+
+-- STATUS: IMPLEMENTED — SQLDelight .sq: ToolResultClaims.sq
+CREATE TABLE tool_result_claims (
+  proposal_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  attempt INTEGER NOT NULL,
+  result_payload_digest TEXT NOT NULL,
+  is_error INTEGER NOT NULL DEFAULT 0,
+  submitted_at_epoch_ms INTEGER NOT NULL,
+  PRIMARY KEY (proposal_id, idempotency_key)
+);
+
+-- STATUS: PLANNED (not yet implemented)
 CREATE TABLE security_audit_events (
   event_id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_class TEXT NOT NULL,
@@ -659,17 +811,15 @@ CREATE TABLE security_audit_events (
   retention_class TEXT NOT NULL
 );
 
+-- STATUS: IMPLEMENTED — SQLDelight .sq: CatalogTrustState.sq
 CREATE TABLE catalog_trust_state (
   singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1),
-  schema_version INTEGER NOT NULL CHECK(schema_version>0),
-  root_version INTEGER NOT NULL CHECK(root_version>=0),
-  timestamp_version INTEGER NOT NULL CHECK(timestamp_version>=0),
-  snapshot_version INTEGER NOT NULL CHECK(snapshot_version>=0),
-  targets_version INTEGER NOT NULL CHECK(targets_version>=0),
-  last_trusted_wall_time TEXT,
+  highest_sequence INTEGER NOT NULL DEFAULT 0 CHECK(highest_sequence>=0),
+  trusted_clock_epoch_ms INTEGER,
   boot_id TEXT,
-  elapsed_anchor_ns INTEGER CHECK(elapsed_anchor_ns>=0),
-  clock_state TEXT NOT NULL,
+  elapsed_realtime_anchor_ms INTEGER,
+  uncertain INTEGER NOT NULL DEFAULT 1 CHECK(uncertain IN (0,1)),
+  root_digest TEXT,
   updated_at TEXT NOT NULL
 );
 
@@ -683,8 +833,8 @@ CREATE INDEX idx_jobs_principal_state ON jobs(principal_id,state,created_at);
 CREATE INDEX idx_job_events_job_event ON job_events(job_id,event_id);
 CREATE INDEX idx_security_event_time ON security_audit_events(occurred_at,event_class);
 
-CREATE INDEX idx_pairing_challenge_expiry ON pairing_challenges(state,expires_at);
-CREATE INDEX idx_access_token_registration ON access_tokens(registration_id,state,expires_at);
+CREATE INDEX idx_pairing_challenge_expiry ON pairing_challenges(state,expires_at_epoch_ms);
+CREATE INDEX idx_access_token_registration ON access_tokens(registration_id,state,expires_at_epoch_ms);
 CREATE INDEX idx_token_receipt_expiry ON token_issue_receipts(expires_at);
 CREATE INDEX idx_content_report_owner_state ON content_reports(principal_id,state,updated_at);
 CREATE INDEX idx_content_report_grant_expiry ON content_report_consent_grants(state,expires_at);
