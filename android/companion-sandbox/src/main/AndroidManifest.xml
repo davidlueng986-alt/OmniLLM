@@ -5,8 +5,11 @@
   applicationId = com.omnillm.companion (see build.gradle.kts) — never sharedUserId with main app.
   Minimum permissions: no INTERNET, contacts, media, broad storage, backup, or main-app Keystore aliases.
 
-  Binding: explicit component + same-signer signature permission + protocol ticket handshake.
-  Signature permission controls who may bind; untrusted native code inside this process is still untrusted.
+  Binding: explicit component + same-signer signature permission + AUTHENTICATED protocol
+  ticket handshake (SEC-07: every ticket carries an HMAC-SHA-256 MAC computed with the
+  per-instance pairing key established at attachSupervisor time; the companion verifies it
+  before accepting any ticket). Signature permission controls who may bind; untrusted
+  native code inside this process is still untrusted.
 
   Packaging: separate APK (preferred) or optional AAB — see PACKAGING.md. Not merged into com.omnillm AAB.
 -->

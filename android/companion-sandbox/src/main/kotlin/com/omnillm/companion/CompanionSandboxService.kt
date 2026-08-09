@@ -42,6 +42,12 @@ class CompanionSandboxService : Service() {
     private val bound = AtomicBoolean(false)
     private val processInstanceId = UUID.randomUUID().toString()
     private lateinit var fence: CompanionSupervisorFence
+    /**
+     * Per-instance ticket MAC key (SEC-07), generated at attachSupervisor
+     * (pairing) and delivered to the host in the attach result attributes
+     * (`sessionMacKeyHex`). Null until attach; cleared on fence/close.
+     */
+    private var ticketMacKey: ByteArray? = null
 
     private val binder = object : Binder(), CompanionSandboxBinder {
         override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
@@ -257,10 +263,14 @@ class CompanionSandboxService : Service() {
         return when (fence.attach(supervisorBinder, runtimeEpoch, bootId, runtimeInstanceId)) {
             CompanionFenceAttachResult.Attached -> {
                 bound.set(false) // still need ticket handshake
+                // SEC-07: establish per-instance pairing key; host uses it to MAC tickets.
+                val key = SandboxTicketMac.randomKeyBytes()
+                ticketMacKey = key
                 CompanionCommandResult.Ok(
                     mapOf(
                         "pid" to Process.myPid().toString(),
                         "processInstanceId" to processInstanceId,
+                        "sessionMacKeyHex" to SandboxTicketMac.encodeHex(key),
                     ),
                 )
             }
@@ -281,6 +291,7 @@ class CompanionSandboxService : Service() {
             session = session,
             claimedNonces = claimedNonces,
             nowMonotonicMs = SystemClock.elapsedRealtime(),
+            ticketMacKey = ticketMacKey,
         )
         if (gateReject != null) return gateReject
 
@@ -388,6 +399,7 @@ class CompanionSandboxService : Service() {
     private fun handleClose(): CompanionCommandResult {
         fdRegistry.releaseAll()
         bound.set(false)
+        ticketMacKey = null
         fence.stopAccepting()
         return CompanionCommandResult.Ok(mapOf("closed" to "true"))
     }
@@ -396,6 +408,7 @@ class CompanionSandboxService : Service() {
         if (!exiting.compareAndSet(false, true)) return
         Log.w(TAG, "Supervisor died — fencing companion and exiting")
         bound.set(false)
+        ticketMacKey = null
         fdRegistry.releaseAll()
         // SEC-EXTERNAL-SANDBOX §6: self-terminate; host marks models/sessions LOST.
         Process.killProcess(Process.myPid())

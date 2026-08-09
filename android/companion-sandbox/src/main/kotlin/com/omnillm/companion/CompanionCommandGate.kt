@@ -3,6 +3,10 @@ package com.omnillm.companion
 /**
  * Pure fail-closed gate for companion commands (no I/O).
  * Unknown placement/path tokens / stale epoch / unattached supervisor ⇒ reject.
+ *
+ * SEC-07: handshake tickets must carry a valid HMAC-SHA-256 computed with the
+ * per-instance pairing key ([ticketMacKey]); without a key the handshake is
+ * rejected with `INVALID_AUTH` (fail closed).
  */
 object CompanionCommandGate {
 
@@ -11,6 +15,8 @@ object CompanionCommandGate {
         session: CompanionSessionView,
         claimedNonces: Set<String>,
         nowMonotonicMs: Long,
+        /** Per-instance ticket MAC key from attach (SEC-07); null ⇒ handshake rejected. */
+        ticketMacKey: ByteArray? = null,
     ): CompanionCommandResult? {
         if (session.isFenced || session.isExiting) {
             return CompanionCommandResult.Rejected(
@@ -26,9 +32,15 @@ object CompanionCommandGate {
                     message = "handshake not accepted in current state",
                 )
             }
+            val macKey = ticketMacKey
+                ?: return CompanionCommandResult.Rejected(
+                    errorCode = "INVALID_AUTH",
+                    message = "ticket MAC key unavailable (attach supervisor first)",
+                )
             return when (
                 val v = CompanionTicketValidator.validate(
                     ticket = command.ticket,
+                    macKey = macKey,
                     expectedRuntimeEpoch = command.runtimeEpoch,
                     expectedBootId = command.bootId,
                     expectedRuntimeInstanceId = command.runtimeInstanceId,

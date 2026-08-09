@@ -26,6 +26,7 @@ object CompanionBinderParcelCodec {
         dest.writeLong(ticket.monotonicDeadlineMs)
         dest.writeString(ticket.nonce)
         dest.writeString(ticket.placementClass)
+        dest.writeString(ticket.macHex)
     }
 
     fun readTicket(src: Parcel): CompanionBinderWire.TicketWire {
@@ -45,6 +46,7 @@ object CompanionBinderParcelCodec {
         val monotonicDeadlineMs = src.readLong()
         val nonce = src.readString().orEmpty()
         val placementClass = src.readString().orEmpty()
+        val macHex = src.readString().orEmpty()
         return CompanionBinderWire.TicketWire(
             protocolMajor = protocolMajor,
             protocolMinor = protocolMinor,
@@ -61,6 +63,7 @@ object CompanionBinderParcelCodec {
             monotonicDeadlineMs = monotonicDeadlineMs,
             nonce = nonce,
             placementClass = placementClass,
+            macHex = macHex,
         )
     }
 

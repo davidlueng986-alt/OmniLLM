@@ -42,7 +42,13 @@ object CompanionBinderWire {
     const val RESULT_HANDSHAKE_OK: Int = 1
     const val RESULT_REJECTED: Int = 2
 
-    /** Pure ticket field order for parcel encode/decode (both sides must match). */
+    /**
+     * Pure ticket field order for parcel encode/decode (both sides must match).
+     *
+     * SEC-07: [macHex] is the trailing field (16th). Older hosts that do not
+     * write it yield an empty MAC on the companion side, which the validator
+     * rejects with `INVALID_AUTH` — fail closed until the host MACs tickets.
+     */
     data class TicketWire(
         val protocolMajor: Int,
         val protocolMinor: Int,
@@ -59,6 +65,7 @@ object CompanionBinderWire {
         val monotonicDeadlineMs: Long,
         val nonce: String,
         val placementClass: String,
+        val macHex: String,
     ) {
         fun toTicket(): SandboxExecutionTicket =
             SandboxExecutionTicket(
@@ -77,6 +84,7 @@ object CompanionBinderWire {
                 monotonicDeadlineMs = monotonicDeadlineMs,
                 nonce = nonce,
                 placementClass = placementClass,
+                macHex = macHex,
             )
 
         companion object {
@@ -97,6 +105,7 @@ object CompanionBinderWire {
                     monotonicDeadlineMs = t.monotonicDeadlineMs,
                     nonce = t.nonce,
                     placementClass = t.placementClass,
+                    macHex = t.macHex,
                 )
         }
     }

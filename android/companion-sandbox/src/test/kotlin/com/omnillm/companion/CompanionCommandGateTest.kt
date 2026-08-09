@@ -7,6 +7,8 @@ import org.junit.Test
 
 class CompanionCommandGateTest {
 
+    private val key: ByteArray = ByteArray(SandboxTicketMac.KEY_BYTES) { it.toByte() }
+
     private fun ticket() = SandboxExecutionTicket(
         protocolMajor = CompanionSandboxModule.PROTOCOL_MAJOR,
         protocolMinor = CompanionSandboxModule.PROTOCOL_MINOR,
@@ -23,7 +25,8 @@ class CompanionCommandGateTest {
         monotonicDeadlineMs = 10_000L,
         nonce = "n1",
         placementClass = CompanionTicketValidator.PLACEMENT_EXTERNAL_UID_ACCELERATED,
-    )
+        macHex = "",
+    ).let { it.copy(macHex = SandboxTicketMac.computeHex(key, it)) }
 
     @Test
     fun handshakeOkWhenSessionAccepting() {
@@ -39,8 +42,49 @@ class CompanionCommandGateTest {
             session = session,
             claimedNonces = emptySet(),
             nowMonotonicMs = 1L,
+            ticketMacKey = key,
         )
         assertNull(result)
+    }
+
+    @Test
+    fun handshakeRejectedWithoutMacKey() {
+        val session = FakeCompanionSessionView(isAcceptingHandshake = true, isBound = false)
+        val result = CompanionCommandGate.gate(
+            command = CompanionCommand.Handshake(
+                runtimeEpoch = 1L,
+                bootId = "boot-1",
+                requestId = "req",
+                runtimeInstanceId = "rt-1",
+                ticket = ticket(),
+            ),
+            session = session,
+            claimedNonces = emptySet(),
+            nowMonotonicMs = 1L,
+        )
+        assertTrue(result is CompanionCommandResult.Rejected)
+        assertEquals("INVALID_AUTH", (result as CompanionCommandResult.Rejected).errorCode)
+    }
+
+    @Test
+    fun handshakeRejectedWhenForged() {
+        val session = FakeCompanionSessionView(isAcceptingHandshake = true, isBound = false)
+        val forged = ticket().copy(commitId = "other-commit")
+        val result = CompanionCommandGate.gate(
+            command = CompanionCommand.Handshake(
+                runtimeEpoch = 1L,
+                bootId = "boot-1",
+                requestId = "req",
+                runtimeInstanceId = "rt-1",
+                ticket = forged,
+            ),
+            session = session,
+            claimedNonces = emptySet(),
+            nowMonotonicMs = 1L,
+            ticketMacKey = key,
+        )
+        assertTrue(result is CompanionCommandResult.Rejected)
+        assertEquals("INVALID_AUTH", (result as CompanionCommandResult.Rejected).errorCode)
     }
 
     @Test

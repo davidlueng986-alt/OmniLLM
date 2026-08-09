@@ -13,6 +13,7 @@ class CompanionBinderWireTest {
 
     @Test
     fun ticketWire_roundTripToTicket() {
+        val key: ByteArray = ByteArray(SandboxTicketMac.KEY_BYTES) { it.toByte() }
         val ticket = SandboxExecutionTicket(
             protocolMajor = CompanionSandboxModule.PROTOCOL_MAJOR,
             protocolMinor = CompanionSandboxModule.PROTOCOL_MINOR,
@@ -29,10 +30,12 @@ class CompanionBinderWireTest {
             monotonicDeadlineMs = 999L,
             nonce = "n-1",
             placementClass = CompanionTicketValidator.PLACEMENT_EXTERNAL_UID_ACCELERATED,
-        )
+            macHex = "",
+        ).let { it.copy(macHex = SandboxTicketMac.computeHex(key, it)) }
         val wire = CompanionBinderWire.TicketWire.fromTicket(ticket)
         val back = wire.toTicket()
         assertEquals(ticket, back)
+        assertEquals(ticket.macHex, back.macHex)
     }
 
     @Test
