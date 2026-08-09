@@ -20,6 +20,7 @@ import com.omnillm.data.modelstore.ModelStorePort
 import com.omnillm.data.modelstore.StorageLayout
 import com.omnillm.data.persistence.CommitReconcileResult
 import com.omnillm.data.persistence.ControlPlaneDatabase
+import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.ports.ledger.ControlPlaneWriter
 import com.omnillm.data.persistence.OmniLlmDatabase
 import com.omnillm.core.ports.ledger.SingleWriterPolicy
@@ -293,12 +294,50 @@ class RuntimeControlPlane private constructor(
     fun requestDrain(): LifecycleStepResult {
         val stop = lifecycle.stopRequested()
         if (stop is LifecycleStepResult.Rejected) return stop
-        // Scaffold: no active sessions/allocations yet — complete drain immediately.
+        // COR-23h: drain LIVE sessions before declaring drain complete — never
+        // report immediate success while sessions are still open (the previous
+        // scaffold reported DRAIN_COMPLETE with zero drain work).
+        val failures = drainLiveSessions(sessionManager)
+        if (failures.isNotEmpty()) {
+            Log.w(TAG, "drain incomplete: $failures")
+            return LifecycleStepResult.Rejected(
+                "drain incomplete: ${failures.size} session(s) failed to drain " +
+                    "(failures=${failures.joinToString()})",
+            )
+        }
         return lifecycle.drainComplete()
     }
 
     companion object {
         private const val TAG = "OmniControlPlane"
+
+        /**
+         * COR-23h: drain live sessions via the SESSION FSM before a runtime
+         * drain can be declared complete. ACTIVE → DRAIN_REQUESTED (blocks new
+         * use); NEW → CLOSE (never admitted to the pool). DRAINING / CLOSING /
+         * POISONED / ORPHANED / CLOSED sessions are already out of usable work
+         * and do not block drain. Returns per-session failure reasons — empty
+         * means every usable session was successfully drained.
+         */
+        fun drainLiveSessions(sessionManager: SessionManager): List<String> {
+            val failures = mutableListOf<String>()
+            for (rec in sessionManager.allSessions()) {
+                when (rec.aggregateState) {
+                    "ACTIVE" -> when (val d = sessionManager.requestDrain(rec.sessionId)) {
+                        is OmniResult.Err ->
+                            failures += "${rec.sessionId.value}:${d.error.code.code}"
+                        is OmniResult.Ok -> Unit
+                    }
+                    "NEW" -> when (val c = sessionManager.closeNew(rec.sessionId)) {
+                        is OmniResult.Err ->
+                            failures += "${rec.sessionId.value}:${c.error.code.code}"
+                        is OmniResult.Ok -> Unit
+                    }
+                    else -> Unit
+                }
+            }
+            return failures
+        }
 
         private val attached = AtomicBoolean(false)
         private val instance = AtomicReference<RuntimeControlPlane?>(null)

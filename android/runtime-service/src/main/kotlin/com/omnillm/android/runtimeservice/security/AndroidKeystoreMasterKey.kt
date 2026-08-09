@@ -1,6 +1,5 @@
 package com.omnillm.android.runtimeservice.security
 
-import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Log
@@ -24,18 +23,37 @@ import javax.crypto.spec.GCMParameterSpec
  *
  * Backup: Keystore material and wrapped master blob are excluded from auto-backup
  * (see app data-extraction / backup rules).
+ *
+ * Crypto seams (internal, TST-04): [cipherFactory] / [keySource] / [ensureKeystore]
+ * let hermetic JVM tests exercise the real wrap/unwrap contract (including the
+ * cipher-generated-IV rule below) without an Android Keystore; production uses
+ * the AndroidKeyStore defaults.
  */
 class AndroidKeystoreMasterKey(
-    private val appContext: Context,
+    private val blobDirProvider: () -> File,
     private val alias: String = KEYSTORE_ALIAS,
 ) {
+    /**
+     * Cipher seam. Production: JCA lookup. Tests: a Keystore-constraint fake
+     * that rejects caller-supplied IVs on ENCRYPT (regression for the
+     * `Caller-provided IV not permitted` device crash captured in
+     * e2e-artifacts/session.json).
+     */
+    internal var cipherFactory: (String) -> Cipher = { Cipher.getInstance(it) }
+
+    /** Keystore-key seam. Production: AndroidKeyStore alias; tests: static key. */
+    internal var keySource: () -> SecretKey = { keystoreSecretKey() }
+
+    /** Keystore-key-creation seam. Production: AndroidKeyStore; tests: no-op. */
+    internal var ensureKeystore: () -> Unit = { ensureKeystoreAes() }
+
     /**
      * Returns the 256-bit master wrapping key for [EncryptedBlobSecretKeyVault].
      * Creates Keystore AES key + wrapped master blob on first call.
      */
     fun getOrCreateMasterKeyBytes(): ByteArray {
-        ensureKeystoreAes()
-        val wrappedFile = File(appContext.noBackupFilesDir, MASTER_BLOB_FILE)
+        ensureKeystore()
+        val wrappedFile = File(blobDirProvider(), MASTER_BLOB_FILE)
         if (wrappedFile.exists() && wrappedFile.length() > SecurityProfile.GCM_NONCE_BYTES) {
             val wrapped = wrappedFile.readBytes()
             val nonce = wrapped.copyOfRange(0, SecurityProfile.GCM_NONCE_BYTES)
@@ -44,7 +62,7 @@ class AndroidKeystoreMasterKey(
             if (plain != null && plain.size == SecurityProfile.SECRET_KEY_BYTES) {
                 return plain
             }
-            Log.w(TAG, "master blob decrypt failed — rotating (tokens must re-issue)")
+            logW("master blob decrypt failed — rotating (tokens must re-issue)")
             wrappedFile.delete()
         }
         val master = CryptoPrimitives.randomSecretKeyBytes()
@@ -72,7 +90,7 @@ class AndroidKeystoreMasterKey(
                 .build(),
         )
         keyGen.generateKey()
-        Log.i(TAG, "Android Keystore AES master wrap key created alias=$alias")
+        logI("Android Keystore AES master wrap key created alias=$alias")
     }
 
     private fun keystoreSecretKey(): SecretKey {
@@ -85,10 +103,14 @@ class AndroidKeystoreMasterKey(
     /**
      * Encrypt with Keystore-generated GCM IV (required when randomized encryption is on).
      * Returns (nonce, ciphertext+tag).
+     *
+     * The nonce MUST come from the cipher after doFinal — a caller-supplied IV
+     * on ENCRYPT is exactly the device crash regression from e2e-artifacts
+     * (InvalidAlgorithmParameterException in encryptWithKeystore).
      */
     private fun encryptWithKeystore(plaintext: ByteArray): Pair<ByteArray, ByteArray> {
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, keystoreSecretKey())
+        val cipher = cipherFactory(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, keySource())
         cipher.updateAAD(AAD)
         val ct = cipher.doFinal(plaintext)
         val nonce = cipher.iv
@@ -101,10 +123,10 @@ class AndroidKeystoreMasterKey(
 
     private fun decryptWithKeystore(nonce: ByteArray, ciphertext: ByteArray): ByteArray? =
         try {
-            val cipher = Cipher.getInstance(TRANSFORMATION)
+            val cipher = cipherFactory(TRANSFORMATION)
             cipher.init(
                 Cipher.DECRYPT_MODE,
-                keystoreSecretKey(),
+                keySource(),
                 GCMParameterSpec(SecurityProfile.GCM_TAG_BITS, nonce),
             )
             cipher.updateAAD(AAD)
@@ -112,6 +134,10 @@ class AndroidKeystoreMasterKey(
         } catch (_: Exception) {
             null
         }
+
+    private fun logW(msg: String) = runCatching { Log.w(TAG, msg) }
+
+    private fun logI(msg: String) = runCatching { Log.i(TAG, msg) }
 
     companion object {
         private const val TAG = "OmniKeystoreMaster"

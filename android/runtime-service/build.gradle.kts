@@ -144,6 +144,10 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.core)
+    // TST-04/COR-23c: real Ktor CIO bind in GatewayLifecycle tests (the engine
+    // itself is an implementation dep of :interfaces:http — test-only here so
+    // the bound-port + TCP-reachability contract runs against a REAL server).
+    testImplementation(libs.ktor.server.cio)
 
     androidTestImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

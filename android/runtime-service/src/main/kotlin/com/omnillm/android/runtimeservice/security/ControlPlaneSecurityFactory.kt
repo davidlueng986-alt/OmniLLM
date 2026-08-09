@@ -19,13 +19,35 @@ import com.omnillm.runtime.policy.security.VaultSecretBroker
 object ControlPlaneSecurityFactory {
     private const val TAG = "OmniSecurityFactory"
 
+    /**
+     * Production entry: full Android stack (Keystore-wrapped master key).
+     * The Context is used ONLY to resolve the master blob directory.
+     */
     fun createSecurityStack(
         appContext: Context,
         controlPlaneDb: ControlPlaneDatabase,
         clockMs: () -> Long = { System.currentTimeMillis() },
+    ): PolicyModule.SecurityStack =
+        createSecurityStack(
+            controlPlaneDb = controlPlaneDb,
+            clockMs = clockMs,
+            masterKeyBytes = {
+                AndroidKeystoreMasterKey({ appContext.noBackupFilesDir }).getOrCreateMasterKeyBytes()
+            },
+        )
+
+    /**
+     * TST-04 seam: hermetic stack construction with an injected master wrapping
+     * key (no Android Keystore / Context required). Production wiring stays on
+     * the Context overload above.
+     */
+    fun createSecurityStack(
+        controlPlaneDb: ControlPlaneDatabase,
+        clockMs: () -> Long = { System.currentTimeMillis() },
+        masterKeyBytes: () -> ByteArray,
     ): PolicyModule.SecurityStack {
         val secrets = controlPlaneDb.secrets
-        val masterKey = AndroidKeystoreMasterKey(appContext).getOrCreateMasterKeyBytes()
+        val masterKey = masterKeyBytes()
         val vault = EncryptedBlobSecretKeyVault(
             store = secrets.keyBlobs,
             masterKeyBytes = masterKey,
@@ -36,11 +58,13 @@ object ControlPlaneSecurityFactory {
             clockMs = clockMs,
             bootstrapKeys = true,
         )
-        Log.i(
-            TAG,
-            "Secret Broker durable vault ready tokenKeyV=${broker.activeTokenKeyVersion()} " +
-                "storage=keystore-wrapped+sqlite",
-        )
+        runCatching {
+            Log.i(
+                TAG,
+                "Secret Broker durable vault ready tokenKeyV=${broker.activeTokenKeyVersion()} " +
+                    "storage=keystore-wrapped+sqlite",
+            )
+        }
         return PolicyModule.createSecurityStack(
             clockMs = clockMs,
             broker = broker,
