@@ -55,6 +55,20 @@ class DurableContentReportStore(
         }
     }
 
+    override fun putReportIfAbsent(record: ContentReportRecord): Boolean =
+        // COR-23g: serialized check-then-insert inside a single SQLite write
+        // transaction — concurrent proposals for the same reportId resolve to
+        // exactly one claimant (no last-writer-wins overwrite).
+        ledger.tx.inTransaction {
+            val existing = ledger.reports.findByReportId(record.reportId)
+            if (existing != null) {
+                false
+            } else {
+                ledger.reports.upsert(record.toRow(null))
+                true
+            }
+        }
+
     override fun getReport(reportId: String): ContentReportRecord? =
         ledger.reports.findByReportId(reportId)?.toDomain()
 

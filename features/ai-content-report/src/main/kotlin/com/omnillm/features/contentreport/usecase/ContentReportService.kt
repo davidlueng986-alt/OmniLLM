@@ -249,7 +249,24 @@ class ContentReportService(
             updatedAtEpochMs = now,
             hasEncryptedPayload = true,
         )
-        store.putReport(record)
+        // COR-23g: atomic claim-or-insert keyed by reportId — concurrent
+        // proposals for the same reportId resolve to exactly one winner; the
+        // loser reconciles against the durable record (reply-loss) instead of
+        // last-writer-wins overwriting. Serialized in-process too (the durable
+        // store adds its own transactional check-then-insert).
+        val claimed = synchronized(lock) {
+            store.putReportIfAbsent(record)
+        }
+        if (!claimed) {
+            val winner = store.getReport(spec.reportId)
+                ?: return OmniResult.err(
+                    OmniError.STATE_CONFLICT(
+                        message = "concurrent proposal for reportId lost the claim race",
+                        details = mapOf("reportId" to spec.reportId),
+                    ),
+                )
+            return OmniResult.ok(ContentReportStateProjection.toInfoView(winner))
+        }
         lastError = null
         return OmniResult.ok(ContentReportStateProjection.toInfoView(record))
     }

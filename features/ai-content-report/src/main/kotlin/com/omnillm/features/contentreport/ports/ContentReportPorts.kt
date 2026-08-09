@@ -36,6 +36,15 @@ class DefaultCapabilityAvailabilityPort(
  */
 interface ContentReportStorePort {
     fun putReport(record: ContentReportRecord)
+
+    /**
+     * COR-23g: atomic claim-or-insert keyed by reportId. Returns true when this
+     * caller inserted the record (sole claimant); false when another writer won
+     * the race — caller must reconcile against the existing record instead of
+     * last-writer-wins overwriting.
+     */
+    fun putReportIfAbsent(record: ContentReportRecord): Boolean
+
     fun getReport(reportId: String): ContentReportRecord?
     fun findByPrincipalAndIdempotency(
         principalId: String,
@@ -66,6 +75,13 @@ class InMemoryContentReportStore : ContentReportStorePort {
     override fun putReport(record: ContentReportRecord) {
         reports[record.reportId] = record
         idemIndex["${record.principalId}\u0000${record.idempotencyKey}"] = record.reportId
+    }
+
+    override fun putReportIfAbsent(record: ContentReportRecord): Boolean {
+        val existing = reports.putIfAbsent(record.reportId, record)
+        if (existing != null) return false
+        idemIndex["${record.principalId}\u0000${record.idempotencyKey}"] = record.reportId
+        return true
     }
 
     override fun getReport(reportId: String): ContentReportRecord? = reports[reportId]
