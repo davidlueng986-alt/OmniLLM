@@ -1,14 +1,17 @@
 package com.omnillm.runtime.policy.security
+import com.omnillm.core.ports.security.InMemoryAccessTokenStore
+import com.omnillm.core.ports.security.InMemoryEncryptedKeyBlobStore
+import com.omnillm.core.ports.security.InMemoryRevocationEpochStore
+import com.omnillm.core.ports.security.RevocationScope
+import com.omnillm.core.ports.security.RevocationSubjectKind
+import com.omnillm.core.ports.security.TransportConstraint
+import com.omnillm.core.ports.security.storageKey
 
 import com.omnillm.core.canonical.generated.AccessProfile
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniErrorCode
 import com.omnillm.runtime.PolicyModule
-import com.omnillm.runtime.policy.InMemoryRevocationEpochStore
-import com.omnillm.runtime.policy.RevocationScope
-import com.omnillm.runtime.policy.RevocationSubjectKind
-import com.omnillm.runtime.policy.storageKey
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -42,7 +45,7 @@ class DurableSecretBrokerTest {
                 registrationId = "reg-1",
                 principalId = PrincipalId.parse("p1"),
                 scopes = setOf("models.read"),
-                transportConstraint = TokenService.TransportConstraint.LOOPBACK_ONLY,
+                transportConstraint = TransportConstraint.LOOPBACK_ONLY,
                 ttlSeconds = 600L,
                 profile = AccessProfile.DEVELOPER_CLIENT,
             ),
@@ -71,7 +74,7 @@ class DurableSecretBrokerTest {
                 registrationId = "reg-2",
                 principalId = PrincipalId.parse("p2"),
                 scopes = setOf("models.read"),
-                transportConstraint = TokenService.TransportConstraint.LOOPBACK_ONLY,
+                transportConstraint = TransportConstraint.LOOPBACK_ONLY,
                 ttlSeconds = 600L,
                 profile = AccessProfile.DEVELOPER_CLIENT,
             ),
@@ -83,7 +86,7 @@ class DurableSecretBrokerTest {
         )
         val auth = stack.tokenService.authenticate(
             issued2.value.plaintextOnce,
-            TokenService.TransportConstraint.LOOPBACK_ONLY,
+            TransportConstraint.LOOPBACK_ONLY,
             now,
         ) as OmniResult.Err
         assertEquals(OmniErrorCode.FORBIDDEN, auth.error.code)

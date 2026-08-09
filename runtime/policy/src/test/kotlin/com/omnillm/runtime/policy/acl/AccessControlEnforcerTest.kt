@@ -1,4 +1,7 @@
 package com.omnillm.runtime.policy.acl
+import com.omnillm.core.ports.security.RevocationScope
+import com.omnillm.core.ports.security.RevocationSubjectKind
+import com.omnillm.core.ports.security.TransportConstraint
 
 import com.omnillm.core.canonical.generated.AccessProfile
 import com.omnillm.core.canonical.generated.AccessScope
@@ -7,8 +10,6 @@ import com.omnillm.core.canonical.generated.PrincipalKind
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniErrorCode
 import com.omnillm.runtime.PolicyModule
-import com.omnillm.runtime.policy.RevocationScope
-import com.omnillm.runtime.policy.RevocationSubjectKind
 import com.omnillm.runtime.policy.security.TokenService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -196,14 +197,14 @@ class AccessControlEnforcerTest {
                 registrationId = "reg",
                 principalId = PrincipalId.parse("http-dev"),
                 scopes = setOf("models.read", "inference.create"),
-                transportConstraint = TokenService.TransportConstraint.LOOPBACK_ONLY,
+                transportConstraint = TransportConstraint.LOOPBACK_ONLY,
                 ttlSeconds = 3600L,
                 profile = AccessProfile.DEVELOPER_CLIENT,
             ),
         ) as OmniResult.Ok
         val auth = tokens.authenticate(
             issued.value.plaintextOnce,
-            TokenService.TransportConstraint.LOOPBACK_ONLY,
+            TransportConstraint.LOOPBACK_ONLY,
         ) as OmniResult.Ok
         val principal = acl.fromAuthenticatedToken(
             token = auth.value,

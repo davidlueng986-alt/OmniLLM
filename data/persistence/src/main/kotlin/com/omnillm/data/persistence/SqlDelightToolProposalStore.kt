@@ -1,4 +1,12 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.ToolResultClaimDao
+import com.omnillm.core.ports.ledger.ToolProposalRow
+import com.omnillm.core.ports.ledger.ToolResultClaimRow
+import com.omnillm.core.ports.ledger.ClaimLedgerTransaction
+import com.omnillm.core.ports.ledger.ToolProposalLedgerPorts
+import com.omnillm.core.ports.ledger.ToolProposalLedgerStates
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.ToolProposalRecordDao
 
 /**
  * SQLDelight-backed [ToolProposalLedgerPorts] for control-plane sole writer (ADR-010).
@@ -102,3 +110,4 @@ private fun com.omnillm.data.persistence.Tool_result_claims.toClaimRow(): ToolRe
         isError = is_error != 0L,
         submittedAtEpochMs = submitted_at_epoch_ms,
     )
+

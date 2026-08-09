@@ -5,6 +5,9 @@ import com.omnillm.core.canonical.generated.AccessScope
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniErrorCode
+import com.omnillm.core.ports.security.RevocationScope
+import com.omnillm.core.ports.security.RevocationSubjectKind
+import com.omnillm.core.ports.security.TransportConstraint
 import com.omnillm.runtime.policy.RevocationEpochManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -28,7 +31,7 @@ class TokenServiceTest {
                 registrationId = "reg-1",
                 principalId = PrincipalId.parse("http-dev-1"),
                 scopes = scopes,
-                transportConstraint = TokenService.TransportConstraint.LOOPBACK_ONLY,
+                transportConstraint = TransportConstraint.LOOPBACK_ONLY,
                 ttlSeconds = ttl,
                 profile = profile,
                 label = "test",
@@ -53,7 +56,7 @@ class TokenServiceTest {
         // Authenticate with plaintext succeeds.
         val auth = tokens.authenticate(
             issued.plaintextOnce,
-            TokenService.TransportConstraint.LOOPBACK_ONLY,
+            TransportConstraint.LOOPBACK_ONLY,
             now,
         ) as OmniResult.Ok
         assertEquals(issued.tokenId, auth.value.tokenId)
@@ -61,7 +64,7 @@ class TokenServiceTest {
         // Wrong secret fails.
         val bad = tokens.authenticate(
             "not-a-real-token-value-xxxxxxxxxxxxxxxx",
-            TokenService.TransportConstraint.LOOPBACK_ONLY,
+            TransportConstraint.LOOPBACK_ONLY,
             now,
         ) as OmniResult.Err
         assertEquals(OmniErrorCode.UNAUTHORIZED, bad.error.code)
@@ -72,7 +75,7 @@ class TokenServiceTest {
         val issued = issueLoopback()
         val forbidden = tokens.authenticate(
             issued.plaintextOnce,
-            TokenService.TransportConstraint.LAN_ONLY,
+            TransportConstraint.LAN_ONLY,
             now,
         ) as OmniResult.Err
         assertEquals(OmniErrorCode.FORBIDDEN, forbidden.error.code)
@@ -85,7 +88,7 @@ class TokenServiceTest {
                 registrationId = "reg",
                 principalId = PrincipalId.parse("p"),
                 scopes = setOf("not.a.real.scope"),
-                transportConstraint = TokenService.TransportConstraint.LOOPBACK_ONLY,
+                transportConstraint = TransportConstraint.LOOPBACK_ONLY,
                 ttlSeconds = 600L,
                 profile = AccessProfile.DEVELOPER_CLIENT,
             ),
@@ -100,7 +103,7 @@ class TokenServiceTest {
                 registrationId = "reg",
                 principalId = PrincipalId.parse("p"),
                 scopes = setOf("tokens.manage"),
-                transportConstraint = TokenService.TransportConstraint.LOOPBACK_ONLY,
+                transportConstraint = TransportConstraint.LOOPBACK_ONLY,
                 ttlSeconds = 600L,
                 profile = AccessProfile.DEVELOPER_CLIENT,
             ),
@@ -120,7 +123,7 @@ class TokenServiceTest {
 
         val auth = tokens.authenticate(
             issued.plaintextOnce,
-            TokenService.TransportConstraint.LOOPBACK_ONLY,
+            TransportConstraint.LOOPBACK_ONLY,
             now,
         ) as OmniResult.Err
         assertEquals(OmniErrorCode.UNAUTHORIZED, auth.error.code)
@@ -130,9 +133,9 @@ class TokenServiceTest {
     fun principalEpochBump_rejectsToken() {
         val issued = issueLoopback()
         val fence = revocation.revokeAndFence(
-            scope = com.omnillm.runtime.policy.RevocationScope(
+            scope = RevocationScope(
                 "http-dev-1",
-                com.omnillm.runtime.policy.RevocationSubjectKind.PRINCIPAL,
+                RevocationSubjectKind.PRINCIPAL,
             ),
             actorPrincipalId = PrincipalId.parse("admin"),
             reason = "acl-change",
@@ -141,7 +144,7 @@ class TokenServiceTest {
 
         val auth = tokens.authenticate(
             issued.plaintextOnce,
-            TokenService.TransportConstraint.LOOPBACK_ONLY,
+            TransportConstraint.LOOPBACK_ONLY,
             now,
         ) as OmniResult.Err
         assertEquals(OmniErrorCode.FORBIDDEN, auth.error.code)
@@ -152,7 +155,7 @@ class TokenServiceTest {
         val issued = issueLoopback(scopes = setOf("models.read"))
         val auth = tokens.authenticate(
             issued.plaintextOnce,
-            TokenService.TransportConstraint.LOOPBACK_ONLY,
+            TransportConstraint.LOOPBACK_ONLY,
             now,
         ) as OmniResult.Ok
         assertTrue(tokens.requireScope(auth.value, AccessScope.models_read) is OmniResult.Ok)
@@ -166,7 +169,7 @@ class TokenServiceTest {
         now += 61_000L
         val auth = tokens.authenticate(
             issued.plaintextOnce,
-            TokenService.TransportConstraint.LOOPBACK_ONLY,
+            TransportConstraint.LOOPBACK_ONLY,
             now,
         ) as OmniResult.Err
         assertEquals(OmniErrorCode.UNAUTHORIZED, auth.error.code)

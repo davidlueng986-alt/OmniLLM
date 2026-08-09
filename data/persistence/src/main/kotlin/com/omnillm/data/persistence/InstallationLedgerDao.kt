@@ -1,4 +1,6 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.ControlPlaneWriter
+import com.omnillm.core.ports.ledger.ClaimLedgerTransaction
 
 /**
  * Control-plane DAO for durable MODEL_INSTALLATION rows (CORE-MODEL / ADR-010).
@@ -30,3 +32,4 @@ interface InstallationLedgerPorts : ControlPlaneWriter {
     val installations: InstallationRecordDao
     val tx: ClaimLedgerTransaction
 }
+

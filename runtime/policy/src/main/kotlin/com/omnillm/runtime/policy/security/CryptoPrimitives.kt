@@ -1,4 +1,5 @@
 package com.omnillm.runtime.policy.security
+import com.omnillm.core.ports.security.SecurityProfile
 
 import java.security.MessageDigest
 import java.security.SecureRandom

@@ -6,6 +6,13 @@ import com.omnillm.core.canonical.generated.AccessScope
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniError
+import com.omnillm.core.ports.security.ChallengeKind
+import com.omnillm.core.ports.security.EncryptedRecord
+import com.omnillm.core.ports.security.InMemoryPairingChallengeStore
+import com.omnillm.core.ports.security.PairingChallengeRecord
+import com.omnillm.core.ports.security.PairingChallengeStore
+import com.omnillm.core.ports.security.SecurityProfile
+import com.omnillm.core.ports.security.TransportConstraint
 import com.omnillm.core.state.GuardEvaluator
 import com.omnillm.core.state.StateMachineDriver
 import com.omnillm.core.state.TransitionOutcome
@@ -22,6 +29,9 @@ import java.util.UUID
  *
  * Fail closed on TTL, attempt limit, epoch change, SPKI mismatch, or replay.
  * Production injects SQLite-backed [PairingChallengeStore] (ADR-010).
+ *
+ * Port types (PairingChallengeRecord / ChallengeKind / PairingChallengeStore)
+ * live in `:core:ports` (ARC-01).
  */
 class PairingChallengeService(
     private val broker: SecretBroker,
@@ -32,86 +42,6 @@ class PairingChallengeService(
     private fun put(rec: PairingChallengeRecord) = store.upsert(rec)
 
     private fun getRec(challengeId: String): PairingChallengeRecord? = store.get(challengeId)
-
-    enum class ChallengeKind {
-        /** Observed Binder principal + local approval; no pairing secret. */
-        AIDL_REGISTRATION,
-
-        /** Channel-bound LAN HMAC pairing (OmniLLM-LAN-Pairing-1). */
-        LAN_HMAC,
-    }
-
-    data class PairingChallengeRecord(
-        val challengeId: String,
-        val kind: ChallengeKind,
-        val state: String,
-        val principalId: String?,
-        val observedUid: Int?,
-        val androidUserId: Int?,
-        val protocolLabel: String?,
-        val requestedScopes: Set<String>,
-        val serverSpkiSha256: String?,
-        val connectionEpoch: Long?,
-        /** base64url server nonce (channel binding). */
-        val serverNonceBase64Url: String?,
-        val secretEncrypted: EncryptedRecord?,
-        val attemptsRemaining: Int,
-        val expiresAtEpochMs: Long,
-        val approvedAtEpochMs: Long?,
-        val consumedAtEpochMs: Long?,
-        val createdAtEpochMs: Long,
-        val updatedAtEpochMs: Long,
-        /** One-time secret plaintext for QR display — wiped after first take or consume. */
-        val secretPlaintextOnce: String?,
-    ) {
-        init {
-            require(challengeId.isNotBlank())
-            require(StateMachines.PAIRING_CHALLENGE.isKnownState(state)) {
-                "unknown PAIRING_CHALLENGE state: $state"
-            }
-            require(attemptsRemaining in 0..SecurityProfile.LAN_PAIRING_MAX_ATTEMPTS)
-            require(requestedScopes.isNotEmpty())
-            when (kind) {
-                ChallengeKind.LAN_HMAC -> {
-                    require(protocolLabel == SecurityProfile.LAN_PAIRING_PROTOCOL_LABEL)
-                    require(serverSpkiSha256 != null && serverSpkiSha256.matches(HEX64))
-                    require(connectionEpoch != null && connectionEpoch >= 0L)
-                    require(serverNonceBase64Url != null)
-                    val live = state == "PENDING" || state == "APPROVED"
-                    if (live) {
-                        require(secretEncrypted != null) {
-                            "LAN_HMAC live challenge must hold encrypted pairing secret"
-                        }
-                    }
-                }
-                ChallengeKind.AIDL_REGISTRATION -> {
-                    require(secretEncrypted == null)
-                    require(observedUid != null)
-                    require(androidUserId != null)
-                }
-            }
-        }
-
-        fun view(includeSecretOnce: Boolean = false): PairingChallengeView =
-            PairingChallengeView(
-                challengeId = challengeId,
-                kind = kind,
-                state = state,
-                requestedScopes = requestedScopes,
-                serverSpkiSha256 = serverSpkiSha256,
-                connectionEpoch = connectionEpoch,
-                serverNonceBase64Url = serverNonceBase64Url,
-                protocolLabel = protocolLabel,
-                attemptsRemaining = attemptsRemaining,
-                expiresAtEpochMs = expiresAtEpochMs,
-                approvedAtEpochMs = approvedAtEpochMs,
-                secretPlaintextOnce = if (includeSecretOnce) secretPlaintextOnce else null,
-            )
-
-        companion object {
-            private val HEX64 = Regex("^[0-9a-f]{64}$")
-        }
-    }
 
     data class PairingChallengeView(
         val challengeId: String,
@@ -374,12 +304,29 @@ class PairingChallengeService(
         val proofBytes = CryptoPrimitives.decodeBase64Url(request.proofBase64Url)
             ?: return recordFailedAttempt(current, "malformed pairing proof")
 
+        val protocolLabel = current.protocolLabel ?: return recordFailedAttempt(
+            current,
+            "LAN_HMAC challenge missing protocol label",
+        )
+        val serverSpki = current.serverSpkiSha256 ?: return recordFailedAttempt(
+            current,
+            "LAN_HMAC challenge missing SPKI fingerprint",
+        )
+        val serverNonce = current.serverNonceBase64Url ?: return recordFailedAttempt(
+            current,
+            "LAN_HMAC challenge missing server nonce",
+        )
+        val connectionEpoch = current.connectionEpoch ?: return recordFailedAttempt(
+            current,
+            "LAN_HMAC challenge missing connection epoch",
+        )
+
         val transcript = LanPairingTranscript(
-            protocolLabel = current.protocolLabel!!,
-            serverSpkiSha256 = current.serverSpkiSha256,
-            connectionEpoch = current.connectionEpoch!!,
+            protocolLabel = protocolLabel,
+            serverSpkiSha256 = serverSpki,
+            connectionEpoch = connectionEpoch,
             challengeId = current.challengeId,
-            serverNonce = current.serverNonceBase64Url!!,
+            serverNonce = serverNonce,
             clientPublicKey = request.clientPublicKey,
             requestedScopes = current.requestedScopes,
             issuedAtEpochMs = current.createdAtEpochMs,
@@ -425,7 +372,7 @@ class PairingChallengeService(
                 registrationId = request.registrationId,
                 principalId = request.principalId,
                 scopes = current.requestedScopes,
-                transportConstraint = TokenService.TransportConstraint.LAN_ONLY,
+                transportConstraint = TransportConstraint.LAN_ONLY,
                 ttlSeconds = DEFAULT_LAN_TOKEN_TTL_SECONDS,
                 profile = AccessProfile.LAN_CLIENT,
                 label = "lan-pairing",
@@ -616,3 +563,22 @@ class PairingChallengeService(
         const val DEFAULT_LAN_TOKEN_TTL_SECONDS: Long = 86_400L
     }
 }
+
+/** View projection (no secret material) for a durable pairing-challenge record. */
+fun com.omnillm.core.ports.security.PairingChallengeRecord.view(
+    includeSecretOnce: Boolean = false,
+): PairingChallengeService.PairingChallengeView =
+    PairingChallengeService.PairingChallengeView(
+        challengeId = challengeId,
+        kind = kind,
+        state = state,
+        requestedScopes = requestedScopes,
+        serverSpkiSha256 = serverSpkiSha256,
+        connectionEpoch = connectionEpoch,
+        serverNonceBase64Url = serverNonceBase64Url,
+        protocolLabel = protocolLabel,
+        attemptsRemaining = attemptsRemaining,
+        expiresAtEpochMs = expiresAtEpochMs,
+        approvedAtEpochMs = approvedAtEpochMs,
+        secretPlaintextOnce = if (includeSecretOnce) secretPlaintextOnce else null,
+    )

@@ -18,7 +18,7 @@ import com.omnillm.features.contentreport.domain.ContentReportReceipt
 import com.omnillm.features.contentreport.domain.ContentReportRecord
 import com.omnillm.runtime.policy.security.EncryptedRecordCodec
 import com.omnillm.runtime.policy.security.SecretBroker
-import com.omnillm.runtime.policy.security.SecurityProfile
+import com.omnillm.core.ports.security.SecurityProfile
 import com.omnillm.runtime.policy.security.VaultSecretBroker
 import java.nio.charset.StandardCharsets
 import java.time.Instant

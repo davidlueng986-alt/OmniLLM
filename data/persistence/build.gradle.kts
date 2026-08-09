@@ -41,11 +41,16 @@ dependencies {
     implementation(project(":core:canonical"))
     implementation(project(":core:identity"))
     implementation(project(":core:state"))
-    // Secret ledger adapters implement AccessTokenStore / PairingChallengeStore /
-    // RevocationEpochStore / EncryptedKeyBlobStore from :runtime:policy (SEC-AUTH-NET).
-    // No reverse dep: policy stays free of SQLDelight / Android.
-    implementation(project(":runtime:policy"))
+    // Persistence ports (AccessTokenStore / PairingChallengeStore /
+    // RevocationEpochStore / EncryptedKeyBlobStore + ledger port rows) live in
+    // :core:ports (ARC-01 / ARC-02). Secret-ledger adapters implement them here
+    // without a reverse dependency on :runtime:policy.
+    implementation(project(":core:ports"))
     testImplementation(libs.junit)
     testImplementation(project(":core:contracts"))
     testImplementation(project(":core:errors"))
+    // Integration tests exercise the SQLite adapters against the real policy
+    // services (TokenService / PairingChallengeService / vault). Test-only
+    // reverse edge — production main sources never depend on :runtime:policy.
+    testImplementation(project(":runtime:policy"))
 }

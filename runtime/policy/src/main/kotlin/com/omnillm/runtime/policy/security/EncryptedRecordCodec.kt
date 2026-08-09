@@ -1,5 +1,6 @@
 package com.omnillm.runtime.policy.security
 
+import com.omnillm.core.ports.security.EncryptedRecord
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream

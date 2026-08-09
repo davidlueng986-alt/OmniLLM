@@ -2,6 +2,8 @@ package com.omnillm.runtime.policy
 
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.contracts.PrincipalId
+import com.omnillm.core.ports.security.RevocationScope
+import com.omnillm.core.ports.security.RevocationSubjectKind
 import com.omnillm.core.errors.generated.OmniErrorCode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

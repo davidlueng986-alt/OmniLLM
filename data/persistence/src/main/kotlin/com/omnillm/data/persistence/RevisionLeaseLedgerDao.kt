@@ -1,4 +1,6 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.ControlPlaneWriter
+import com.omnillm.core.ports.ledger.ClaimLedgerTransaction
 
 /**
  * Control-plane DAO for durable REVISION_LEASE rows (CORE-MODEL §9 / ADR-010).
@@ -20,3 +22,4 @@ interface RevisionLeaseLedgerPorts : ControlPlaneWriter {
     val leases: RevisionLeaseRecordDao
     val tx: ClaimLedgerTransaction
 }
+

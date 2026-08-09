@@ -1,4 +1,6 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.ToolResultClaimRow
+import com.omnillm.core.ports.ledger.ToolProposalRow
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -52,3 +54,4 @@ class SqlDelightToolProposalStoreTest {
         }
     }
 }
+

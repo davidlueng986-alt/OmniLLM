@@ -1,4 +1,4 @@
-package com.omnillm.data.persistence
+package com.omnillm.core.ports.ledger
 
 /**
  * Durable ContentReport ledger rows (FEAT-AI-CONTENT-REPORT / DATA-OWNERSHIP).
@@ -10,6 +10,8 @@ package com.omnillm.data.persistence
  * **Stream kind:** `AI_CONTENT_REPORT` — never telemetry (SEC-PRIVACY).
  * Raw prompt/output bytes live only in [encryptedProposal]/[encryptedPayload] BLOBs;
  * metrics/logs must use digests/status only.
+ * SQLite adapter lives in `:data:persistence`; the Feature Pack consumes these
+ * ports directly (ARC-02) without compiling against `:data:*` writers.
  */
 
 /** CONTENT_REPORT FSM states from specs/state-machines.yaml / ContentReportState. */

@@ -1,16 +1,17 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.security.RevocationScope
+import com.omnillm.core.ports.security.RevocationSubjectKind
+import com.omnillm.core.ports.security.TransportConstraint
 
 import com.omnillm.core.canonical.generated.AccessProfile
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniErrorCode
 import com.omnillm.runtime.PolicyModule
-import com.omnillm.runtime.policy.RevocationScope
-import com.omnillm.runtime.policy.RevocationSubjectKind
 import com.omnillm.runtime.policy.security.CryptoPrimitives
 import com.omnillm.runtime.policy.security.EncryptedBlobSecretKeyVault
 import com.omnillm.runtime.policy.security.PairingChallengeService
-import com.omnillm.runtime.policy.security.SecurityProfile
+import com.omnillm.core.ports.security.SecurityProfile
 import com.omnillm.runtime.policy.security.TokenService
 import com.omnillm.runtime.policy.security.VaultSecretBroker
 import org.junit.Assert.assertArrayEquals
@@ -73,7 +74,7 @@ class SqlDelightSecretLedgerStoreTest {
                 registrationId = "reg-durable-1",
                 principalId = PrincipalId.parse("http-dev-durable"),
                 scopes = setOf("models.read", "inference.create"),
-                transportConstraint = TokenService.TransportConstraint.LOOPBACK_ONLY,
+                transportConstraint = TransportConstraint.LOOPBACK_ONLY,
                 ttlSeconds = 3_600L,
                 profile = AccessProfile.DEVELOPER_CLIENT,
                 label = "durable-test",
@@ -97,7 +98,7 @@ class SqlDelightSecretLedgerStoreTest {
             assertFalse(String(row.verifier, Charsets.ISO_8859_1).contains(issued.plaintextOnce))
             val auth = stack.tokenService.authenticate(
                 issued.plaintextOnce,
-                TokenService.TransportConstraint.LOOPBACK_ONLY,
+                TransportConstraint.LOOPBACK_ONLY,
                 now,
             ) as OmniResult.Ok
             assertEquals(issued.tokenId, auth.value.tokenId)
@@ -111,7 +112,7 @@ class SqlDelightSecretLedgerStoreTest {
             assertEquals(32, row.verifier.size)
             val auth = stack.tokenService.authenticate(
                 issued.plaintextOnce,
-                TokenService.TransportConstraint.LOOPBACK_ONLY,
+                TransportConstraint.LOOPBACK_ONLY,
                 now,
             ) as OmniResult.Ok
             assertEquals(issued.tokenId, auth.value.tokenId)
@@ -133,7 +134,7 @@ class SqlDelightSecretLedgerStoreTest {
             assertEquals("REVOKED", revoked.value.state)
             val auth = stack.tokenService.authenticate(
                 issued.plaintextOnce,
-                TokenService.TransportConstraint.LOOPBACK_ONLY,
+                TransportConstraint.LOOPBACK_ONLY,
                 now,
             ) as OmniResult.Err
             assertEquals(OmniErrorCode.UNAUTHORIZED, auth.error.code)
@@ -148,7 +149,7 @@ class SqlDelightSecretLedgerStoreTest {
             assertTrue(tokenEpoch > 0L)
             val auth = stack.tokenService.authenticate(
                 issued.plaintextOnce,
-                TokenService.TransportConstraint.LOOPBACK_ONLY,
+                TransportConstraint.LOOPBACK_ONLY,
                 now,
             ) as OmniResult.Err
             assertEquals(OmniErrorCode.UNAUTHORIZED, auth.error.code)
@@ -170,7 +171,7 @@ class SqlDelightSecretLedgerStoreTest {
             assertEquals(1L, fence.value.epoch)
             val auth = stack.tokenService.authenticate(
                 issued.plaintextOnce,
-                TokenService.TransportConstraint.LOOPBACK_ONLY,
+                TransportConstraint.LOOPBACK_ONLY,
                 now,
             ) as OmniResult.Err
             assertEquals(OmniErrorCode.FORBIDDEN, auth.error.code)
@@ -186,7 +187,7 @@ class SqlDelightSecretLedgerStoreTest {
             )
             val auth = stack.tokenService.authenticate(
                 issued.plaintextOnce,
-                TokenService.TransportConstraint.LOOPBACK_ONLY,
+                TransportConstraint.LOOPBACK_ONLY,
                 now,
             ) as OmniResult.Err
             assertEquals(OmniErrorCode.FORBIDDEN, auth.error.code)

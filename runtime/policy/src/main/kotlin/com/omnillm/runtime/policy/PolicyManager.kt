@@ -3,6 +3,8 @@ package com.omnillm.runtime.policy
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniError
+import com.omnillm.core.ports.security.RevocationRecord
+import com.omnillm.core.ports.security.RevocationScope
 
 /**
  * Policy Manager (DATA-CONFIG, SEC-AUTH-NET, INV-017).

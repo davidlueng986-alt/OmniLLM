@@ -1,4 +1,6 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.ClaimLedgerTransaction
 
 /**
  * SQLDelight-backed [CommitLedgerPorts] for control-plane sole writer (ADR-010).
@@ -261,3 +263,4 @@ private fun Commit_resource_bindings.toBindingRow(): CommitResourceBindingRow =
         disposition = disposition,
         updatedAt = updated_at,
     )
+

@@ -1,4 +1,6 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.CommandLedgerStates
+import com.omnillm.core.ports.ledger.IdempotentCommandClaimRow
 
 /**
  * Row models for request/command claim ledgers
@@ -8,29 +10,8 @@ package com.omnillm.data.persistence
  * Claim key (request + command tables): `(principal_id, operation_kind, idempotency_key)`.
  * Same claim with different digest ⇒ IDEMPOTENCY_CONFLICT (catalog); claim-or-return
  * returns the durable original when digest matches (ADR-004/005).
+ * CommandLedgerStates / IdempotentCommandClaimRow live in `:core:ports` (ARC-02).
  */
-
-/** States from OpenAPI CommandResult / schema CHECK on idempotent_commands / FSM COMMAND. */
-object CommandLedgerStates {
-    val ALL: Set<String> = setOf(
-        "RECEIVED",
-        "CLAIMED",
-        "RUNNING",
-        "RECONCILING",
-        "SUCCEEDED",
-        "FAILED",
-        "CANCELLED",
-        "UNCERTAIN",
-    )
-
-    /** Terminal states from specs/state-machines.yaml#COMMAND. */
-    val TERMINAL: Set<String> = setOf(
-        "SUCCEEDED",
-        "FAILED",
-        "CANCELLED",
-        "UNCERTAIN",
-    )
-}
 
 /** Request ledger states from specs/state-machines.yaml#REQUEST / schema inference_requests. */
 object RequestLedgerStates {
@@ -112,24 +93,6 @@ data class RequestTerminalRow(
         }
     }
 }
-
-data class IdempotentCommandClaimRow(
-    val commandId: String,
-    val principalId: String,
-    val operationKind: String,
-    val idempotencyKey: String,
-    val expectedVersion: Long? = null,
-    val canonicalInputDigest: String,
-    val state: String,
-    val affectedResourceId: String? = null,
-    val resultJson: String? = null,
-    val errorCode: String? = null,
-    val reconciliationDisposition: String? = null,
-    val resourceVersion: Long = 0,
-    val expiresAt: String? = null,
-    val createdAt: String,
-    val updatedAt: String,
-)
 
 /**
  * In-memory claim-or-return semantics for conformance placeholders.
@@ -213,3 +176,4 @@ class ClaimOrReturnLedger {
 }
 
 class IdempotencyConflict(message: String) : Exception(message)
+

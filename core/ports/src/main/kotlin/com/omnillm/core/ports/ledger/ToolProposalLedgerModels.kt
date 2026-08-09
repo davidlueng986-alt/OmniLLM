@@ -1,4 +1,4 @@
-package com.omnillm.data.persistence
+package com.omnillm.core.ports.ledger
 
 /**
  * Durable tool proposal / result claim rows (FEAT-TOOLS / DATA-OWNERSHIP).
@@ -6,6 +6,8 @@ package com.omnillm.data.persistence
  * Control-plane sole writer (ADR-010). UI never holds these DAOs (INV-001).
  * Arguments live in [ToolProposalRow.argumentsJson] for host recovery only —
  * observability traces must redact (FEAT-TOOLS §6).
+ * SQLite adapter lives in `:data:persistence`; Feature Packs consume these
+ * ports directly (ARC-02) without compiling against `:data:*` writers.
  */
 
 object ToolProposalLedgerStates {

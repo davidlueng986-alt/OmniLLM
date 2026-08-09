@@ -1,4 +1,5 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.IdempotentCommandClaimRow
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -235,3 +236,4 @@ class SqlDelightClaimLedgerStoreTest {
         }
     }
 }
+

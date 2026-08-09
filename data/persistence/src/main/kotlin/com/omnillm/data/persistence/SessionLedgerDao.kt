@@ -1,4 +1,7 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.ClaimLedgerTransaction
+import com.omnillm.core.ports.ledger.ControlPlaneWriter
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
 
 /**
  * Control-plane DAO for durable Session records (CORE-SESSION / DATA-OWNERSHIP).
@@ -43,3 +46,4 @@ interface SessionLedgerPorts : ControlPlaneWriter {
     val sessions: SessionRecordDao
     val tx: ClaimLedgerTransaction
 }
+

@@ -1,4 +1,6 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.ClaimLedgerTransaction
 
 /**
  * SQLDelight-backed [InstallationLedgerPorts] for control-plane sole writer (ADR-010).
@@ -114,3 +116,4 @@ private fun Installations.toInstallationRow(): InstallationRecordRow =
         createdAt = created_at,
         updatedAt = updated_at,
     )
+

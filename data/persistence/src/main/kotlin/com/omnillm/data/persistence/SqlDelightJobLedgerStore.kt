@@ -1,4 +1,5 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
 
 /**
  * SQLDelight-backed [JobLedgerPorts] for control-plane sole writer (ADR-010).
@@ -181,3 +182,4 @@ private fun Job_events.toEventRow(): JobEventLedgerRow =
         payloadJson = payload_json,
         occurredAt = occurred_at,
     )
+

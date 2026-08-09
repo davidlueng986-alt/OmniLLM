@@ -2,6 +2,7 @@ package com.omnillm.runtime.policy.security
 
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.errors.generated.OmniErrorCode
+import com.omnillm.core.ports.security.SecurityProfile
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

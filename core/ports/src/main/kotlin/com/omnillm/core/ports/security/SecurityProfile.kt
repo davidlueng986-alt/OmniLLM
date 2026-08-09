@@ -1,4 +1,4 @@
-package com.omnillm.runtime.policy.security
+package com.omnillm.core.ports.security
 
 /**
  * Versioned security / crypto profile (SEC-PROFILE, specs/security-profile.yaml).

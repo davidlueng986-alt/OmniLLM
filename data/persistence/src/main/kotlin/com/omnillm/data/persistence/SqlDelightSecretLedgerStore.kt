@@ -1,17 +1,22 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.security.AccessTokenRecord
+import com.omnillm.core.ports.security.AccessTokenStore
+import com.omnillm.core.ports.security.BrokerKeyMetadata
+import com.omnillm.core.ports.security.ChallengeKind
+import com.omnillm.core.ports.security.EncryptedKeyBlobStore
+import com.omnillm.core.ports.security.EncryptedRecord
+import com.omnillm.core.ports.security.PairingChallengeRecord
+import com.omnillm.core.ports.security.PairingChallengeStore
+import com.omnillm.core.ports.security.RevocationEpochStore
+import com.omnillm.core.ports.security.RevocationRecord
+import com.omnillm.core.ports.security.RevocationScope
+import com.omnillm.core.ports.security.RevocationSubjectKind
+import com.omnillm.core.ports.security.SecurityProfile
+import com.omnillm.core.ports.security.TransportConstraint
+import com.omnillm.core.ports.ledger.ClaimLedgerTransaction
+import com.omnillm.core.ports.ledger.ControlPlaneWriter
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
 
-import com.omnillm.runtime.policy.RevocationEpochStore
-import com.omnillm.runtime.policy.RevocationRecord
-import com.omnillm.runtime.policy.RevocationScope
-import com.omnillm.runtime.policy.RevocationSubjectKind
-import com.omnillm.runtime.policy.security.AccessTokenStore
-import com.omnillm.runtime.policy.security.BrokerKeyMetadata
-import com.omnillm.runtime.policy.security.EncryptedKeyBlobStore
-import com.omnillm.runtime.policy.security.EncryptedRecord
-import com.omnillm.runtime.policy.security.PairingChallengeService
-import com.omnillm.runtime.policy.security.PairingChallengeStore
-import com.omnillm.runtime.policy.security.SecurityProfile
-import com.omnillm.runtime.policy.security.TokenService
 
 /**
  * SQLDelight-backed secret / token / pairing / revocation ledgers (ADR-010).
@@ -31,13 +36,13 @@ class SqlDelightSecretLedgerStore(
     }
 
     val accessTokens: AccessTokenStore = object : AccessTokenStore {
-        override fun get(tokenId: String): TokenService.AccessTokenRecord? =
+        override fun get(tokenId: String): AccessTokenRecord? =
             database.accessTokensQueries.selectByTokenId(tokenId).executeAsOneOrNull()?.toRecord()
 
-        override fun listAll(): List<TokenService.AccessTokenRecord> =
+        override fun listAll(): List<AccessTokenRecord> =
             database.accessTokensQueries.listAll().executeAsList().map { it.toRecord() }
 
-        override fun upsert(record: TokenService.AccessTokenRecord) {
+        override fun upsert(record: AccessTokenRecord) {
             database.accessTokensQueries.upsertToken(
                 token_id = record.tokenId,
                 registration_id = record.registrationId,
@@ -66,16 +71,16 @@ class SqlDelightSecretLedgerStore(
     }
 
     val pairingChallenges: PairingChallengeStore = object : PairingChallengeStore {
-        override fun get(challengeId: String): PairingChallengeService.PairingChallengeRecord? =
+        override fun get(challengeId: String): PairingChallengeRecord? =
             database.pairingChallengesQueries
                 .selectByChallengeId(challengeId)
                 .executeAsOneOrNull()
                 ?.toRecord()
 
-        override fun listAll(): List<PairingChallengeService.PairingChallengeRecord> =
+        override fun listAll(): List<PairingChallengeRecord> =
             database.pairingChallengesQueries.listAll().executeAsList().map { it.toRecord() }
 
-        override fun upsert(record: PairingChallengeService.PairingChallengeRecord) {
+        override fun upsert(record: PairingChallengeRecord) {
             val enc = record.secretEncrypted
             database.pairingChallengesQueries.upsertChallenge(
                 challenge_id = record.challengeId,
@@ -209,8 +214,8 @@ private fun decodeScopes(json: String): Set<String> =
     if (json.isBlank()) emptySet()
     else json.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
-private fun Access_tokens.toRecord(): TokenService.AccessTokenRecord =
-    TokenService.AccessTokenRecord(
+private fun Access_tokens.toRecord(): AccessTokenRecord =
+    AccessTokenRecord(
         tokenId = token_id,
         registrationId = registration_id,
         principalId = principal_id,
@@ -218,7 +223,7 @@ private fun Access_tokens.toRecord(): TokenService.AccessTokenRecord =
         verifier = verifier,
         verifierAlgorithm = verifier_algorithm,
         verifierKeyVersion = verifier_key_version.toInt(),
-        transportConstraint = TokenService.TransportConstraint.valueOf(transport_constraint),
+        transportConstraint = TransportConstraint.valueOf(transport_constraint),
         scopes = decodeScopes(scope_json),
         revocationEpoch = revocation_epoch,
         issuedAtEpochMs = issued_at_epoch_ms,
@@ -229,7 +234,7 @@ private fun Access_tokens.toRecord(): TokenService.AccessTokenRecord =
         lastSeenAtEpochMs = last_seen_at_epoch_ms,
     )
 
-private fun Pairing_challenges.toRecord(): PairingChallengeService.PairingChallengeRecord {
+private fun Pairing_challenges.toRecord(): PairingChallengeRecord {
     val enc = if (secret_ciphertext != null && secret_nonce != null && secret_key_version != null) {
         EncryptedRecord(
             profileId = SecurityProfile.PROFILE_ID,
@@ -245,9 +250,9 @@ private fun Pairing_challenges.toRecord(): PairingChallengeService.PairingChalle
     } else {
         null
     }
-    return PairingChallengeService.PairingChallengeRecord(
+    return PairingChallengeRecord(
         challengeId = challenge_id,
-        kind = PairingChallengeService.ChallengeKind.valueOf(challenge_kind),
+        kind = ChallengeKind.valueOf(challenge_kind),
         state = state,
         principalId = principal_id,
         observedUid = observed_uid?.toInt(),

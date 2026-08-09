@@ -26,6 +26,7 @@ include(
     ":core:errors",
     ":core:resource",
     ":core:identity",
+    ":core:ports",
 )
 
 // ---------------------------------------------------------------------------

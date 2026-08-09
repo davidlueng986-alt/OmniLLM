@@ -1,10 +1,10 @@
-package com.omnillm.data.persistence
+package com.omnillm.core.ports.ledger
 
 /**
  * ## Single-writer policy (ADR-010 / DATA-OWNERSHIP / INV-001)
  *
  * Runtime control plane is the **sole** authoritative writer of:
- * - domain DB (this module)
+ * - domain DB (`:data:persistence`)
  * - model store projection
  * - trust state
  * - request / command / job / commit ledgers
@@ -61,4 +61,9 @@ object SingleWriterPolicy {
  */
 interface ControlPlaneWriter {
     val writerRole: String get() = SingleWriterPolicy.WRITER_ROLE
+}
+
+/** Atomic claim/insert boundary for request + command ledgers. */
+interface ClaimLedgerTransaction {
+    fun <T> inTransaction(block: () -> T): T
 }

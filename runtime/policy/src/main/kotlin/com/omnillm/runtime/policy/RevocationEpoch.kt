@@ -3,35 +3,21 @@ package com.omnillm.runtime.policy
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniError
+import com.omnillm.core.ports.security.InMemoryRevocationEpochStore
+import com.omnillm.core.ports.security.RevocationEpochStore
+import com.omnillm.core.ports.security.RevocationRecord
+import com.omnillm.core.ports.security.RevocationScope
+import com.omnillm.core.ports.security.RevocationSubjectKind
+import com.omnillm.core.ports.security.storageKey
 import com.omnillm.core.state.GuardEvaluator
 import com.omnillm.core.state.StateMachineDriver
 import com.omnillm.core.state.TransitionOutcome
 import com.omnillm.core.state.generated.StateMachines
 
 /**
- * Monotonic revocation epoch + REVOCATION FSM (SEC-AUTH-NET, INV-017,
- * access-control-catalog invariant, state-machines.yaml#REVOCATION).
- *
- * Bumping the epoch fences active streams, queues, sessions and commands
- * bound to the previous epoch. New work must observe the current epoch.
+ * Revocation-scope / record / store port types live in `:core:ports` (ARC-01);
+ * SQLite adapters implement [RevocationEpochStore] in `:data:persistence`.
  */
-data class RevocationScope(
-    /** Principal / token / trust subject being revoked. */
-    val subjectId: String,
-    val kind: RevocationSubjectKind,
-) {
-    init {
-        require(subjectId.isNotBlank()) { "subjectId must be non-blank" }
-    }
-}
-
-enum class RevocationSubjectKind {
-    PRINCIPAL,
-    TOKEN,
-    CLIENT_REGISTRATION,
-    TRUST_MODE,
-    ACL,
-}
 
 /**
  * Hooks invoked during fencing (INV-017). Runtime wires cancel/queue/session
@@ -61,22 +47,6 @@ interface RevocationFenceHooks {
             override fun rotateSecrets(scope: RevocationScope, epoch: Long) = Unit
             override fun audit(scope: RevocationScope, event: String, details: Map<String, String>) = Unit
             override fun hasOldCapability(scope: RevocationScope, oldEpoch: Long): Boolean = false
-        }
-    }
-}
-
-data class RevocationRecord(
-    val scope: RevocationScope,
-    val epoch: Long,
-    val state: String,
-    val reason: String?,
-    val actorPrincipalId: String?,
-    val updatedAtEpochMs: Long,
-) {
-    init {
-        require(epoch >= 0L) { "epoch must be non-negative" }
-        require(StateMachines.REVOCATION.isKnownState(state)) {
-            "unknown REVOCATION state: $state"
         }
     }
 }

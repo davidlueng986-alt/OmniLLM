@@ -5,7 +5,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Log
 import com.omnillm.runtime.policy.security.CryptoPrimitives
-import com.omnillm.runtime.policy.security.SecurityProfile
+import com.omnillm.core.ports.security.SecurityProfile
 import java.io.File
 import java.security.KeyStore
 import javax.crypto.Cipher

@@ -1,12 +1,13 @@
 package com.omnillm.runtime.policy.security
+import com.omnillm.core.ports.security.RevocationScope
+import com.omnillm.core.ports.security.RevocationSubjectKind
+import com.omnillm.core.ports.security.TransportConstraint
 
 import com.omnillm.core.canonical.generated.AccessProfile
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniErrorCode
 import com.omnillm.runtime.policy.RevocationEpochManager
-import com.omnillm.runtime.policy.RevocationScope
-import com.omnillm.runtime.policy.RevocationSubjectKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,7 +33,7 @@ class RevokedTokenNegativeSecurityTest {
                 registrationId = "reg-revoked-1",
                 principalId = PrincipalId.parse(principal),
                 scopes = scopes,
-                transportConstraint = TokenService.TransportConstraint.LOOPBACK_ONLY,
+                transportConstraint = TransportConstraint.LOOPBACK_ONLY,
                 ttlSeconds = 3_600L,
                 profile = AccessProfile.DEVELOPER_CLIENT,
                 label = "revoked-neg",
@@ -56,7 +57,7 @@ class RevokedTokenNegativeSecurityTest {
 
         val auth = tokens.authenticate(
             issued.plaintextOnce,
-            TokenService.TransportConstraint.LOOPBACK_ONLY,
+            TransportConstraint.LOOPBACK_ONLY,
             now,
         )
         assertTrue(auth is OmniResult.Err)
@@ -76,7 +77,7 @@ class RevokedTokenNegativeSecurityTest {
 
         val auth = tokens.authenticate(
             issued.plaintextOnce,
-            TokenService.TransportConstraint.LOOPBACK_ONLY,
+            TransportConstraint.LOOPBACK_ONLY,
             now,
         )
         assertTrue(auth is OmniResult.Err)
@@ -88,7 +89,7 @@ class RevokedTokenNegativeSecurityTest {
         val issued = issueLoopback()
         val auth = tokens.authenticate(
             issued.plaintextOnce,
-            TokenService.TransportConstraint.LAN_ONLY,
+            TransportConstraint.LAN_ONLY,
             now,
         )
         assertTrue(auth is OmniResult.Err)

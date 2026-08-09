@@ -1,4 +1,7 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.ClaimLedgerTransaction
+import com.omnillm.core.ports.ledger.ControlPlaneWriter
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
 
 /**
  * Control-plane DAO surfaces for commit recovery ledgers (REL-RECOVERY / DATA-OWNERSHIP).
@@ -77,3 +80,4 @@ interface CommitLedgerPorts : ControlPlaneWriter {
     val bindings: CommitResourceBindingDao
     val tx: ClaimLedgerTransaction
 }
+

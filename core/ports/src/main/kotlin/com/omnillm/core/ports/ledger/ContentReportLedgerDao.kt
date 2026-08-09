@@ -1,10 +1,12 @@
-package com.omnillm.data.persistence
+package com.omnillm.core.ports.ledger
 
 /**
- * Control-plane DAOs for durable content reports (FEAT-AI-CONTENT-REPORT).
+ * Control-plane DAO surfaces for durable content reports (FEAT-AI-CONTENT-REPORT).
  *
  * Only the runtime control plane may open writers (ADR-010 / [SingleWriterPolicy]).
  * UI / workers / companion must not hold these DAOs as domain writers.
+ * SQLite adapter lives in `:data:persistence`; the Feature Pack consumes these
+ * ports directly (ARC-02) without compiling against `:data:*` writers.
  *
  * Authority tables: `content_reports`, `content_report_consent_grants`,
  * `content_report_receipts`.

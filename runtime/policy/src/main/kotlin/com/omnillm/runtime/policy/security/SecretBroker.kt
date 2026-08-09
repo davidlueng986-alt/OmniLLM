@@ -2,6 +2,9 @@ package com.omnillm.runtime.policy.security
 
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.errors.generated.OmniError
+import com.omnillm.core.ports.security.BrokerKeyMetadata
+import com.omnillm.core.ports.security.EncryptedRecord
+import com.omnillm.core.ports.security.SecurityProfile
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -117,14 +120,6 @@ data class BrokerKeyMaterial(
         BrokerKeyMetadata(purpose, keyVersion, state, createdAtEpochMs, rotationReason)
 }
 
-data class BrokerKeyMetadata(
-    val purpose: SecurityProfile.KeyPurpose,
-    val keyVersion: Int,
-    val state: SecurityProfile.KeyState,
-    val createdAtEpochMs: Long,
-    val rotationReason: String?,
-)
-
 data class BearerMint(
     /** base64url-without-padding 256-bit secret. */
     val plaintext: String,
@@ -152,17 +147,6 @@ data class OneTimePlaintextReceipt(
     val acknowledgedAtEpochMs: Long?,
     /** True when plaintext has already been taken or wiped. */
     val consumed: Boolean,
-)
-
-data class EncryptedRecord(
-    val profileId: String,
-    val recordType: String,
-    val recordId: String,
-    val schemaVersion: Int,
-    val keyVersion: Int,
-    val expiresAtEpochMs: Long,
-    val nonce: ByteArray,
-    val ciphertext: ByteArray,
 )
 
 data class MintedPairingSecret(

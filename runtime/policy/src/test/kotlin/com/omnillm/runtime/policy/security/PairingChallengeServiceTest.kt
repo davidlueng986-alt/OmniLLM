@@ -1,4 +1,7 @@
 package com.omnillm.runtime.policy.security
+import com.omnillm.core.ports.security.ChallengeKind
+import com.omnillm.core.ports.security.SecurityProfile
+import com.omnillm.core.ports.security.TransportConstraint
 
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.contracts.PrincipalId
@@ -76,7 +79,7 @@ class PairingChallengeServiceTest {
                 connectionEpoch = 7L,
             ),
         ) as OmniResult.Ok
-        assertEquals(PairingChallengeService.ChallengeKind.LAN_HMAC, created.value.kind)
+        assertEquals(ChallengeKind.LAN_HMAC, created.value.kind)
         assertEquals(SecurityProfile.LAN_PAIRING_PROTOCOL_LABEL, created.value.protocolLabel)
         assertEquals(spki, created.value.serverSpkiSha256)
         assertEquals(7L, created.value.connectionEpoch)
@@ -118,13 +121,13 @@ class PairingChallengeServiceTest {
                 principalId = PrincipalId.parse("http-lan-client-1"),
             ),
         ) as OmniResult.Ok
-        assertEquals(TokenService.TransportConstraint.LAN_ONLY, result.value.token.transportConstraint)
+        assertEquals(TransportConstraint.LAN_ONLY, result.value.token.transportConstraint)
         assertEquals("CONSUMED", pairing.get(created.challengeId)!!.state)
 
         // Token works on LAN listener.
         val auth = tokens.authenticate(
             result.value.token.plaintextOnce,
-            TokenService.TransportConstraint.LAN_ONLY,
+            TransportConstraint.LAN_ONLY,
             now,
         ) as OmniResult.Ok
         assertTrue(auth.value.scopes.contains("inference.create"))
@@ -253,7 +256,7 @@ class PairingChallengeServiceTest {
                 requestedScopes = setOf("models.read", "inference.create"),
             ),
         ) as OmniResult.Ok
-        assertEquals(PairingChallengeService.ChallengeKind.AIDL_REGISTRATION, created.value.kind)
+        assertEquals(ChallengeKind.AIDL_REGISTRATION, created.value.kind)
         assertNull(created.value.secretPlaintextOnce)
         val approved = pairing.approve(created.value.challengeId, actorIsLocalUi = true) as OmniResult.Ok
         assertEquals("APPROVED", approved.value.state)

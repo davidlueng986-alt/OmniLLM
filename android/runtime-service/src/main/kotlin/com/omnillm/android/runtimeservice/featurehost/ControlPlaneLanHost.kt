@@ -1,4 +1,5 @@
 package com.omnillm.android.runtimeservice.featurehost
+import com.omnillm.core.ports.security.TransportConstraint
 
 import com.omnillm.android.runtimeservice.http.LanTlsEndpoint
 import com.omnillm.core.canonical.generated.OmniResult
@@ -479,7 +480,7 @@ class ControlPlaneLanHost(
                         registrationId = clientId,
                         principalId = PrincipalId.parse("http-lan-$clientId"),
                         scopes = scopes,
-                        transportConstraint = TokenService.TransportConstraint.LAN_ONLY,
+                        transportConstraint = TransportConstraint.LAN_ONLY,
                         ttlSeconds = 86_400L,
                         profile = com.omnillm.core.canonical.generated.AccessProfile.LAN_CLIENT,
                         label = "lan-pairing",

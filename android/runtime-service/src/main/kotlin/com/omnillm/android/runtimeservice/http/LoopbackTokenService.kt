@@ -1,4 +1,5 @@
 package com.omnillm.android.runtimeservice.http
+import com.omnillm.core.ports.security.TransportConstraint
 
 import com.omnillm.core.canonical.generated.AccessProfile
 import com.omnillm.core.canonical.generated.OmniResult
@@ -80,9 +81,9 @@ class LoopbackTokenService(
         registrationId: String = clientId ?: "reg-$principalId",
     ): IssuedToken {
         val constraint = if (loopbackOnly) {
-            TokenService.TransportConstraint.LOOPBACK_ONLY
+            TransportConstraint.LOOPBACK_ONLY
         } else {
-            TokenService.TransportConstraint.LAN_ONLY
+            TransportConstraint.LAN_ONLY
         }
         // LOCAL_ADMIN_HTTP profile scopes when issuing broad bootstrap tokens.
         val resolvedProfile = when {
@@ -154,7 +155,7 @@ class LoopbackTokenService(
                 scopes = m.scopes,
                 expiresAt = Instant.ofEpochMilli(m.expiresAtEpochMs),
                 loopbackOnly = m.transportConstraint ==
-                    TokenService.TransportConstraint.LOOPBACK_ONLY,
+                    TransportConstraint.LOOPBACK_ONLY,
                 label = m.label,
                 revoked = m.state == "REVOKED",
                 issuedAt = Instant.ofEpochMilli(m.issuedAtEpochMs),
@@ -186,7 +187,7 @@ class LoopbackTokenService(
             scopes = rec.scopes,
             expiresAt = Instant.ofEpochMilli(rec.expiresAtEpochMs),
             loopbackOnly = rec.transportConstraint ==
-                TokenService.TransportConstraint.LOOPBACK_ONLY,
+                TransportConstraint.LOOPBACK_ONLY,
             label = rec.label,
             revoked = rec.state == "REVOKED",
             issuedAt = Instant.ofEpochMilli(rec.issuedAtEpochMs),
@@ -216,8 +217,8 @@ class LoopbackTokenService(
 
     override fun authenticate(bearerToken: String, transport: HttpTransportKind): AuthResult {
         val listener = when (transport) {
-            HttpTransportKind.LOOPBACK -> TokenService.TransportConstraint.LOOPBACK_ONLY
-            HttpTransportKind.LAN_TLS13 -> TokenService.TransportConstraint.LAN_ONLY
+            HttpTransportKind.LOOPBACK -> TransportConstraint.LOOPBACK_ONLY
+            HttpTransportKind.LAN_TLS13 -> TransportConstraint.LAN_ONLY
         }
         return when (val result = tokens.authenticate(bearerToken, listener)) {
             is OmniResult.Ok -> {
@@ -229,7 +230,7 @@ class LoopbackTokenService(
                         scopes = a.scopes,
                         revocationEpoch = a.revocationEpoch,
                         loopbackOnly = a.transportConstraint ==
-                            TokenService.TransportConstraint.LOOPBACK_ONLY,
+                            TransportConstraint.LOOPBACK_ONLY,
                         clientId = a.clientId,
                     ),
                 )

@@ -1,4 +1,16 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.ContentReportLedgerPorts
+import com.omnillm.core.ports.ledger.ContentReportReceiptRow
+import com.omnillm.core.ports.ledger.ContentReportLedgerCategories
+import com.omnillm.core.ports.ledger.ClaimLedgerTransaction
+import com.omnillm.core.ports.ledger.ContentReportGrantStates
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.ContentReportRecordRow
+import com.omnillm.core.ports.ledger.ContentReportGrantRow
+import com.omnillm.core.ports.ledger.ContentReportGrantDao
+import com.omnillm.core.ports.ledger.ContentReportLedgerStates
+import com.omnillm.core.ports.ledger.ContentReportRecordDao
+import com.omnillm.core.ports.ledger.ContentReportReceiptDao
 
 /**
  * SQLDelight-backed [ContentReportLedgerPorts] for control-plane sole writer (ADR-010).
@@ -221,3 +233,4 @@ private fun Content_report_receipts.toReceiptRow(): ContentReportReceiptRow =
         responseDigest = response_digest,
         lastQueriedAt = last_queried_at,
     )
+

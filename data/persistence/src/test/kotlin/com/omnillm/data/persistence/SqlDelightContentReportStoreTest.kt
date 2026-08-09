@@ -1,4 +1,7 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.ContentReportReceiptRow
+import com.omnillm.core.ports.ledger.ContentReportRecordRow
+import com.omnillm.core.ports.ledger.ContentReportGrantRow
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -223,3 +226,4 @@ class SqlDelightContentReportStoreTest {
         }
     }
 }
+

@@ -6,13 +6,18 @@ import com.omnillm.core.canonical.generated.AccessScope
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniError
+import com.omnillm.core.ports.security.AccessTokenRecord
+import com.omnillm.core.ports.security.AccessTokenStore
+import com.omnillm.core.ports.security.InMemoryAccessTokenStore
+import com.omnillm.core.ports.security.RevocationScope
+import com.omnillm.core.ports.security.RevocationSubjectKind
+import com.omnillm.core.ports.security.TokenMetadata
+import com.omnillm.core.ports.security.TransportConstraint
 import com.omnillm.core.state.GuardEvaluator
 import com.omnillm.core.state.StateMachineDriver
 import com.omnillm.core.state.TransitionOutcome
 import com.omnillm.core.state.generated.StateMachines
 import com.omnillm.runtime.policy.RevocationEpochManager
-import com.omnillm.runtime.policy.RevocationScope
-import com.omnillm.runtime.policy.RevocationSubjectKind
 import java.util.UUID
 
 /**
@@ -25,6 +30,10 @@ import java.util.UUID
  *
  * Single writer: runtime control plane (ADR-010).
  * Production: inject SQLite-backed [AccessTokenStore]; never keep plaintext.
+ *
+ * Port types (AccessTokenRecord / TokenMetadata / TransportConstraint /
+ * AccessTokenStore) live in `:core:ports` (ARC-01); `TokenService` consumes
+ * them directly.
  */
 class TokenService(
     private val broker: SecretBroker,
@@ -33,74 +42,6 @@ class TokenService(
     private val clockMs: () -> Long = { System.currentTimeMillis() },
 ) {
     private val lock = Any()
-
-    data class AccessTokenRecord(
-        val tokenId: String,
-        val registrationId: String,
-        val principalId: String,
-        val state: String,
-        val verifier: ByteArray,
-        val verifierAlgorithm: String,
-        val verifierKeyVersion: Int,
-        val transportConstraint: TransportConstraint,
-        val scopes: Set<String>,
-        val revocationEpoch: Long,
-        val issuedAtEpochMs: Long,
-        val expiresAtEpochMs: Long,
-        val label: String?,
-        val clientId: String?,
-        val updatedAtEpochMs: Long,
-        val lastSeenAtEpochMs: Long? = null,
-    ) {
-        init {
-            require(tokenId.isNotBlank())
-            require(StateMachines.TOKEN.isKnownState(state)) { "unknown TOKEN state: $state" }
-            require(verifier.isNotEmpty())
-            require(scopes.isNotEmpty())
-            require(revocationEpoch >= 0L)
-            require(expiresAtEpochMs > issuedAtEpochMs)
-        }
-
-        /** Metadata safe for list/admin — no verifier/plaintext. */
-        fun metadata(): TokenMetadata =
-            TokenMetadata(
-                tokenId = tokenId,
-                registrationId = registrationId,
-                principalId = principalId,
-                state = state,
-                transportConstraint = transportConstraint,
-                scopes = scopes,
-                revocationEpoch = revocationEpoch,
-                issuedAtEpochMs = issuedAtEpochMs,
-                expiresAtEpochMs = expiresAtEpochMs,
-                label = label,
-                clientId = clientId,
-                lastSeenAtEpochMs = lastSeenAtEpochMs,
-            )
-    }
-
-    data class TokenMetadata(
-        val tokenId: String,
-        val registrationId: String,
-        val principalId: String,
-        val state: String,
-        val transportConstraint: TransportConstraint,
-        val scopes: Set<String>,
-        val revocationEpoch: Long,
-        val issuedAtEpochMs: Long,
-        val expiresAtEpochMs: Long,
-        val label: String?,
-        val clientId: String?,
-        val lastSeenAtEpochMs: Long?,
-    )
-
-    enum class TransportConstraint {
-        /** Loopback admin / developer — never accepted on LAN listener. */
-        LOOPBACK_ONLY,
-
-        /** Channel-bound LAN pairing issued tokens. */
-        LAN_ONLY,
-    }
 
     data class IssueRequest(
         val registrationId: String,
@@ -574,7 +515,7 @@ data class AuthenticatedToken(
     val registrationId: String,
     val scopes: Set<String>,
     val revocationEpoch: Long,
-    val transportConstraint: TokenService.TransportConstraint,
+    val transportConstraint: TransportConstraint,
     val clientId: String?,
     val expiresAtEpochMs: Long,
 )

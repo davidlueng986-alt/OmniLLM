@@ -1,4 +1,6 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.ControlPlaneWriter
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
 
 /**
  * SQLDelight-backed catalog trust projection (SEC-SUPPLY / ADR-010).
@@ -43,3 +45,4 @@ class SqlDelightCatalogTrustStore(
         )
     }
 }
+

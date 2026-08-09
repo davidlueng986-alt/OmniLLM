@@ -1,4 +1,7 @@
 package com.omnillm.runtime.policy.acl
+import com.omnillm.core.ports.security.RevocationScope
+import com.omnillm.core.ports.security.RevocationSubjectKind
+import com.omnillm.core.ports.security.TransportConstraint
 
 import com.omnillm.core.canonical.generated.AccessControlCatalog
 import com.omnillm.core.canonical.generated.AccessProfile
@@ -8,8 +11,6 @@ import com.omnillm.core.canonical.generated.PrincipalKind
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniError
 import com.omnillm.runtime.policy.RevocationEpochManager
-import com.omnillm.runtime.policy.RevocationScope
-import com.omnillm.runtime.policy.RevocationSubjectKind
 import com.omnillm.runtime.policy.security.AuthenticatedToken
 import com.omnillm.runtime.policy.security.TokenService
 
@@ -232,7 +233,7 @@ class AccessControlEnforcer(
             registrationId = token.registrationId,
             tokenId = token.tokenId,
             loopbackOnlyToken = token.transportConstraint ==
-                TokenService.TransportConstraint.LOOPBACK_ONLY,
+                TransportConstraint.LOOPBACK_ONLY,
             isLocalUi = false,
         )
 

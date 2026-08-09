@@ -1,4 +1,6 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.ClaimLedgerTransaction
 
 /**
  * Thread-safe in-memory implementation of commit recovery ledgers.
@@ -173,3 +175,4 @@ class InMemoryCommitLedgerStore(
     private fun bindingKey(commitId: String, allocationId: String, role: String): String =
         "$commitId\u0000$allocationId\u0000$role"
 }
+

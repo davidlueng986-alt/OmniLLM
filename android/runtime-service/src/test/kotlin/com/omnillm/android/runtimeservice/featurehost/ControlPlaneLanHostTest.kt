@@ -17,7 +17,7 @@ import com.omnillm.runtime.PolicyModule
 import com.omnillm.runtime.policy.security.CryptoPrimitives
 import com.omnillm.runtime.policy.security.InMemorySecretBroker
 import com.omnillm.runtime.policy.security.LanPairingTranscript
-import com.omnillm.runtime.policy.security.SecurityProfile
+import com.omnillm.core.ports.security.SecurityProfile
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -253,7 +253,7 @@ class ControlPlaneLanHostTest {
 
         val auth = stack.tokenService.authenticate(
             tok.tokenPlaintext,
-            com.omnillm.runtime.policy.security.TokenService.TransportConstraint.LAN_ONLY,
+            com.omnillm.core.ports.security.TransportConstraint.LAN_ONLY,
             now,
         )
         assertTrue(auth is OmniResult.Err)

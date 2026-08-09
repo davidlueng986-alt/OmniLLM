@@ -1,4 +1,5 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.ControlPlaneWriter
 
 /**
  * Control-plane DAOs for durable JOB ledger (FEAT-ADMIN / ADR-010).
@@ -67,3 +68,4 @@ interface JobLedgerPorts : ControlPlaneWriter {
     val events: JobEventDao
     val tx: JobLedgerTransaction
 }
+

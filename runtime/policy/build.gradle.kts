@@ -18,5 +18,10 @@ dependencies {
     implementation(project(":core:contracts"))
     implementation(project(":core:errors"))
     implementation(project(":core:state"))
+    // Persistence ports (AccessTokenStore / PairingChallengeStore /
+    // RevocationEpochStore / EncryptedKeyBlobStore + records) live in
+    // :core:ports (ARC-01): policy consumes ports, :data:persistence
+    // implements them — no reverse data -> policy edge.
+    implementation(project(":core:ports"))
     testImplementation(libs.junit)
 }

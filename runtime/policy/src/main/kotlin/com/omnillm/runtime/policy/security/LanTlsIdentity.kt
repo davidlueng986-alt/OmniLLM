@@ -2,6 +2,7 @@ package com.omnillm.runtime.policy.security
 
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.errors.generated.OmniError
+import com.omnillm.core.ports.security.EncryptedRecord
 import java.io.ByteArrayInputStream
 import java.math.BigInteger
 import java.security.KeyFactory

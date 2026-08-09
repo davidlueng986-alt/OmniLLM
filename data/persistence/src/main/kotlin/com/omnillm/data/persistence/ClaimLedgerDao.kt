@@ -1,4 +1,8 @@
 package com.omnillm.data.persistence
+import com.omnillm.core.ports.ledger.ClaimLedgerTransaction
+import com.omnillm.core.ports.ledger.ControlPlaneWriter
+import com.omnillm.core.ports.ledger.SingleWriterPolicy
+import com.omnillm.core.ports.ledger.IdempotentCommandClaimRow
 
 /**
  * Control-plane DAO surfaces for request/command claim ledgers (DATA-OWNERSHIP).
@@ -10,11 +14,6 @@ package com.omnillm.data.persistence
  * - `inference_requests`, `request_attempts`, `request_terminals`
  * - `idempotent_commands`
  */
-
-/** Atomic claim/insert boundary for request + command ledgers. */
-interface ClaimLedgerTransaction {
-    fun <T> inTransaction(block: () -> T): T
-}
 
 interface InferenceRequestDao {
     fun findByRequestId(requestId: String): InferenceRequestClaimRow?
@@ -102,3 +101,4 @@ interface ClaimLedgerPorts : ControlPlaneWriter {
     val commands: IdempotentCommandDao
     val tx: ClaimLedgerTransaction
 }
+
