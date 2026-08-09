@@ -1,37 +1,52 @@
 package com.omnillm.core.contracts
 
 /**
- * Product build posture for OmniLLM Android.
+ * Product build posture for OmniLLM Android — variant-scoped, injected, fail-closed.
  *
- * **DEVELOPMENT_SHIP_MODE = true** (current default for this monorepo):
- * - All catalog engines may attempt execute when an adapter is bound.
- * - Capability negotiation may project SUPPORTED/CONDITIONAL without formal
- *   QUALIFIED_WITH_ENVELOPE + lab PASS packs (so feature development is unblocked).
- * - `runtime.exploratoryExecuteEnabled` defaults to true.
+ * ## Design (BLD-02)
  *
- * Flip to **false** only when you intentionally want the pre-build document
- * "honesty gates" (UNKNOWN until qualification evidence) for a compliance audit.
+ * `core/contracts` is a pure Kotlin JVM module: a hardcoded global constant cannot
+ * know which Android buildType it is running in, so `DEVELOPMENT_SHIP_MODE` is no
+ * longer a `const val`. Instead the flag is a **constructor value** passed into
+ * construction (manual DI, same style as `XxxModule.createXxx` factories):
  *
- * This is **not** a Play Console certificate; it only removes self-imposed
- * product-doc fail-closed that blocked finishing feature development.
+ * - **Release builds**: wire [FAIL_CLOSED] (`developmentShipMode = false`) — dev
+ *   semantics are OFF by default (fail-closed). Nothing in the codebase flips the
+ *   flag for release; it must be explicitly passed.
+ * - **Debug / dev builds**: the Android layer passes `developmentShipMode = true`
+ *   from a per-buildType `BuildConfig` field (see
+ *   `android/runtime-service/build.gradle.kts` + `RuntimeControlPlane.attach`),
+ *   with an auditable override via `-Pomnillm.developmentShipMode=true|false`.
+ * - No global mutable state: the value is immutable per instance and travels
+ *   through the DI graph like every other dependency.
+ *
+ * When dev mode is ON, capability projections must never lie as plain
+ * `SUPPORTED` (COR-10 / INV-018/019): bound engines project `CONDITIONAL` with
+ * an explicit `development_ship_mode` condition instead (see
+ * `EngineExecuteBinding.resolveCapability`).
  */
-object ProductBuildMode {
+class ProductBuildMode(
+    val developmentShipMode: Boolean,
+) {
 
-    /**
-     * Master switch: finish building all engines + features without qualification
-     * paperwork blocking execute paths.
-     */
-    const val DEVELOPMENT_SHIP_MODE: Boolean = true
+    /** When dev mode, allow every catalog engine to load a real backend if present. */
+    fun allowAllEnginesNative(): Boolean = developmentShipMode
 
-    /** When [DEVELOPMENT_SHIP_MODE], allow every catalog engine to load a real backend if present. */
-    fun allowAllEnginesNative(): Boolean = DEVELOPMENT_SHIP_MODE
+    /** When dev mode, treat bound adapters as executable without PASS packs. */
+    fun allowExecuteWithoutQualification(): Boolean = developmentShipMode
 
-    /** When [DEVELOPMENT_SHIP_MODE], treat bound adapters as executable without PASS packs. */
-    fun allowExecuteWithoutQualification(): Boolean = DEVELOPMENT_SHIP_MODE
-
-    /** Default for `runtime.exploratoryExecuteEnabled`. */
-    fun defaultExploratoryExecuteEnabled(): Boolean = DEVELOPMENT_SHIP_MODE
+    /** Default for `runtime.exploratoryExecuteEnabled` (dev ON / release OFF). */
+    fun defaultExploratoryExecuteEnabled(): Boolean = developmentShipMode
 
     /** Skip attach-time assert that forbids any SUPPORTED cell. */
-    fun allowSupportedProjectionWithoutPass(): Boolean = DEVELOPMENT_SHIP_MODE
+    fun allowSupportedProjectionWithoutPass(): Boolean = developmentShipMode
+
+    companion object {
+        /**
+         * Default posture for anything not explicitly wired: dev semantics OFF
+         * (fail-closed). Release builds must never construct [ProductBuildMode]
+         * with `true`; only the debug/dev variant wiring may.
+         */
+        val FAIL_CLOSED: ProductBuildMode = ProductBuildMode(developmentShipMode = false)
+    }
 }

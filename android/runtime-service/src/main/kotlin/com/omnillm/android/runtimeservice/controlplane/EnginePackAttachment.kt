@@ -4,6 +4,7 @@ import android.os.Build
 import android.util.Log
 import com.omnillm.core.contracts.DeviceExecutionFingerprint
 import com.omnillm.core.contracts.EngineBuildId
+import com.omnillm.core.contracts.ProductBuildMode
 import com.omnillm.engines.api.EngineRegistration
 import com.omnillm.engines.api.EngineRegistry
 import com.omnillm.engines.litertlm.LitertLmModule
@@ -55,8 +56,10 @@ class EnginePackAttachment private constructor(
          * Does not write OmniLLM domain DB (ENGINE-STANDARD §3).
          *
          * Only llama-cpp may load a real native backend; peers stay stub/UNKNOWN.
+         * Dev-mode posture travels via [buildMode] (BLD-02); default fail-closed.
          */
         fun attachAfterReady(
+            buildMode: ProductBuildMode = ProductBuildMode.FAIL_CLOSED,
             deviceFingerprint: DeviceExecutionFingerprint = defaultDeviceFingerprint(),
         ): EnginePackAttachment {
             val registry = EngineRegistry()
@@ -87,19 +90,19 @@ class EnginePackAttachment private constructor(
             val nativePresent = llamaEngine != null || JniNativeBackend.isNativePresent()
 
             // Peer engines: register catalog adapters (native allowed in DEVELOPMENT_SHIP_MODE).
-            registerPeerEngines(registry, deviceFingerprint, registrations)
+            registerPeerEngines(registry, deviceFingerprint, registrations, buildMode)
 
-            if (!com.omnillm.core.contracts.ProductBuildMode.allowSupportedProjectionWithoutPass()) {
-                check(!EngineSelectionPolicy.anySupportedCell(registry)) {
+            if (!buildMode.allowSupportedProjectionWithoutPass()) {
+                check(!EngineSelectionPolicy.anyExecutableCell(registry, buildMode)) {
                     "Engine attach must not project SUPPORTED without qualification evidence"
                 }
             }
 
             val notes = buildMap {
-                putAll(EngineSelectionPolicy.summaryNotes())
+                putAll(EngineSelectionPolicy.summaryNotes(buildMode))
                 put(
                     "mode",
-                    if (com.omnillm.core.contracts.ProductBuildMode.DEVELOPMENT_SHIP_MODE) {
+                    if (buildMode.developmentShipMode) {
                         "development_ship"
                     } else {
                         "compliance"
@@ -115,15 +118,15 @@ class EnginePackAttachment private constructor(
                 put("registry.cells", registry.listCells().size.toString())
                 put(
                     "registryExposure",
-                    if (com.omnillm.core.contracts.ProductBuildMode.allowExecuteWithoutQualification()) {
+                    if (buildMode.allowExecuteWithoutQualification()) {
                         "DEV_EXECUTABLE"
                     } else {
                         "UNKNOWN"
                     },
                 )
                 put(
-                    "anySupported",
-                    EngineSelectionPolicy.anySupportedCell(registry).toString(),
+                    "anyExecutable",
+                    EngineSelectionPolicy.anyExecutableCell(registry, buildMode).toString(),
                 )
                 if (llamaEngine == null) {
                     put(
@@ -168,6 +171,7 @@ class EnginePackAttachment private constructor(
          * llama-cpp stub engine). Production must use [attachAfterReady].
          */
         fun attachForTest(
+            buildMode: ProductBuildMode = ProductBuildMode.FAIL_CLOSED,
             includeStubEngine: Boolean = false,
             deviceFingerprint: DeviceExecutionFingerprint =
                 DeviceExecutionFingerprint.parse("device-fp-engine-test"),
@@ -190,10 +194,10 @@ class EnginePackAttachment private constructor(
             )
             registrations[LlamaCppModule.ENGINE_ID] = llamaReg
 
-            registerPeerEngines(registry, deviceFingerprint, registrations)
+            registerPeerEngines(registry, deviceFingerprint, registrations, buildMode)
 
-            if (!com.omnillm.core.contracts.ProductBuildMode.allowSupportedProjectionWithoutPass()) {
-                check(!EngineSelectionPolicy.anySupportedCell(registry)) {
+            if (!buildMode.allowSupportedProjectionWithoutPass()) {
+                check(!EngineSelectionPolicy.anyExecutableCell(registry, buildMode)) {
                     "Engine attach must not project SUPPORTED without qualification evidence"
                 }
             }
@@ -211,13 +215,22 @@ class EnginePackAttachment private constructor(
                 registrationsByEngineId = registrations.toMap(),
                 nativeLibraryPresent = false,
                 notes = buildMap {
-                    putAll(EngineSelectionPolicy.summaryNotes())
-                    put("mode", "test")
+                    putAll(EngineSelectionPolicy.summaryNotes(buildMode))
+                    put(
+                        "mode",
+                        if (buildMode.developmentShipMode) "development_ship" else "test",
+                    )
                     put("includeStubEngine", includeStubEngine.toString())
-                    put("registryExposure", "UNKNOWN")
+                    put(
+                        "registryExposure",
+                        if (buildMode.allowExecuteWithoutQualification()) "DEV_EXECUTABLE" else "UNKNOWN",
+                    )
                     put("registry.registrations", registry.listRegistrations().size.toString())
                     put("registry.cells", registry.listCells().size.toString())
-                    put("anySupported", "false")
+                    put(
+                        "anyExecutable",
+                        EngineSelectionPolicy.anyExecutableCell(registry, buildMode).toString(),
+                    )
                 },
             )
         }
@@ -230,11 +243,12 @@ class EnginePackAttachment private constructor(
             registry: EngineRegistry,
             deviceFingerprint: DeviceExecutionFingerprint,
             out: MutableMap<String, EngineRegistration>,
+            buildMode: ProductBuildMode,
         ) {
             // In compliance mode peers may never use real native/SDK backends.
             // In DEVELOPMENT_SHIP_MODE every catalog engine may attempt a real backend
             // when the adapter is wired (see EngineSelectionPolicy / SHIP_BACKLOG E3-E6).
-            val complianceOnly = !com.omnillm.core.contracts.ProductBuildMode.allowAllEnginesNative()
+            val complianceOnly = !buildMode.allowAllEnginesNative()
 
             // LiteRT-LM
             val litertReg = LitertLmModule.registerWith(registry = registry)
@@ -245,7 +259,7 @@ class EnginePackAttachment private constructor(
             )
             out[LitertLmModule.ENGINE_ID] = litertReg
             if (complianceOnly) {
-                require(!EngineSelectionPolicy.mayUseRealNativeBackend(LitertLmModule.ENGINE_ID))
+                require(!EngineSelectionPolicy.mayUseRealNativeBackend(LitertLmModule.ENGINE_ID, buildMode))
             }
 
             // MLC-LLM (register without default seed so we can pass device fingerprint)
@@ -261,7 +275,7 @@ class EnginePackAttachment private constructor(
             )
             out[MlcLlmModule.ENGINE_ID] = mlcReg
             if (complianceOnly) {
-                require(!EngineSelectionPolicy.mayUseRealNativeBackend(MlcLlmModule.ENGINE_ID))
+                require(!EngineSelectionPolicy.mayUseRealNativeBackend(MlcLlmModule.ENGINE_ID, buildMode))
             }
 
             // mllm — metadata + UNQUALIFIED cells only (private-server stub; no AAR load)
@@ -277,7 +291,7 @@ class EnginePackAttachment private constructor(
             )
             out[MllmModule.ENGINE_ID] = mllmReg
             if (complianceOnly) {
-                require(!EngineSelectionPolicy.mayUseRealNativeBackend(MllmModule.ENGINE_ID))
+                require(!EngineSelectionPolicy.mayUseRealNativeBackend(MllmModule.ENGINE_ID, buildMode))
             }
 
             // ONNX Runtime GenAI
@@ -288,7 +302,7 @@ class EnginePackAttachment private constructor(
             )
             out[OrtGenaiModule.ENGINE_ID] = ortReg
             if (complianceOnly) {
-                require(!EngineSelectionPolicy.mayUseRealNativeBackend(OrtGenaiModule.ENGINE_ID))
+                require(!EngineSelectionPolicy.mayUseRealNativeBackend(OrtGenaiModule.ENGINE_ID, buildMode))
             }
         }
 

@@ -58,16 +58,23 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * Engine execute binding: FakeEngine + attachForTest stub path.
  *
- * DEVELOPMENT_SHIP_MODE: bound adapter projects SUPPORTED for generation caps so
- * features finish without qualification paperwork (SHIP_BACKLOG §8).
- * Compliance mode (DEVELOPMENT_SHIP_MODE=false): exploratory CONDITIONAL only when
- * policy allows; never SUPPORTED without evidence.
+ * Build posture is variant-scoped (BLD-02): dev mode projects **CONDITIONAL** —
+ * never plain SUPPORTED — for generation caps (COR-10 / INV-018/019), with an
+ * explicit `development_ship_mode` condition. Compliance mode (dev OFF):
+ * exploratory CONDITIONAL only when policy allows; never SUPPORTED without
+ * evidence.
  */
 class EngineExecuteBindingTest {
 
     private val digest = Sha256Digest.parse("ab".repeat(32))
     private val revision = ModelRevisionId.parse("cd".repeat(32))
     private val device = DeviceExecutionFingerprint.parse("device-fp-exec-bind")
+
+    /** Dev-mode posture (what a debug build wires). */
+    private val devMode = ProductBuildMode(developmentShipMode = true)
+
+    /** Fail-closed posture (what a release build wires — BLD-02 default). */
+    private val failClosed = ProductBuildMode.FAIL_CLOSED
 
     private fun candidate(
         build: EngineBuildId = EngineBuildId.parse("engine-build-fake-1"),
@@ -95,74 +102,102 @@ class EngineExecuteBindingTest {
     }
 
     @Test
-    fun fakeEngine_bound_capabilityReflectsBuildMode() {
+    fun devMode_bound_projectsConditionalNeverSupported() {
+        // COR-10 regression: dev mode must NOT project plain SUPPORTED.
         val fake = FakePortEngine()
-        val binding = EngineExecuteBinding(exploratoryEnabled = { true })
+        val binding = EngineExecuteBinding(buildMode = devMode, exploratoryEnabled = { true })
         binding.bindTestEngine(fake)
-        val devMode = ProductBuildMode.allowExecuteWithoutQualification()
-        if (devMode) {
-            // Finish-all-features mode: bound adapter is executable.
+        for (cap in listOf(
+            CapabilityId.TEXT_GENERATION,
+            CapabilityId.STRUCTURED_OUTPUT,
+            CapabilityId.TOOL_CALLING,
+            CapabilityId.EMBEDDING,
+        )) {
+            val state = binding.resolveCapability(cap, candidate())
             assertEquals(
-                CapabilityState.SUPPORTED,
-                binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()),
-            )
-        } else {
-            // No attachment → attachedBuild null → CONDITIONAL for generation when bound+flag
-            assertEquals(
+                "dev mode projection for $cap must be CONDITIONAL, was $state",
                 CapabilityState.CONDITIONAL,
-                binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()),
+                state,
             )
-            assertEquals(
-                CapabilityState.UNKNOWN,
-                binding.resolveCapability(CapabilityId.STRUCTURED_OUTPUT, candidate()),
-            )
-            // Never SUPPORTED without evidence
             assertTrue(
-                binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()) !=
-                    CapabilityState.SUPPORTED,
+                "dev mode must never project SUPPORTED (got $state for $cap)",
+                state != CapabilityState.SUPPORTED,
             )
         }
+        // The conditions list discloses the dev-override honestly.
+        val conds = binding.conditions(CapabilityId.TEXT_GENERATION, revision.hex)
+        assertTrue("development_ship_mode", "development_ship_mode" in conds)
+        assertTrue("engine_unqualified", "engine_unqualified" in conds)
+        // Not-yet-implemented dev-open caps disclose the pending marker.
+        assertTrue(
+            "dev_path_open_implementation_pending",
+            "dev_path_open_implementation_pending" in
+                binding.conditions(CapabilityId.STRUCTURED_OUTPUT, revision.hex),
+        )
+    }
+
+    @Test
+    fun releaseConfig_devOff_projectsNeverSupported() {
+        // BLD-02 regression: release configuration (fail-closed mode) never
+        // projects SUPPORTED; exploratory only widens to CONDITIONAL.
+        val binding = EngineExecuteBinding(buildMode = failClosed, exploratoryEnabled = { true })
+        binding.bindTestEngine(FakePortEngine())
+        assertEquals(
+            CapabilityState.CONDITIONAL,
+            binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()),
+        )
+        assertEquals(
+            CapabilityState.UNKNOWN,
+            binding.resolveCapability(CapabilityId.STRUCTURED_OUTPUT, candidate()),
+        )
+        assertEquals(
+            CapabilityState.UNKNOWN,
+            binding.resolveCapability(CapabilityId.EMBEDDING, candidate()),
+        )
+        assertTrue(
+            binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()) !=
+                CapabilityState.SUPPORTED,
+        )
     }
 
     @Test
     fun fakeEngine_withoutExploratory_reflectsBuildMode() {
-        val binding = EngineExecuteBinding(exploratoryEnabled = { false })
-        binding.bindTestEngine(FakePortEngine())
+        // Dev mode: bound adapter is executable regardless of the exploratory flag.
+        val devBinding = EngineExecuteBinding(buildMode = devMode, exploratoryEnabled = { false })
+        devBinding.bindTestEngine(FakePortEngine())
         assertEquals(
-            if (ProductBuildMode.allowExecuteWithoutQualification()) {
-                CapabilityState.SUPPORTED
-            } else {
-                CapabilityState.UNKNOWN
-            },
-            binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()),
+            CapabilityState.CONDITIONAL,
+            devBinding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()),
+        )
+        // Release posture: exploratory off ⇒ UNKNOWN.
+        val releaseBinding = EngineExecuteBinding(buildMode = failClosed, exploratoryEnabled = { false })
+        releaseBinding.bindTestEngine(FakePortEngine())
+        assertEquals(
+            CapabilityState.UNKNOWN,
+            releaseBinding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate()),
         )
     }
 
     @Test
     fun attachForTest_stub_bindsAdapter_capabilityReflectsBuildMode() {
         val pack = EnginePackAttachment.attachForTest(
+            buildMode = devMode,
             includeStubEngine = true,
             deviceFingerprint = device,
         )
         assertNotNull(pack.llamaCppEngine)
-        val binding = EngineExecuteBinding(exploratoryEnabled = { true })
+        val binding = EngineExecuteBinding(buildMode = devMode, exploratoryEnabled = { true })
         val result = binding.applyAttachment(pack)
         assertTrue(result.bound)
         assertTrue(binding.isEngineBound())
-        // DEV mode: registrations present ⇒ policy shortcut true.
-        // Compliance mode: UNQUALIFIED cells never project SUPPORTED.
-        assertEquals(
-            ProductBuildMode.allowExecuteWithoutQualification(),
+        // Dev mode: registrations present ⇒ executable (never SUPPORTED evidence).
+        assertTrue(
             com.omnillm.android.runtimeservice.controlplane.EngineSelectionPolicy
-                .anySupportedCell(pack.registry),
+                .anyExecutableCell(pack.registry, devMode),
         )
         val build = pack.llamaCppEngine!!.engineBuildId
         assertEquals(
-            if (ProductBuildMode.allowExecuteWithoutQualification()) {
-                CapabilityState.SUPPORTED
-            } else {
-                CapabilityState.CONDITIONAL
-            },
+            CapabilityState.CONDITIONAL,
             binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate(build)),
         )
         // Cross-build refuses
@@ -172,6 +207,30 @@ class EngineExecuteBindingTest {
                 CapabilityId.TEXT_GENERATION,
                 candidate(EngineBuildId.parse("engine-other-build-xx")),
             ),
+        )
+    }
+
+    @Test
+    fun attachForTest_releaseMode_cellsStayUnknownExecutableFalse() {
+        // BLD-02 regression: release-mode attach must not claim executability
+        // from registrations; registry projection stays UNKNOWN (no evidence).
+        val pack = EnginePackAttachment.attachForTest(
+            buildMode = failClosed,
+            includeStubEngine = true,
+            deviceFingerprint = device,
+        )
+        assertFalse(
+            com.omnillm.android.runtimeservice.controlplane.EngineSelectionPolicy
+                .anyExecutableCell(pack.registry, failClosed),
+        )
+        val binding = EngineExecuteBinding(buildMode = failClosed, exploratoryEnabled = { true })
+        val result = binding.applyAttachment(pack)
+        assertTrue(result.bound)
+        val build = pack.llamaCppEngine!!.engineBuildId
+        // Exploratory on ⇒ CONDITIONAL; still never SUPPORTED.
+        assertEquals(
+            CapabilityState.CONDITIONAL,
+            binding.resolveCapability(CapabilityId.TEXT_GENERATION, candidate(build)),
         )
     }
 
@@ -328,12 +387,13 @@ class EngineExecuteBindingTest {
             EngineExecuteBinding.SETTING_EXPLORATORY_EXECUTE,
         )
         assertNotNull(def)
-        assertEquals(
-            SettingValue.BoolValue(ProductBuildMode.defaultExploratoryExecuteEnabled()),
-            def!!.defaultValue,
-        )
-        // Catalog default is the mode default; an *absent* setting value is false
-        // (the effective value is composed by the settings merge, not the raw lookup).
+        // The static catalog is fail-closed (COR-10): the dev-mode default ON is
+        // seeded by the Android control plane, not baked into the JVM catalog.
+        assertEquals(SettingValue.BoolValue(false), def!!.defaultValue)
+        // Dev-mode posture default is ON so debug/dev works out of the box.
+        assertTrue(ProductBuildMode(developmentShipMode = true).defaultExploratoryExecuteEnabled())
+        assertFalse(failClosed.defaultExploratoryExecuteEnabled())
+        // An *absent* setting value is false (effective value composed by merge).
         assertFalse(EngineExecuteBinding.readExploratoryEnabled(emptyMap()))
         assertTrue(
             EngineExecuteBinding.readExploratoryEnabled(
@@ -423,7 +483,10 @@ class EngineExecuteBindingTest {
             includeStubEngine = true,
             deviceFingerprint = device,
         )
-        val binding = EngineExecuteBinding(exploratoryEnabled = { true })
+        val binding = EngineExecuteBinding(
+            buildMode = devMode,
+            exploratoryEnabled = { true },
+        )
         binding.applyAttachment(pack)
         assertTrue(binding.isEngineBound())
 
@@ -440,11 +503,10 @@ class EngineExecuteBindingTest {
         assertEquals(build.value, result.actualRouting.engineBuildId.value)
         assertEquals("cpu", result.actualRouting.backend)
         // Registry projection: attach seeds only UNQUALIFIED cells (compliance invariant).
-        // DEV mode policy shortcut only reflects registrations presence.
-        assertEquals(
-            ProductBuildMode.allowExecuteWithoutQualification(),
+        // Default binding posture is fail-closed ⇒ no executability from registrations.
+        assertFalse(
             com.omnillm.android.runtimeservice.controlplane.EngineSelectionPolicy
-                .anySupportedCell(pack.registry),
+                .anyExecutableCell(pack.registry, failClosed),
         )
         assertTrue(
             pack.registry.listCells().none {

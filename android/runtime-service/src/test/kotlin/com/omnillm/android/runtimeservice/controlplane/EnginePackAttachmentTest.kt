@@ -29,6 +29,12 @@ class EnginePackAttachmentTest {
 
     private val device = DeviceExecutionFingerprint.parse("device-fp-engine-pack-test")
 
+    /** Dev-mode posture (what a debug build wires — BLD-02). */
+    private val devMode = ProductBuildMode(developmentShipMode = true)
+
+    /** Fail-closed posture (what a release build wires). */
+    private val failClosed = ProductBuildMode.FAIL_CLOSED
+
     @Test
     fun attachForTest_registersAllCatalogEngines() {
         val pack = EnginePackAttachment.attachForTest(
@@ -74,11 +80,15 @@ class EnginePackAttachmentTest {
         )
 
         // Projection: no cell may advertise SUPPORTED without QUALIFIED_WITH_ENVELOPE+PASS.
-        // (DEV-mode policy shortcut anySupportedCell = registrations present; the
-        // evidence-driven registry projection must still stay UNKNOWN.)
+        // (DEV-mode policy shortcut anyExecutableCell = registrations present; the
+        // evidence-driven registry projection must still stay UNKNOWN — COR-10.)
         assertEquals(
-            ProductBuildMode.allowExecuteWithoutQualification(),
-            EngineSelectionPolicy.anySupportedCell(pack.registry),
+            true,
+            EngineSelectionPolicy.anyExecutableCell(pack.registry, devMode),
+        )
+        assertEquals(
+            false,
+            EngineSelectionPolicy.anyExecutableCell(pack.registry, failClosed),
         )
         assertTrue(cells.none { EngineSelectionPolicy.projectsSupported(it) })
         for (cell in cells) {
@@ -115,10 +125,9 @@ class EnginePackAttachmentTest {
         assertNotNull(pack.llamaCppEngine)
         assertTrue(pack.llamaCppEngine!!.native.libraryLabel().contains("stub"))
         // Stub presence must never project SUPPORTED through the evidence-driven registry.
-        assertEquals(
-            ProductBuildMode.allowExecuteWithoutQualification(),
-            EngineSelectionPolicy.anySupportedCell(pack.registry),
-        )
+        // Executability is posture-dependent: dev registrations shortcut vs evidence.
+        assertTrue(EngineSelectionPolicy.anyExecutableCell(pack.registry, devMode))
+        assertFalse(EngineSelectionPolicy.anyExecutableCell(pack.registry, failClosed))
         val anySupported = pack.registry.listCells().any {
             pack.registry.projectRuntimeCapability(
                 it.qualificationStatus,
@@ -132,10 +141,17 @@ class EnginePackAttachmentTest {
     fun selectionPolicy_allCatalogEnginesMayUseRealNativeInDevMode() {
         // DEVELOPMENT_SHIP_MODE: every catalog engine may use a real native/SDK backend.
         for (engineId in EngineSelectionPolicy.CATALOG_ENGINE_IDS) {
-            assertEquals(
+            assertTrue(
                 "unexpected native eligibility for $engineId",
-                ProductBuildMode.allowAllEnginesNative(),
-                EngineSelectionPolicy.mayUseRealNativeBackend(engineId),
+                EngineSelectionPolicy.mayUseRealNativeBackend(engineId, devMode),
+            )
+        }
+        // Compliance (release) posture: only llama-cpp may use a real backend.
+        for (engineId in EngineSelectionPolicy.CATALOG_ENGINE_IDS) {
+            assertEquals(
+                "unexpected native eligibility for $engineId in release posture",
+                engineId == LlamaCppModule.ENGINE_ID,
+                EngineSelectionPolicy.mayUseRealNativeBackend(engineId, failClosed),
             )
         }
         assertEquals(
@@ -143,8 +159,20 @@ class EnginePackAttachmentTest {
             EngineSelectionPolicy.PRIMARY_ENGINE_ID,
         )
         assertEquals(
-            if (ProductBuildMode.allowAllEnginesNative()) "ALL_CATALOG" else LlamaCppModule.ENGINE_ID,
-            EngineSelectionPolicy.summaryNotes()["nativeEligible"],
+            "ALL_CATALOG",
+            EngineSelectionPolicy.summaryNotes(devMode)["nativeEligible"],
+        )
+        assertEquals(
+            LlamaCppModule.ENGINE_ID,
+            EngineSelectionPolicy.summaryNotes(failClosed)["nativeEligible"],
+        )
+        assertEquals(
+            "DEVELOPMENT_SHIP_MODE",
+            EngineSelectionPolicy.summaryNotes(devMode)["productBuildMode"],
+        )
+        assertEquals(
+            "COMPLIANCE_HONESTY_MODE",
+            EngineSelectionPolicy.summaryNotes(failClosed)["productBuildMode"],
         )
     }
 
@@ -153,27 +181,28 @@ class EnginePackAttachmentTest {
         val pack = EnginePackAttachment.attachForTest(includeStubEngine = false)
         assertEquals("UNKNOWN", pack.notes["registryExposure"])
         assertEquals("test", pack.notes["mode"])
-        assertEquals("false", pack.notes["anySupported"])
+        assertEquals("false", pack.notes["anyExecutable"])
         assertEquals(
             EngineSelectionPolicy.CATALOG_ENGINE_IDS.size.toString(),
             pack.notes["registry.registrations"],
         )
         assertEquals(
-            if (ProductBuildMode.allowAllEnginesNative()) {
-                "ALL_CATALOG"
-            } else {
-                LlamaCppModule.ENGINE_ID
-            },
+            LlamaCppModule.ENGINE_ID,
             pack.notes["nativeEligible"],
         )
         assertEquals(
-            if (ProductBuildMode.allowAllEnginesNative()) {
-                "native_sdk_allowed"
-            } else {
-                "stub_registry_only"
-            },
+            "stub_registry_only",
             pack.notes["peerEngines"],
         )
+        // Dev-mode attach notes honestly label the exposure.
+        val devPack = EnginePackAttachment.attachForTest(
+            buildMode = devMode,
+            includeStubEngine = false,
+        )
+        assertEquals("DEV_EXECUTABLE", devPack.notes["registryExposure"])
+        assertEquals("true", devPack.notes["anyExecutable"])
+        assertEquals("development_ship", devPack.notes["mode"])
+        assertEquals("ALL_CATALOG", devPack.notes["nativeEligible"])
     }
 
     @Test
@@ -213,8 +242,12 @@ class EnginePackAttachmentTest {
         // projection (DEV-mode policy shortcut reflects registrations presence only).
         val pack = EnginePackAttachment.attachForTest(deviceFingerprint = device)
         assertEquals(
-            ProductBuildMode.allowExecuteWithoutQualification(),
-            EngineSelectionPolicy.anySupportedCell(pack.registry),
+            false,
+            EngineSelectionPolicy.anyExecutableCell(pack.registry, failClosed),
+        )
+        assertEquals(
+            true,
+            EngineSelectionPolicy.anyExecutableCell(pack.registry, devMode),
         )
 
         // Even if a caller mistakenly put QUALIFIED without PASS, projection stays UNKNOWN.
@@ -242,6 +275,6 @@ class EnginePackAttachmentTest {
             CapabilityState.SUPPORTED,
             pack.registry.resolveCapability(sample.toKey()),
         )
-        assertTrue(EngineSelectionPolicy.anySupportedCell(pack.registry))
+        assertTrue(EngineSelectionPolicy.anyExecutableCell(pack.registry, failClosed))
     }
 }

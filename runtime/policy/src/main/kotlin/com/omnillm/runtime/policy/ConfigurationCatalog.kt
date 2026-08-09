@@ -199,11 +199,12 @@ object ConfigurationCatalog {
             clampAllowed = false,
             admissionBound = false,
             requiresPlanReservationCommit = false,
-            // Development ship mode defaults ON so generate is not blocked by paperwork.
-            // Set ProductBuildMode.DEVELOPMENT_SHIP_MODE=false for compliance-style default OFF.
-            defaultValue = SettingValue.BoolValue(
-                com.omnillm.core.contracts.ProductBuildMode.defaultExploratoryExecuteEnabled(),
-            ),
+            // Fail-closed default: this static JVM catalog must never lie about
+            // build posture. The variant-scoped dev-mode default (ON for
+            // debug/dev, OFF for release) is seeded by the Android control plane
+            // (RuntimeControlPlane) into the "product-default" source layer from
+            // its ProductBuildMode (BLD-02).
+            defaultValue = SettingValue.BoolValue(false),
         ),
         SettingDefinition(
             key = "server.loopbackEnabled",

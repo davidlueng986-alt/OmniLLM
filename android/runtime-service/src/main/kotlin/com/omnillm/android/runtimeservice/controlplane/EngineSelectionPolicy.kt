@@ -15,16 +15,22 @@ import com.omnillm.engines.ortgenai.OrtGenaiModule
 /**
  * Engine selection policy for the `:runtime` control plane.
  *
- * ## Development ship mode ([ProductBuildMode.DEVELOPMENT_SHIP_MODE] = true)
+ * ## Development ship mode (`buildMode.developmentShipMode == true`)
  *
  * Goal: **finish all engines + features**. Selection does **not** require
  * formal QUALIFIED_WITH_ENVELOPE + lab PASS packs before execute.
  * Any catalog engine may use a real native/SDK backend when wired.
+ * Projections stay honest (COR-10): the policy never claims `SUPPORTED`
+ * without evidence — dev mode only widens **executability**, see
+ * [anyExecutableCell].
  *
- * ## Compliance mode (set DEVELOPMENT_SHIP_MODE = false)
+ * ## Compliance mode (dev mode OFF / [ProductBuildMode.FAIL_CLOSED])
  *
  * Restores document-style honesty: only QUALIFIED_WITH_ENVELOPE + PASS ⇒ SUPPORTED;
  * only llama-cpp native-eligible; peers stub-only.
+ *
+ * The mode travels as an explicit [ProductBuildMode] parameter (manual DI);
+ * anything not wired defaults to fail-closed.
  */
 object EngineSelectionPolicy {
 
@@ -41,19 +47,29 @@ object EngineSelectionPolicy {
 
     /**
      * True when [engineId] may attempt real native/SDK load during attach.
-     * Development ship mode: **all** catalog engines.
+     * Development ship mode: **all** catalog engines; otherwise llama-cpp only.
      */
-    fun mayUseRealNativeBackend(engineId: String): Boolean {
-        if (ProductBuildMode.allowAllEnginesNative()) return engineId in CATALOG_ENGINE_IDS
+    fun mayUseRealNativeBackend(
+        engineId: String,
+        buildMode: ProductBuildMode = ProductBuildMode.FAIL_CLOSED,
+    ): Boolean {
+        if (buildMode.allowAllEnginesNative()) return engineId in CATALOG_ENGINE_IDS
         return engineId == PRIMARY_ENGINE_ID
     }
 
     /**
-     * True when registry has at least one executable cell.
-     * Development ship mode: true if any registration exists (adapter catalog present).
+     * True when the registry contains at least one **executable** path.
+     *
+     * Naming is deliberate (COR-10): this must never be read as "projects
+     * SUPPORTED". Dev mode: any registration present (attach shortcut, no
+     * qualification required). Compliance mode: only cells that project
+     * [CapabilityState.SUPPORTED] from evidence (QUALIFIED_WITH_ENVELOPE + PASS).
      */
-    fun anySupportedCell(registry: EngineRegistry): Boolean {
-        if (ProductBuildMode.allowExecuteWithoutQualification()) {
+    fun anyExecutableCell(
+        registry: EngineRegistry,
+        buildMode: ProductBuildMode = ProductBuildMode.FAIL_CLOSED,
+    ): Boolean {
+        if (buildMode.allowExecuteWithoutQualification()) {
             return registry.listRegistrations().isNotEmpty()
         }
         return registry.listCells().any { cell ->
@@ -72,26 +88,26 @@ object EngineSelectionPolicy {
         cell.qualificationStatus == EngineQualificationCellStatus.QUALIFIED_WITH_ENVELOPE &&
             cell.evidenceStatus == EvidenceStatusLabels.PASS
 
-    fun summaryNotes(): Map<String, String> = mapOf(
+    fun summaryNotes(buildMode: ProductBuildMode = ProductBuildMode.FAIL_CLOSED): Map<String, String> = mapOf(
         "policy" to "EngineSelectionPolicy",
-        "productBuildMode" to if (ProductBuildMode.DEVELOPMENT_SHIP_MODE) {
+        "productBuildMode" to if (buildMode.developmentShipMode) {
             "DEVELOPMENT_SHIP_MODE"
         } else {
             "COMPLIANCE_HONESTY_MODE"
         },
         "catalogEngines" to CATALOG_ENGINE_IDS.joinToString(","),
-        "nativeEligible" to if (ProductBuildMode.allowAllEnginesNative()) {
+        "nativeEligible" to if (buildMode.allowAllEnginesNative()) {
             "ALL_CATALOG"
         } else {
             PRIMARY_ENGINE_ID
         },
         "executeRequiresQualificationPass" to
-            (!ProductBuildMode.allowExecuteWithoutQualification()).toString(),
-        "peerEngines" to if (ProductBuildMode.allowAllEnginesNative()) {
+            (!buildMode.allowExecuteWithoutQualification()).toString(),
+        "peerEngines" to if (buildMode.allowAllEnginesNative()) {
             "native_sdk_allowed"
         } else {
             "stub_registry_only"
         },
-        "failClosedOnUnknown" to (!ProductBuildMode.allowExecuteWithoutQualification()).toString(),
+        "failClosedOnUnknown" to (!buildMode.allowExecuteWithoutQualification()).toString(),
     )
 }

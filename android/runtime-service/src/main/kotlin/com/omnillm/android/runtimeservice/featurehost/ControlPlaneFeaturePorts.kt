@@ -327,7 +327,7 @@ private class OrchestratorPlaygroundInferencePort(
             )
         }
         if (!binding.isExploratoryExecuteEnabled() &&
-            !com.omnillm.core.contracts.ProductBuildMode.allowExecuteWithoutQualification()
+            !binding.buildMode.allowExecuteWithoutQualification()
         ) {
             return OmniResult.err(
                 OmniError.CAPABILITY_UNSUPPORTED(
@@ -537,7 +537,7 @@ private class OrchestratorServerInferencePort(
             )
         }
         if (!binding.isExploratoryExecuteEnabled() &&
-            !com.omnillm.core.contracts.ProductBuildMode.allowExecuteWithoutQualification()
+            !binding.buildMode.allowExecuteWithoutQualification()
         ) {
             return OmniResult.ok(
                 SmokeTestResult(
@@ -723,7 +723,7 @@ private class OrchestratorToolsInferencePort(
         maxAttempts: Int,
         maxRepairAttempts: Int,
     ): OmniResult<StructuredInferenceHandle> {
-        if (!com.omnillm.core.contracts.ProductBuildMode.allowExecuteWithoutQualification()) {
+        if (!binding.buildMode.allowExecuteWithoutQualification()) {
             return OmniResult.err(
                 OmniError.CAPABILITY_UNKNOWN(
                     message = "STRUCTURED_OUTPUT unknown/unqualified (compliance mode)",
@@ -754,7 +754,7 @@ private class OrchestratorToolsInferencePort(
         actualMode: StructuredMode,
         maxAttempts: Int,
     ): OmniResult<ToolCallingHandle> {
-        if (!com.omnillm.core.contracts.ProductBuildMode.allowExecuteWithoutQualification()) {
+        if (!binding.buildMode.allowExecuteWithoutQualification()) {
             return OmniResult.err(
                 OmniError.CAPABILITY_UNKNOWN(
                     message = "TOOL_CALLING unknown/unqualified (compliance mode)",

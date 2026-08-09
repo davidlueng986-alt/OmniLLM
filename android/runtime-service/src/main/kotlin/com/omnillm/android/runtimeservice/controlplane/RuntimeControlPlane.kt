@@ -3,6 +3,7 @@ package com.omnillm.android.runtimeservice.controlplane
 import android.content.Context
 import android.util.Log
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
+import com.omnillm.android.runtimeservice.BuildConfig
 import com.omnillm.android.runtimeservice.binder.AssetHandleBroker
 import com.omnillm.android.runtimeservice.binder.ClientRegistrationStore
 import com.omnillm.android.runtimeservice.binder.StreamSessionRegistry
@@ -111,6 +112,12 @@ class RuntimeControlPlane private constructor(
     val registrations: ClientRegistrationStore,
     val streamSessions: StreamSessionRegistry,
     val assetBroker: AssetHandleBroker,
+    /**
+     * Variant-scoped build posture (BLD-02): debug ⇒ dev mode ON, release ⇒ OFF.
+     * Wired at [attach] from BuildConfig.OMNILLM_DEV_SHIP_MODE; never mutable.
+     */
+    private val buildMode: com.omnillm.core.contracts.ProductBuildMode =
+        com.omnillm.core.contracts.ProductBuildMode.FAIL_CLOSED,
 ) : ControlPlaneWriter {
 
     private val enginePacksRef = AtomicReference<EnginePackAttachment?>(null)
@@ -211,7 +218,7 @@ class RuntimeControlPlane private constructor(
         }
         synchronized(this) {
             enginePacksRef.get()?.let { return it }
-            val attached = EnginePackAttachment.attachAfterReady()
+            val attached = EnginePackAttachment.attachAfterReady(buildMode = buildMode)
             enginePacksRef.set(attached)
             // Wire Orchestrator + feature inference ports to real engine execute path
             // (SW-ENG-06). Capability cells stay UNKNOWN/UNQUALIFIED; exploratory
@@ -227,7 +234,7 @@ class RuntimeControlPlane private constructor(
                     "engines=${attached.registeredEngineIds.joinToString()} " +
                     "registrations=${attached.registry.listRegistrations().size} " +
                     "cells=${attached.registry.listCells().size} " +
-                    "anySupported=${EngineSelectionPolicy.anySupportedCell(attached.registry)} " +
+                    "anyExecutable=${EngineSelectionPolicy.anyExecutableCell(attached.registry, buildMode)} " +
                     "note=${bindResult?.message ?: "wave-A missing"}",
             )
             return attached
@@ -361,6 +368,24 @@ class RuntimeControlPlane private constructor(
                     clockMs = { System.currentTimeMillis() },
                 )
                 val policy = securityStack.policyManager
+                // BLD-02: variant-scoped build posture — debug ⇒ development ship
+                // mode ON, release ⇒ OFF (fail-closed). Value comes from the
+                // per-buildType BuildConfig field (android/runtime-service
+                // build.gradle.kts); override auditable via
+                // -Pomnillm.developmentShipMode. Seeding the exploratory
+                // product-default keeps debug/dev "works out of the box" while the
+                // static ConfigurationCatalog stays fail-closed (COR-10).
+                val buildMode = com.omnillm.core.contracts.ProductBuildMode(
+                    developmentShipMode = BuildConfig.OMNILLM_DEV_SHIP_MODE,
+                )
+                policy.putSourceValue(
+                    com.omnillm.android.runtimeservice.featurehost.EngineExecuteBinding
+                        .SETTING_EXPLORATORY_EXECUTE,
+                    "product-default",
+                    com.omnillm.runtime.policy.SettingValue.BoolValue(
+                        buildMode.defaultExploratoryExecuteEnabled(),
+                    ),
+                )
                 val observability = ObservabilityModule.createFacade()
                 // Durable ModelManager: SQL installations/leases + FS quarantine (CORE-MODEL).
                 val modelStore = ModelStoreModule.createFilesystemPort(
@@ -413,14 +438,14 @@ class RuntimeControlPlane private constructor(
                     )
                 val engineExecuteBinding =
                     com.omnillm.android.runtimeservice.featurehost.EngineExecuteBinding(
+                        buildMode = buildMode,
                         exploratoryEnabled = {
                             com.omnillm.android.runtimeservice.featurehost.EngineExecuteBinding
                                 .readExploratoryEnabled(policy.settingsSnapshot().values)
                         },
                         modelSourceResolver = ggufModelSourceResolver,
                         fallbackToFixtureOnUnresolved =
-                            com.omnillm.core.contracts.ProductBuildMode
-                                .allowExecuteWithoutQualification(),
+                            buildMode.allowExecuteWithoutQualification(),
                     )
                 val waveA = WaveAWiring.wire(
                     WaveAWiring.Deps(
@@ -502,6 +527,7 @@ class RuntimeControlPlane private constructor(
                     registrations = registrations,
                     streamSessions = streamSessions,
                     assetBroker = assetBroker,
+                    buildMode = buildMode,
                 )
                 planeRef.set(plane)
                 instance.set(plane)

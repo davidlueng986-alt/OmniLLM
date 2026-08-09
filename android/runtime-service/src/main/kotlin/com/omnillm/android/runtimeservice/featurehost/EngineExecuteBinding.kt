@@ -17,20 +17,29 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * Binds [EnginePackAttachment] results into Orchestrator inference + capability ports.
  *
- * ## Development ship mode ([ProductBuildMode.DEVELOPMENT_SHIP_MODE])
+ * ## Development ship mode (`buildMode.developmentShipMode == true`)
  *
- * Bound engines project **SUPPORTED** for generation/lifecycle caps so features
- * can be finished without qualification paperwork. Cross-build mismatch still
- * returns UNKNOWN (no silent wrong-build fallback).
+ * Bound engines project **CONDITIONAL** (never plain SUPPORTED) for
+ * generation/lifecycle caps so features can be finished without qualification
+ * paperwork — while staying honest to consumers (COR-10 / INV-018/019): the
+ * projection is a documented dev-override, and `conditions()` lists
+ * `development_ship_mode` + the unqualified/evidence reasons. Cross-build
+ * mismatch still returns UNKNOWN (no silent wrong-build fallback).
  *
- * ## Compliance mode (DEVELOPMENT_SHIP_MODE = false)
+ * ## Compliance mode (dev mode OFF / [ProductBuildMode.FAIL_CLOSED])
  *
  * CONDITIONAL only when exploratory flag on; never SUPPORTED without PASS.
  */
 class EngineExecuteBinding(
     val inferenceEngine: DelegatingInferenceEngine = DelegatingInferenceEngine(),
+    /**
+     * Variant-scoped build posture (BLD-02). Default is fail-closed
+     * ([ProductBuildMode.FAIL_CLOSED]); the Android control plane passes the
+     * per-buildType value from BuildConfig.
+     */
+    val buildMode: ProductBuildMode = ProductBuildMode.FAIL_CLOSED,
     private val exploratoryEnabled: () -> Boolean = {
-        ProductBuildMode.defaultExploratoryExecuteEnabled()
+        buildMode.defaultExploratoryExecuteEnabled()
     },
     /**
      * Resolves real installed model bytes for llama-cpp (privileged load).
@@ -45,7 +54,7 @@ class EngineExecuteBinding(
      * still work end-to-end. Compliance mode keeps this false (INV-018).
      */
     private val fallbackToFixtureOnUnresolved: Boolean =
-        ProductBuildMode.allowExecuteWithoutQualification(),
+        buildMode.allowExecuteWithoutQualification(),
 ) {
     private val attachmentRef = AtomicReference<EnginePackAttachment?>(null)
     private val boundOnce = AtomicBoolean(false)
@@ -75,7 +84,7 @@ class EngineExecuteBinding(
             logI(
                 "inference port bound to llama-cpp native=${pack.nativeLibraryPresent} " +
                     "exploratoryDefault=${exploratoryEnabled()} " +
-                    "anySupported=${EngineSelectionPolicy.anySupportedCell(pack.registry)}",
+                    "anyExecutable=${EngineSelectionPolicy.anyExecutableCell(pack.registry, buildMode)}",
             )
             return ApplyResult(
                 bound = true,
@@ -110,8 +119,15 @@ class EngineExecuteBinding(
     fun isExploratoryExecuteEnabled(): Boolean = exploratoryEnabled()
 
     /**
-     * Capability negotiation for Orchestrator filter 1.
-     * Development ship mode: bound engine ⇒ SUPPORTED for generation caps.
+     * Capability negotiation for Orchestrator filter 1 (COR-10 / INV-018/019).
+     *
+     * Dev mode: a bound engine projects **CONDITIONAL** (never plain SUPPORTED)
+     * for generation caps. CONDITIONAL is the documented dev-override state —
+     * it keeps the product usable (features treat CONDITIONAL as operable) while
+     * never lying to consumers about qualification. Execution paths in the same
+     * build honor the same posture: generation executes through the orchestrator,
+     * and not-yet-implemented caps (STRUCTURED_OUTPUT / TOOL_CALLING / EMBEDDING)
+     * fail with honest CAPABILITY_UNSUPPORTED/UNKNOWN + `conditions()` entries.
      */
     fun resolveCapability(capability: CapabilityId, candidate: RoutingCandidate): CapabilityState {
         val pack = attachmentRef.get()
@@ -127,6 +143,20 @@ class EngineExecuteBinding(
             return CapabilityState.UNKNOWN
         }
 
+        if (capability in DEV_OPEN_NOT_YET_IMPLEMENTED) {
+            // COR-10: execution for these caps is still a documented TODO
+            // (ControlPlaneFeaturePorts returns honest CAPABILITY_UNKNOWN/
+            // UNSUPPORTED). Negotiation must not widen to CONDITIONAL just because
+            // exploratory is on — the cap is not implemented. Dev mode keeps the
+            // dev-override CONDITIONAL with the pending marker; release stays
+            // UNKNOWN (fail-closed).
+            return if (buildMode.allowExecuteWithoutQualification()) {
+                CapabilityState.CONDITIONAL
+            } else {
+                CapabilityState.UNKNOWN
+            }
+        }
+
         val generationCaps = setOf(
             CapabilityId.TEXT_GENERATION,
             CapabilityId.EMBEDDING,
@@ -140,16 +170,17 @@ class EngineExecuteBinding(
             CapabilityId.TOOL_CALLING,
         )
         if (capability !in generationCaps) {
-            return if (ProductBuildMode.allowExecuteWithoutQualification()) {
+            return if (buildMode.allowExecuteWithoutQualification()) {
                 CapabilityState.CONDITIONAL
             } else {
                 CapabilityState.UNKNOWN
             }
         }
 
-        if (ProductBuildMode.allowExecuteWithoutQualification()) {
-            // Finish-all-features mode: treat bound adapter as executable.
-            return CapabilityState.SUPPORTED
+        if (buildMode.allowExecuteWithoutQualification()) {
+            // Finish-all-features mode: bound adapter is executable, but the
+            // projection is CONDITIONAL (dev-override), never SUPPORTED (COR-10).
+            return CapabilityState.CONDITIONAL
         }
 
         if (!exploratoryEnabled()) {
@@ -193,13 +224,21 @@ class EngineExecuteBinding(
         ) {
             return emptyList()
         }
-        return listOf(
-            "exploratory_execute_enabled",
-            "engine_unqualified",
-            "no_device_evidence_pack",
-            "native=${attachment?.nativeLibraryPresent == true}",
-            "engineId=${LlamaCppModule.ENGINE_ID}",
-        )
+        return buildList {
+            add("exploratory_execute_enabled")
+            add("engine_unqualified")
+            add("no_device_evidence_pack")
+            add("native=${attachment?.nativeLibraryPresent == true}")
+            add("engineId=${LlamaCppModule.ENGINE_ID}")
+            if (buildMode.developmentShipMode) {
+                // COR-10: dev-override marker — CONDITIONAL is a development
+                // posture, not evidence-backed SUPPORTED.
+                add("development_ship_mode")
+                if (capability in DEV_OPEN_NOT_YET_IMPLEMENTED) {
+                    add("dev_path_open_implementation_pending")
+                }
+            }
+        }
     }
 
     data class ApplyResult(
@@ -210,6 +249,19 @@ class EngineExecuteBinding(
 
     companion object {
         private const val TAG = "OmniEngineExecute"
+
+        /**
+         * Caps whose dev-mode execution path is still a documented TODO
+         * (execution returns CAPABILITY_UNSUPPORTED with honest messages).
+         * Projection stays CONDITIONAL (COR-10) and `conditions()` carries the
+         * `dev_path_open_implementation_pending` marker so consumers can tell
+         * "dev-override open" from "implemented and executable".
+         */
+        private val DEV_OPEN_NOT_YET_IMPLEMENTED: Set<CapabilityId> = setOf(
+            CapabilityId.EMBEDDING,
+            CapabilityId.STRUCTURED_OUTPUT,
+            CapabilityId.TOOL_CALLING,
+        )
 
         /** Host unit tests have no android.util.Log runtime — swallow. */
         private fun logI(msg: String) {

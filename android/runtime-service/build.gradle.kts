@@ -2,6 +2,11 @@ plugins {
     alias(libs.plugins.android.library)
 }
 
+// BLD-02: auditable dev-mode override. Per-variant default: debug=true, release=false.
+// CI/release pipelines must NOT pass this property; it exists for developer auditing.
+val omnillmDevShipModeOverride: Boolean? =
+    providers.gradleProperty("omnillm.developmentShipMode").orNull?.toBooleanStrictOrNull()
+
 android {
     namespace = "com.omnillm.android.runtimeservice"
     compileSdk = libs.versions.compileSdk.get().toInt()
@@ -10,6 +15,32 @@ android {
     defaultConfig {
         minSdk = libs.versions.minSdk.get().toInt()
         consumerProguardFiles("consumer-rules.pro")
+    }
+
+    buildFeatures {
+        // BLD-02: per-buildType OMNILLM_DEV_SHIP_MODE field consumed by
+        // RuntimeControlPlane when constructing ProductBuildMode.
+        buildConfig = true
+    }
+
+    buildTypes {
+        debug {
+            // Debug/dev builds keep development ship mode ON (product needs it to
+            // be shippable in dev); explicit -Pomnillm.developmentShipMode overrides.
+            buildConfigField(
+                "boolean",
+                "OMNILLM_DEV_SHIP_MODE",
+                (omnillmDevShipModeOverride ?: true).toString(),
+            )
+        }
+        release {
+            // Fail-closed: release is OFF unless an explicit override says otherwise.
+            buildConfigField(
+                "boolean",
+                "OMNILLM_DEV_SHIP_MODE",
+                (omnillmDevShipModeOverride ?: false).toString(),
+            )
+        }
     }
 
     compileOptions {
