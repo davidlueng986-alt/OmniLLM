@@ -144,7 +144,9 @@ class RequestLifecycle(
                     errorCode = errorCode,
                 )
                 if (recorded is OmniResult.Err) return recorded
-                aggregates[requestId.value] = next
+                // COR-19: evict terminal aggregates — durable in the registry,
+                // keeping this map bounded to non-terminal requests only.
+                aggregates.remove(requestId.value)
                 return OmniResult.ok(next)
             }
         }

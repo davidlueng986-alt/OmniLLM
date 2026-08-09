@@ -64,6 +64,12 @@ class SqlDelightClaimLedgerStore(
             )
             return true
         }
+
+        override fun listNonTerminal(): List<InferenceRequestClaimRow> =
+            database.inferenceRequestsQueries
+                .listNonTerminal()
+                .executeAsList()
+                .map { it.toClaimRow() }
     }
 
     override val attempts: RequestAttemptDao = object : RequestAttemptDao {

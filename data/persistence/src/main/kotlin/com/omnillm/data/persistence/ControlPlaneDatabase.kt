@@ -73,6 +73,39 @@ class ControlPlaneDatabase private constructor(
         )
     }
 
+    /**
+     * COR-19 / REL-RECOVERY restart path for the REQUEST machine: fence every
+     * request still in a non-terminal state (QUEUED / RESERVED / … / STREAMING)
+     * into RECONCILING so a restarted control plane can never resume blind
+     * execution. Terminal rows (COMPLETED / FAILED / CANCELLED /
+     * ABORTED_UNCERTAIN) are left intact (exactly-one-terminal invariant).
+     *
+     * Mirrors [reconcileUnfinishedCommits]; recovery resolution follows the
+     * REQUEST catalog (REQ-020/020C/021/021C/022 — query, never blind replay).
+     */
+    fun reconcileUnfinishedRequests(now: String = clock()): RequestReconcileResult {
+        val open = claims.requests.listNonTerminal()
+        var marked = 0
+        claims.tx.inTransaction {
+            for (row in open) {
+                if (row.state == "RECONCILING") continue
+                val ok = claims.requests.updateState(
+                    requestId = row.requestId,
+                    state = "RECONCILING",
+                    updatedAt = now,
+                    resourceVersion = row.resourceVersion + 1,
+                )
+                if (ok) marked++
+            }
+        }
+        return RequestReconcileResult(
+            openBefore = open.size,
+            markedReconciling = marked,
+            durable = true,
+            reason = null,
+        )
+    }
+
     companion object {
         /**
          * Wrap an already-opened [SqlDriver].
@@ -195,6 +228,17 @@ class ControlPlaneDatabase private constructor(
 
 /** Outcome of restart commit reconcile (REL-RECOVERY RECONCILING path). */
 data class CommitReconcileResult(
+    val openBefore: Int,
+    val markedReconciling: Int,
+    val durable: Boolean,
+    /** Non-null only when recovery is incomplete / forced DEGRADED. */
+    val reason: String?,
+) {
+    val recoveryComplete: Boolean get() = durable && reason == null
+}
+
+/** Outcome of restart REQUEST-request fence (COR-19 / REL-RECOVERY). */
+data class RequestReconcileResult(
     val openBefore: Int,
     val markedReconciling: Int,
     val durable: Boolean,

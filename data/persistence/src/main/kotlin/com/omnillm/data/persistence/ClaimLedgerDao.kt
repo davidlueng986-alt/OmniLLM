@@ -34,6 +34,12 @@ interface InferenceRequestDao {
         updatedAt: String,
         resourceVersion: Long,
     ): Boolean
+
+    /**
+     * All requests still in a non-terminal REQUEST state (restart fence input,
+     * COR-19 / REL-RECOVERY). Terminal states are untouched by recovery.
+     */
+    fun listNonTerminal(): List<InferenceRequestClaimRow>
 }
 
 interface RequestAttemptDao {

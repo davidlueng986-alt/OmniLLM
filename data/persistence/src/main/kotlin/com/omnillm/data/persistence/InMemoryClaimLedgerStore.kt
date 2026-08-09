@@ -76,6 +76,13 @@ class InMemoryClaimLedgerStore(
                 return true
             }
         }
+
+        override fun listNonTerminal(): List<InferenceRequestClaimRow> =
+            synchronized(lock) {
+                requestsById.values
+                    .filter { it.state !in RequestLedgerStates.TERMINAL }
+                    .toList()
+            }
     }
 
     override val attempts: RequestAttemptDao = object : RequestAttemptDao {

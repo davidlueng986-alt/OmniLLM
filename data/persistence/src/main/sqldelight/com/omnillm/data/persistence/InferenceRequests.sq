@@ -26,6 +26,15 @@ SELECT request_id, principal_id, operation_kind, idempotency_key, canonical_requ
 FROM inference_requests
 WHERE principal_id = ? AND operation_kind = ? AND idempotency_key = ?;
 
+-- Restart fence (COR-19 / REL-RECOVERY): all requests still in a
+-- non-terminal REQUEST FSM state (catalog terminal set: COMPLETED, FAILED,
+-- CANCELLED, ABORTED_UNCERTAIN) so recovery can fence them into RECONCILING.
+listNonTerminal:
+SELECT request_id, principal_id, operation_kind, idempotency_key, canonical_request_digest,
+       revision_id, state, resource_version, created_at, updated_at
+FROM inference_requests
+WHERE state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED', 'ABORTED_UNCERTAIN');
+
 insertRequest:
 INSERT INTO inference_requests(
   request_id, principal_id, operation_kind, idempotency_key, canonical_request_digest,
