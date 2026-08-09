@@ -53,6 +53,13 @@ e2e-artifacts/omnillm.db*
 /*.txt
 /*.log
 /*.err.txt
+/compile-*.txt
+/test-*.txt
+/api-*.txt
+/assemble-*.txt
+*.err
+*.err.txt
+e2e-artifacts/*.log
 /compile-*/
 /admin-*/
 /assemble-*/
