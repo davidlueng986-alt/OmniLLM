@@ -190,3 +190,23 @@ No production Kotlin/C++ changes required for this verification pass (implementa
 | R-CR | Content report store process-memory | `features/ai-content-report` default store |
 | R-SEC | Secrets/tokens default in-memory broker | `LoopbackTokenService.kt`, `PolicyModule` security stack defaults |
 | R-SCHEMA | SQLDelight subset vs authority SQL | `data/persistence` `.sq` vs `resources/db/omnillm-schema.sql`; `applySchema=false` open path |
+
+---
+
+## G) Stage 4 addendum (2026-08-09) — residual blocker closeout
+
+Follow-up wave (launch-readiness fix; branch `fix/launch-readiness`) resolved the
+post-closeout residuals listed above:
+
+| ID | Historical residual | Current status | Evidence / commit |
+|---|---|---|---|
+| R-N | Full upstream native + lock digests | **CLOSED** | llama.cpp **LOCKED** b9999/47c7869 with source/toolchain/artifact digests (`105856a`, `UPSTREAM.lock`); real GGUF verified on emulator (`RealLlamaUpstreamInstrumentedTest`); peers: litert/ort/mllm LOCKED, mlc NOT_LOCKED w/ pin (status yaml synced, FTR-04 `17a9745`) |
+| R-J | Jobs not durable | **CLOSED** | `Jobs.sq`/`JobAttempts.sq`/`JobEvents.sq` + `SqlDelightJobLedgerStore`; `JobManagerModule.createDurableManager(ports=controlDb.jobs)` + `reconcileAfterRestart()` |
+| R-CR | Content report store process-memory | **CLOSED** | `ContentReports.sq` + `SqlDelightContentReportStore` via `ContentReportModule.createDurableApi` |
+| R-SEC | Secrets/tokens default in-memory broker | **CLOSED** | `ControlPlaneSecurityFactory.createSecurityStack` (Keystore-wrapped vault + `AccessTokens.sq`/`PairingChallenges.sq`/`SecretBrokerKeys.sq`/`RevocationSubjects.sq` + `SqlDelightSecretLedgerStore`) |
+| R-SCHEMA | SQLDelight subset vs authority SQL | **PARTIAL — improved** | **26/51** tables implemented and column-identical to authority SQL (API-40..44 `1c66aff`); 25 remaining marked `-- STATUS: PLANNED (not yet implemented)`; `applySchema=false` bootstrap path still open (SW-DUR-08) |
+
+**Remaining after Stage 4:** R4 (device qualification — llama emulator smoke is the
+first real data point, all engines still UNQUALIFIED), R5 (Play ops), plus the
+software residuals in `PRODUCT_READINESS_CHECKLIST.md` (SW-UI-03 Tools destination,
+SW-FEAT-03/06/09, SW-DUR-09) and `SHIP_BACKLOG.md` (Q1–Q4, P1–P8).

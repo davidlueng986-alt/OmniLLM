@@ -5,7 +5,7 @@
 **Authority:** tree on disk + `specs/` + product `GOV-RISKS` (`governance/risk-register.md`).  
 **Scope:** engineering status only. Not a product roadmap or marketing summary.  
 **Closeout:** see root `GAP_CLOSEOUT.md` for gaps 1–3; **remaining build list:** root `SHIP_BACKLOG.md`.  
-**Build posture:** `ProductBuildMode.DEVELOPMENT_SHIP_MODE = true` — qualification / “no lock ⇒ no execute” gates do **not** block finishing features. Flip to `false` only for compliance honesty audits.
+**Build posture (BLD-02):** `ProductBuildMode` is **variant-scoped and injected** — no global `const` anymore. Debug/dev builds read `BuildConfig.OMNILLM_DEV_SHIP_MODE` (per buildType, auditable override `-Pomnillm.developmentShipMode`); **release is always fail-closed** (`ProductBuildMode.FAIL_CLOSED`, dev semantics OFF). Dev mode means qualification / “no lock ⇒ no execute” gates do **not** block finishing features — never an excuse to claim SUPPORTED (dev-mode projections stay CONDITIONAL with an explicit `development_ship_mode` condition, COR-10).
 
 > Root `README.md` is the monorepo entry point and points here for status. **This file is the current status inventory.** **Ship remaining work = `SHIP_BACKLOG.md`.**
 
@@ -20,16 +20,16 @@
 | Contract codegen | `tools/codegen/generate_contracts.py` → `core/{canonical,state,errors}/…/generated/` |
 | Control-plane / process topology | **Implemented** (UI / `:runtime` / `:engine_worker` / `:parser` / companion package) |
 | Feature Packs | **12/12 modules** + **12/12 hosted on control plane** (`FeaturePackHost` wave-A+B in `RuntimeControlPlane.attach`) |
-| Engine Packs | **5 adapters + `engines:api`**; attach-after-READY present; **DEV mode** allows all engines native/SDK when wired |
-| Native engine `.so` / NDK sources | **llama.cpp b9999 vendored + LOCKED + real GGUF verified on emulator** (`upstreamLinked=true`; gemma-3-270m-Q8_0.gguf 301MB → 12 completion tokens, logcat `OmniNativeE2E`); LiteRT/MLC/mllm/ORT adapters fail-closed (vendor artifacts pending) |
-| Durable DB writer | **Claim/commit/session SQLite-backed** via `ControlPlaneDatabase` + SQLDelight stores in production `RuntimeControlPlane.attach` (jobs/content-report/secrets still in-memory) |
+| Engine Packs | **5 real adapters + `engines:api`**; attach-after-READY present; dev builds allow all engines native/SDK when wired; **all engines remain UNQUALIFIED** (device evidence is Stage 5) |
+| Native engine `.so` / NDK sources | **llama.cpp b9999 vendored + LOCKED + real GGUF verified on emulator** (`upstreamLinked=true`; gemma-3-270m-Q8_0.gguf 301MB → 12 completion tokens, logcat `OmniNativeE2E`); LiteRT/MLC/mllm/ORT have **real runtime integrations** (typed SDK bridge / runtime binding / server backend) but no device-verified inference — honest UNQUALIFIED |
+| Durable DB writer | **Claim/commit/session/jobs/model-manager/content-report/tools/secrets/tokens/pairing SQLite-backed** via `ControlPlaneDatabase` + SQLDelight stores in production `RuntimeControlPlane.attach` (observability metrics/traces + binder-level registries remain process-memory) |
 | Unit / host tests | `./gradlew test` **BUILD SUCCESSFUL** (2026-08-09 full-suite verification); host unit tests + `RealLlamaUpstreamInstrumentedTest` (**connected test PASS on Pixel_7 AVD**) |
 | Local APK artifacts observed | `app-ui` debug + unsigned release; `companion-sandbox` debug + release under `build/outputs/apk/` (16 KB zip-align OK) |
 | App version line | **0.1.0** / `versionCode` **1** (main + companion via `libs.versions.toml`) |
 | CI workflows | `.github/workflows/ci.yml`, `release.yml` — test + assemble + contract drift + 16 KB + dep edges; local parity `tools/ci/local_ci.{sh,ps1}` |
 | ProGuard / R8 | Keep rules for AIDL + JNI wired; release `isMinifyEnabled=false` until smoke (see `RELEASE_CHECKLIST` §H) |
 | detekt | **Intentionally skipped** (not configured; documented in `tools/ci/README.md`) |
-| Engine qualification cells | Lab cells may remain UNQUALIFIED in specs; **DEV execute does not require PASS** (`ProductBuildMode`) |
+| Engine qualification cells | Lab cells remain UNQUALIFIED; **dev builds** may execute without PASS (`ProductBuildMode` variant-scoped; release fail-closed). Qualification-status.yaml synced to UPSTREAM.lock reality (FTR-04) |
 
 ---
 
@@ -142,36 +142,36 @@ All twelve Feature Pack modules are included and have main sources + unit tests.
 | A | admin, auto-setup, modelhub, playground, server, dashboard |
 | B | lan, benchmark, diagnostics, routing, tools, ai-content-report |
 
-HTTP handler projects wave-B surfaces; engine execute paths remain **fail-closed** until registry cells are SUPPORTED with real evidence. Some secondary ports (e.g. tool proposal ledger, modelhub display metadata) remain process-memory.
+HTTP handler projects wave-B surfaces; engine execute goes through `EngineExecuteBinding` → `DelegatingInferenceEngine` → real adapter when bound (dev builds; llama real GGUF path verified), fail-closed when unbound/UNKNOWN. Tool proposal ledger + content-report + jobs are SQLDelight-durable; modelhub display/link ports remain process-memory.
 
 ---
 
 ## 4. Engines — what exists
 
-| Module | engineId | Design | Upstream lock | Qualification | Runtime backend |
-|---|---|---|---|---|---|
-| `:engines:api` | (SPI) | — | — | — | `FakeEngine` for Plan→Execute without natives |
-| `:engines:llama-cpp` | `llama.cpp` | BASELINE | `NOT_LOCKED` | `UNQUALIFIED` | JNI shim `libomnillm_llama` packaged; host tests may use `StubNativeBackend`; **not** QUALIFIED |
-| `:engines:litert-lm` | `LiteRT-LM` | BASELINE | `NOT_LOCKED` | `UNQUALIFIED` | `StubSdkBackend` (no real SDK/AAR) |
-| `:engines:mlc-llm` | `MLC-LLM` | BASELINE | `NOT_LOCKED` | `UNQUALIFIED` | Exploratory runtime stub |
-| `:engines:mllm` | `mllm` | BASELINE | `NOT_LOCKED` | `UNQUALIFIED` | Private server channel stub (no AAR) |
-| `:engines:ort-genai` | `ONNX-Runtime-GenAI` | BASELINE | `NOT_LOCKED` | `UNQUALIFIED` | Execute paths fail closed / `CAPABILITY_UNKNOWN` |
+| Module | engineId | Design | Upstream lock | Integration (schema) | Qualification | Runtime backend |
+|---|---|---|---|---|---|---|
+| `:engines:api` | (SPI) | — | — | — | — | `FakeEngine` for Plan→Execute without natives |
+| `:engines:llama-cpp` | `llama.cpp` | BASELINE | **`LOCKED`** (b9999/47c7869) | real JNI + vendored tree | `UNQUALIFIED` | `libomnillm_llama.so` (upstream-linked, EXPERIMENTAL_FIXTURE loop); real GGUF verified on emulator |
+| `:engines:litert-lm` | `LiteRT-LM` | BASELINE | **`LOCKED`** (v0.15.0) | `INTEGRATED_PENDING_QUALIFICATION` | `UNQUALIFIED` | typed `OfficialLitertLmSdkBridge` (real SDK AAR, compile-verified) |
+| `:engines:mlc-llm` | `MLC-LLM` | BASELINE | **`NOT_LOCKED`** (pin 2f78caa4; complete lock pending) | `INTEGRATED` | `UNQUALIFIED` | `MlcEngineRuntimeBackend` binding generated mlc4j runtime |
+| `:engines:mllm` | `mllm` | BASELINE | **`LOCKED`** (2.0.0/c67485a3) | `INTEGRATED_PENDING_QUALIFICATION` | `UNQUALIFIED` | `MllmServerBackend` (gomllm in-app server, loopback HTTP/SSE) |
+| `:engines:ort-genai` | `ONNX-Runtime-GenAI` | BASELINE | **`LOCKED`** (0.14.0) | `INTEGRATED` | `UNQUALIFIED` | `RealGenAiBackend` over onnxruntime-genai AAR Java API |
 
 Each pack ships:
 
-- `UPSTREAM.lock` template (empty digests ⇒ `NOT_LOCKED`)
+- `UPSTREAM.lock` — complete supply-chain pin where locked (digests filled ⇒ `LOCKED`; mlc pending ⇒ `NOT_LOCKED` with pin)
 - `capability-matrix.yaml` with UNQUALIFIED placeholder cells
 - Mapping helpers (errors / phase cancel / resource envelope estimators)
 - Unit tests for lock parse, mapping, and scaffold pipeline
 
-**Policy (2026-08-08):**
+**Policy (BLD-02 — variant-scoped `ProductBuildMode`):**
 
 | Mode | Rule |
 |------|------|
-| **DEVELOPMENT_SHIP_MODE=true** (default) | Bound engines may execute; all catalog engines native-eligible; exploratory default **on**. Goal: finish building. |
-| **COMPLIANCE_HONESTY_MODE** (`false`) | Old rule: only QUALIFIED+PASS ⇒ SUPPORTED; only llama native; fail-closed UNKNOWN. |
+| **Debug/dev build** (`OMNILLM_DEV_SHIP_MODE=true`, from per-buildType `BuildConfig`; auditable override `-Pomnillm.developmentShipMode`) | Bound engines may execute; all catalog engines native-eligible; exploratory product-default **on** (seeded at runtime; static `ConfigurationCatalog` stays fail-closed). Capability projection stays **CONDITIONAL** with explicit `development_ship_mode` condition — never plain SUPPORTED without PASS (COR-10 / INV-018/019). |
+| **Release (default: `FAIL_CLOSED`)** | Only QUALIFIED+PASS ⇒ SUPPORTED; unknown ⇒ fail-closed. Nothing in the codebase flips dev mode for release. |
 
-`RuntimeControlPlane.ensureEnginePacksAttached()` registers catalog engines after READY/DEGRADED. **Remaining work is real native/SDK + model I/O + UI journeys** (`SHIP_BACKLOG.md`), not qualification paperwork.
+`RuntimeControlPlane.ensureEnginePacksAttached()` registers catalog engines after READY/DEGRADED. **Remaining work is device qualification + model I/O + UI journeys** (`SHIP_BACKLOG.md`), not lock/integration paperwork — locks and real backends are in; device-verified inference evidence is not.
 
 ---
 
@@ -206,13 +206,14 @@ Each pack ships:
 | # | Item | Status | Evidence in tree |
 |---|---|---|---|
 | **1** | Full Feature Pack → control-plane attach | **done** | All 12 services constructed in `RuntimeControlPlane.attach` via `WaveAWiring` + `FeaturePackHost.bootstrap`; accessors on plane; host unit smoke tests |
-| **2** | Durable SQLite for claim/commit ledgers | **done** | Production path: `AndroidSqliteDriver` + `ControlPlaneDatabase.open` → `SqlDelightClaimLedgerStore` / `SqlDelightCommitLedgerStore` / sessions; `RequestRegistryModule.createWithCommits` — **no** `InMemoryClaim*` / `InMemoryCommit*` / `createInMemoryWithCommits` in `runtime-service` **main** |
-| **3** | Native packaging path (CMake / `.so`) | **done** (shim) | `android/native/src/main/cpp/CMakeLists.txt`, `jni_bridge.cpp`, `omnillm_llama.{h,cpp}`; built `libomnillm_llama.so` for arm64-v8a + x86_64; NDK **28.2.13676358** present on this host |
-| — | Real upstream engine inference (all 5 engines) | **partial — implementation** | llama: fixture/shim path; peers: stubs. Unblocked by DEV mode; need real SDK/native (SHIP_BACKLOG E1–E7) |
+| **2** | Durable SQLite for claim/commit ledgers | **done** | Production path: `AndroidSqliteDriver` + `ControlPlaneDatabase.open` → `SqlDelightClaimLedgerStore` / `SqlDelightCommitLedgerStore` / sessions / jobs / model-manager (installations+leases) / content-report / tools / secrets/tokens/pairing; `RequestRegistryModule.createWithCommits` — **no** `InMemoryClaim*` / `InMemoryCommit*` / `createInMemoryWithCommits` in `runtime-service` **main** |
+| **3** | Native packaging path (CMake / `.so`) | **done** (real upstream, not just shim) | `android/native/src/main/cpp/` CMake + JNI shim **links vendored llama.cpp b9999** (`third_party/llama.cpp`, LOCKED); `libomnillm_llama.so` built for arm64-v8a + x86_64; real GGUF generate on emulator; NDK **28.2.13676358** present on this host |
+| — | Real upstream engine integration (all 5 engines) | **done — implementation** | llama: vendored b9999 + real GGUF; litert/ort/mllm/mlc: real runtime backends wired (`integrationStatus` in specs). **All UNQUALIFIED** — device-verified inference evidence is the remaining gap (SHIP_BACKLOG Q1) |
 | 4 | Full multi-process E2E on device | **blocked** (human/device) | Host unit tests pass; one instrumented smoke; no device qualification suite |
 | 5 | Signed Play upload automation | **blocked / out of scope** | `release.yml` signing secrets optional; Play Console upload **not wired** (explicitly not automated here) |
 | — | detekt / static analysis suite | **skipped (documented)** | Not configured; AGP lint + unit tests + architecture gates required (`tools/ci/README.md`) |
-| — | Jobs / content-report durability (secondary) | **partial** | Claim/commit/session durable; secrets/tokens durable on plane; jobs/content-report secondary stores still process-memory defaults |
+| — | Jobs / content-report / tools / secrets durability (secondary) | **done** | `JobManagerModule.createDurableManager` + `Jobs.sq`; `ContentReportModule.createDurableApi` + `ContentReports.sq`; `ToolsFeatureModule.createDurableApi` + `ToolProposals.sq`/`ToolResultClaims.sq`; `ControlPlaneSecurityFactory` + `AccessTokens.sq`/`PairingChallenges.sq`/`SecretBrokerKeys.sq`/`RevocationSubjects.sq`. Residual in-memory: observability metrics/traces, binder-level registries, modelhub display/link ports |
+| — | Engine qualification on device (all engines) | **open — device/human** | Real backends exist; device-verified PASS cells do not. Do not mark QUALIFIED/SUPPORTED until Stage 5 evidence packs (`specs/engine-qualification-status.yaml`) |
 
 ---
 
@@ -334,19 +335,27 @@ Ordered by impact on “can run real local inference on device.”
 14. ~~ProGuard JNI/AIDL keep rules incomplete~~ → **closed**: app-ui + consumer-rules for AIDL stubs + `JniNativeBridge`.  
 15. ~~CI missing explicit dep-edge / release assemble emphasis~~ → **closed**: `ci.yml` / `release.yml` / `local_ci` run test + assemble + contract drift + 16 KB + dep edges.  
 16. ~~RELEASE_CHECKLIST mixed software/Console~~ → **closed**: human Play steps primary; software pre-gates in §0 only.  
-17. ~~detekt unclear~~ → **closed as intentional skip** (documented; not a software blocker).
+17. ~~detekt unclear~~ → **closed as intentional skip** (documented; not a software blocker).  
+18. ~~Jobs durable store~~ → **closed** (`1c66aff` wave): `Jobs.sq` + `SqlDelightJobLedgerStore` bound in `RuntimeControlPlane.attach`.  
+19. ~~Content-report store in-memory~~ → **closed**: `ContentReports.sq` + `SqlDelightContentReportStore` via `ContentReportModule.createDurableApi`.  
+20. ~~Tool proposal ledger in-memory~~ → **closed**: `ToolProposals.sq`/`ToolResultClaims.sq` + `SqlDelightToolProposalStore` via `ToolsFeatureModule.createDurableApi`.  
+21. ~~Secrets/tokens/pairing in-memory broker~~ → **closed**: `AccessTokens.sq`/`PairingChallenges.sq`/`SecretBrokerKeys.sq`/`RevocationSubjects.sq` + `ControlPlaneSecurityFactory` on plane.  
+22. ~~Model manager process-memory~~ → **closed**: `ModelManagerModule.createDurableControlPlane` (installations + revision leases).  
+23. ~~Engine backends missing~~ → **closed (implementation)**: llama b9999 real GGUF; litert/ort/mllm/mlc real runtime bindings; locks LOCKED except mlc (pin). **Device evidence remains open** (Stage 5).  
+24. ~~AIDL spec drift~~ → **closed** (API-20 `cfe003f`): aidl yaml = implementation truth; `extract_aidl.py --check` drift gate added.  
+25. ~~Schema vs `.sq` drift~~ → **closed** (API-40..44 `1c66aff`): 26 tables IMPLEMENTED / 25 PLANNED marked in authority SQL.
 
 ### Open — software residual (not packaging)
 
-6. **SQLDelight is a subset** — full DDL/triggers remain authority SQL; bootstrap `applySchema=false` path vs full product DB design residual.  
-7. **Secondary ledgers still in-memory** — jobs, content-report store (secrets/tokens durable on production plane).  
-9. **UI depth** — Compose screens/shell exist; live Admin binder projection depth varies; some feature destinations may still be partial vs product IA (see `PRODUCT_READINESS_CHECKLIST.md`).  
-18. **Inference depth** — DEV mode unblocks execute gates; still need real backends + stable Playground/HTTP generate (SHIP_BACKLOG P0).  
+6. **SQLDelight is a subset** — **26/51 tables** now projected (claims/commits/sessions/jobs/content-report/tools/secrets/tokens/pairing/model-manager/catalog-trust); remaining 25 marked PLANNED in authority SQL; bootstrap `applySchema=false` path vs full product DB design residual.  
+7. **Process-memory residuals** — observability metrics/traces, binder-level registries (client registrations, stream sessions), modelhub display/link ports.  
+9. **UI depth** — Compose screens/shell exist; **Tools top-level destination still missing** (SW-UI-03); LAN/Routing/Benchmark destinations now exist.  
+18. **Inference depth** — real backends in; **device-verified inference evidence missing** (all cells UNQUALIFIED); stable Playground/HTTP generate on device is Stage 5.
 
 ### Open — implementation + ship (see SHIP_BACKLOG.md)
 
-4. **Real Engine Pack backends** — llama true GGUF; LiteRT/MLC/mllm/ORT GenAI real SDK/native (E1–E7).  
-5. **Device matrix / lab PASS** — optional for Play marketing claims; **not** a develop blocker under DEV mode.  
+4. **Device qualification for all engines** — backends real; device matrix / lab PASS open (Q1).  
+5. **Device matrix / lab PASS** — optional for Play marketing claims; **not** a develop blocker under dev builds.  
 8. **Instrumentation / Appium** — deepen import→chat smoke; process isolation mostly host unit tests.  
 10. **Play automated upload not wired** — release builds artifacts; Console upload human-only.  
 11. **Play Console** — FGS, Data Safety, AI reporting, signing ceremony (human).
@@ -361,7 +370,7 @@ These are **accepted residual risks** in design; implementation does not elimina
 | ID | Residual risk (normative) | Design handling | In-repo mitigation status |
 |---|---|---|---|
 | **R-001** | Malicious native may exceed memory envelope / stress system | Sandbox, conservative floor, quota, pressure fail-safe, kill; no hard RSS claim | Governor + resource conservation code exist; JNI **shim** may load; envelope under **full upstream** engines unproven. Residual risk **remains**. |
-| **R-002** | OEM driver/kernel defects can impact system across processes | Qualification, worker isolation, fallback, device deny/quirk, explicit residual risk | Process topology (`:engine_worker`, companion UID, isolated parser) **scaffolded**; **no device/driver qualification cells PASS**. Residual risk **remains**. |
+| **R-002** | OEM driver/kernel defects can impact system across processes | Qualification, worker isolation, fallback, device deny/quirk, explicit residual risk | Process topology (`:engine_worker`, companion UID, isolated parser) **scaffolded**; llama emulator smoke PASS is one device data point; **no qualification matrix PASS cells** across devices. Residual risk **remains**. |
 | **R-003** | Model output may be harmful or wrong | Trust ≠ content quality; in-app report/flag, warnings, diagnostics; no correctness guarantee | `:features:ai-content-report` + UI screen + control-plane ContentReport API **present**. Residual content-risk **remains by design**. |
 | **R-004** | iOS (etc.) lack Android-style isolated UID | Platform placement matrix; refuse combinations without boundary | **Android-only monorepo**; future platforms not implemented. Residual risk **remains** for non-Android. |
 | **R-005** | Catalog root compromise | Threshold signatures, root rotation, revocation, fresh verification; incident recovery still required | Model-manager supply-chain hooks / catalog root bootstrap **code + tests**; production root ceremony / multi-sig **not operationalized** in-tree. Residual risk **remains**. |
@@ -370,8 +379,8 @@ These are **accepted residual risks** in design; implementation does not elimina
 
 **Additional engineering risks (not numbered in GOV-RISKS but material):**
 
-- Claim/commit are SQLite-durable; residual crash paths for **jobs / content-report / secrets** still process-memory.  
-- Shim/`StubNativeBackend` peers may mask integration bugs that only appear with full upstream JNI cancel semantics.  
+- Claim/commit/session/jobs/content-report/tools/secrets/tokens are SQLite-durable; residual crash paths are observability/binder-level registries only.  
+- `EXPERIMENTAL_FIXTURE` loop remains in `libomnillm_llama` (packaging/exploratory only); real GGUF path verified on emulator but device matrix / envelope evidence still open.  
 - Companion package must be installed and same-signer for untrusted acceleration; distribution multi-APK strategy is documented (`PACKAGING.md`) but operational Play multi-package validation is open.
 
 ---
@@ -396,10 +405,11 @@ These are **accepted residual risks** in design; implementation does not elimina
 
 1. ~~Bind claim/commit to SQLDelight in runtime bootstrap~~ (done). Prove crash recovery fixtures **on device**.  
 2. ~~Host all Feature Packs on control plane~~ (done). Deepen Admin/HTTP/AIDL transport parity + UI projections.  
-3. **P0:** real llama.cpp GGUF generate + stable Playground/HTTP (E1–E2, I1/I5).  
-4. **P0:** HTTPS download + model LOAD + remaining engines E3–E6.  
-5. Durable jobs / content-report secondary stores under ADR-010.  
-6. Play release path P6–P8. Master list: **`SHIP_BACKLOG.md`**.
+3. ~~Real llama.cpp GGUF generate + Playground/HTTP~~ (done: vendored b9999, emulator-verified; SSE chat live).  
+4. ~~Real backends for litert/ort/mllm/mlc~~ (done: real bindings, locks LOCKED except mlc pin).  
+5. **P0:** device qualification of all 5 engines (evidence cells; llama emulator smoke is the first data point).  
+6. **P1:** stable Playground/HTTP generate on device + Tools destination (SW-UI-03) + observable deep linking.  
+7. Play release path P6–P8. Master list: **`SHIP_BACKLOG.md`**.
 
 ---
 

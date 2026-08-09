@@ -1,5 +1,7 @@
 # OmniLLM Android — Production Gap Inventory
 
+> **⚠ STALE STATUS WARNING (2026-08-09, Stage 4 refresh):** this document is a **historical snapshot** (2026-08-06) of gaps found before closeout. Do **not** use its line numbers or "Current: No/Yes" claims as current truth. Current status lives in `BUILD_STATUS.md`, `PRODUCT_READINESS_CHECKLIST.md`, `SHIP_BACKLOG.md`, `GAP_CLOSEOUT.md`. The B1–B12 blockers below are resolved as mapped in the table after the historical body.
+
 **Date:** 2026-08-06  
 **Repo:** `C:\Users\daive\Downloads\OmniLLM_Build\omnillm-android`  
 **Scope:** Read-only inventory of production gaps (ledgers, Feature Packs, engine attach, SQLDelight).  
@@ -321,3 +323,26 @@ Order respects ADR-010 (single writer), INV-001, fail-closed unknown capability,
 | `GAP_INVENTORY.md` (repo root) | **Created** (this document) |
 
 No production source code was modified.
+
+---
+
+## 8) Blockers B1–B12 — resolution mapping (Stage 4, 2026-08-09)
+
+Historical blockers from §6, mapped to current state:
+
+| ID | Historical blocker | Current status | Evidence / commit |
+|---|---|---|---|
+| B1 | Production claim/commit/command stores in-memory | **CLOSED** | `RequestRegistryModule.createWithCommits(claims, commits)` + `AndroidSqliteDriver`/`ControlPlaneDatabase` in `RuntimeControlPlane.attach` (baseline `dbf6f33`/`4a5bebe`) |
+| B2 | No SQLDelight → ports adapter | **CLOSED** | `SqlDelightClaimLedgerStore`/`SqlDelightCommitLedgerStore`/`SqlDelightSessionStore`/`SqlDelightJobLedgerStore`/`SqlDelightContentReportStore`/`SqlDelightToolProposalStore`/`SqlDelightInstallationStore`/`SqlDelightRevisionLeaseStore`/`SqlDelightSecretLedgerStore`/`SqlDelightCatalogTrustStore` |
+| B3 | Recovery forced DEGRADED | **CLOSED** | `controlPlaneDb.reconcileUnfinishedCommits()` → READY when durable complete; DEGRADED only on reconcile failure; COR-19 restart fence |
+| B4 | Jobs not durable | **CLOSED** | `JobManagerModule.createDurableManager(ports=controlDb.jobs)` + `jobs.reconcileAfterRestart()` |
+| B5 | Session not on plane | **CLOSED** | `SessionModule.createDurableManager(ports=controlDb.sessions)` |
+| B6 | Orchestrator not on plane / HTTP | **CLOSED** | `GatewayLifecycle` receives plane orchestrator; SSE chat live (COR-03); engine port via `EngineExecuteBinding` |
+| B7 | Model manager not attached | **CLOSED** | `ModelManagerModule.createDurableControlPlane` (installations + revision leases + FS model-store) |
+| B8 | Engine packs not attached | **CLOSED** | `ensureEnginePacksAttached()` after READY/DEGRADED; `EnginePackAttachment.attachAfterReady`; all 5 real backends |
+| B9 | llama-cpp StubNativeBackend only | **CLOSED** | vendored b9999 (`105856a`), `libomnillm_llama.so` upstream-linked, real GGUF on emulator (`RealLlamaUpstreamInstrumentedTest` PASS); `StubNativeBackend` test-only |
+| B10 | Feature Packs mostly library-level | **CLOSED** | 12/12 constructed on plane (`GAP_CLOSEOUT.md` C); benchmark/routing/tools hosts wired |
+| B11 | Content report store in-memory | **CLOSED** | `ContentReports.sq` + `SqlDelightContentReportStore` + `ContentReportModule.createDurableApi` |
+| B12 | Secrets/tokens default in-memory broker | **CLOSED** | `ControlPlaneSecurityFactory.createSecurityStack` (Keystore vault + SQLite verifiers) |
+
+**Still open (not historical blockers):** device qualification evidence for all engines (Q1), Tools UI destination (SW-UI-03), modelhub display/link ports (SW-DUR-09), observability in-memory, `applySchema=false` bootstrap documentation (SW-DUR-08) — see `SHIP_BACKLOG.md` / `PRODUCT_READINESS_CHECKLIST.md`.

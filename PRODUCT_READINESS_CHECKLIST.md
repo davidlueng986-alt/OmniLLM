@@ -1,6 +1,6 @@
 # OmniLLM Android — Product Readiness Checklist
 
-**As-of:** 2026-08-06  
+**As-of:** 2026-08-09 (Stage 4 launch-readiness refresh)  
 **Repo:** `omnillm-android/` (edit surface only)  
 **Authority (docs):** product package `OmniLLM_Product_Documents` + in-repo `specs/`, `GAP_CLOSEOUT.md`, `BUILD_STATUS.md`, `engines/*/NATIVE.md|README.md`, `docs/70-features` (product), `docs/80-engines` (product).  
 **Purpose:** Software-closeable path to **SOFTWARE READY-TO-LAUNCH** vs human/device-only residuals.
@@ -29,17 +29,17 @@
 | # | Criterion | Current status | Evidence |
 |---|---|---|---|
 | D1 | `assembleRelease` succeeds | **PASS** (observed) | `assemble-run-latest2.txt` → `:android:app-ui:assembleRelease` **BUILD SUCCESSFUL**; companion release also assembled |
-| D2 | Unit / host tests green | **PASS** (observed) | `GAP_CLOSEOUT.md` A; `test-verify-gaps.txt` → `./gradlew test` **BUILD SUCCESSFUL** |
+| D2 | Unit / host tests green | **PASS** (observed) | `GAP_CLOSEOUT.md` A; `test-verify-gaps.txt` → `./gradlew test` **BUILD SUCCESSFUL** (302 tasks, 2026-08-09) |
 | D3a | Claim + commit ledgers durable | **PASS** | `RuntimeControlPlane.attach` → `ControlPlaneDatabase` + `RequestRegistryModule.createWithCommits`; no `InMemoryClaim*` / `createInMemoryWithCommits` in `runtime-service` **main** (`GAP_CLOSEOUT.md` B) |
 | D3b | Session ledger durable | **PASS** | `SessionModule.createDurableManager(controlDb.sessions)` in `RuntimeControlPlane.kt` |
-| D3c | Jobs durable | **FAIL — software TODO** | `JobManagerModule.createManager()` default `InMemoryJobStore` (`runtime/job-manager/.../JobManagerModule.kt`, plane L318) |
-| D3d | Secrets / tokens durable | **FAIL — software TODO** | `InMemorySecretBroker` default: `LoopbackTokenService.kt`, `PolicyModule.createSecurityStack` |
-| D4 | llama native load + generate on host/packaged path (shim OK) **or** documented synthetic fixture | **PARTIAL** | Shim: `android/native/src/main/cpp/omnillm_llama.cpp` (synthetic stream); JNI: `JniNativeBackend`; doc: `engines/llama-cpp/NATIVE.md`. **Not** wired into production Orchestrator / AIDL chat execute |
-| D5 | All 12 Feature Packs software E2E paths **not permanently** `FailClosedInference` when native present | **FAIL — software TODO** | 12/12 constructed (`FeaturePackHost` + `WaveAWiring`); inference ports still permanent fail-closed (`FailClosedInferenceEngine`, playground/server/tools/routing ports) |
-| D6 | UI destinations for LAN / benchmark / tools if missing | **PARTIAL** | LAN tab under `ServerClientsScreen` only; **no** `OmniDestination` for Benchmark or Tools |
-| D7 | No fake SUPPORTED | **PASS** | `specs/engine-qualification-status.yaml`; `EnginePackAttachment` asserts `!anySupportedCell`; matrices UNQUALIFIED |
+| D3c | Jobs durable | **PASS** | `JobManagerModule.createDurableManager(ports=controlDb.jobs)` (`RuntimeControlPlane.kt` L357) + `Jobs.sq`/`SqlDelightJobLedgerStore` (wired in baseline tree `dbf6f33`/`4a5bebe`) |
+| D3d | Secrets / tokens durable | **PASS** | `ControlPlaneSecurityFactory.createSecurityStack` (Keystore vault + `AccessTokens.sq`/`PairingChallenges.sq`/`SecretBrokerKeys.sq`/`RevocationSubjects.sq` + `SqlDelightSecretLedgerStore`); `LoopbackTokenService` injects plane `TokenService` |
+| D4 | llama native load + generate on host/packaged path (shim OK) **or** documented synthetic fixture | **PASS** (real path) | `libomnillm_llama.so` links **vendored llama.cpp b9999** (`android/native/src/main/cpp/third_party/llama.cpp`); `LlamaCppInferenceEngineAdapter` + `RuntimeGgufModelSourceResolver` wired via `EngineExecuteBinding`; `RealLlamaUpstreamInstrumentedTest` PASS on emulator (gemma-3-270m-Q8_0 → 12 tokens, `upstreamLinked=true`); EXPERIMENTAL_FIXTURE loop still present for synthetic path |
+| D5 | All 12 Feature Packs software E2E paths **not permanently** `FailClosedInference` when native present | **PASS** | `WaveAWiring` + `FeaturePackHost` bind `engine = binding.inferenceEngine` (`DelegatingInferenceEngine`, fail-closed only when unbound); playground/server/tools/routing ports route through Orchestrator engine port; `FailClosedInferenceEngine` remains only as unbound fallback |
+| D6 | UI destinations for LAN / benchmark / tools if missing | **PARTIAL** | `OmniDestination.Lan` + `Benchmark` + `Routing` + screens exist (`dbf6f33` tree); **`OmniDestination.Tools` still missing** (SW-UI-03 OPEN) |
+| D7 | No fake SUPPORTED | **PASS** | `specs/engine-qualification-status.yaml`; `EnginePackAttachment` asserts `!anySupportedCell`; matrices UNQUALIFIED; dev-mode projections CONDITIONAL (COR-10) |
 
-**Software READY-TO-LAUNCH** = D1–D7 all software-closeable items closed (D3c/d, D4 wiring, D5, D6) without elevating qualification cells.
+**Software READY-TO-LAUNCH** = D1–D7 all software-closeable items closed (SW-UI-03, SW-ENG-09 on-device proof) without elevating qualification cells.
 
 ---
 
@@ -76,74 +76,72 @@ Status: `OPEN` | `PARTIAL` | `DONE`.
 
 | ID | TODO | Status | Path evidence / action |
 |---|---|---|---|
-| SW-DUR-01 | Claim/commit SQLite in production attach | **DONE** | `android/runtime-service/.../RuntimeControlPlane.kt` L296–314; `data/persistence/.../SqlDelightClaimLedgerStore.kt`, `SqlDelightCommitLedgerStore.kt` |
-| SW-DUR-02 | Session SQLite durable manager | **DONE** | `RuntimeControlPlane.kt` L314–317; `Sessions.sq`; `SqlDelightSessionStore` |
-| SW-DUR-03 | Durable **jobs** store bound on plane | **OPEN** | Authority SQL: `data/persistence/src/main/resources/db/omnillm-schema.sql` (`jobs`, `job_attempts`, `job_events`). Missing: `.sq` queries under `data/persistence/src/main/sqldelight/`; `SqlDelightJobStore` implementing `JobStore`; wire `JobManagerModule.createManager(store=…)` in `RuntimeControlPlane.attach` instead of default `InMemoryJobStore` (`runtime/job-manager/.../JobStore.kt`, `JobManagerModule.kt` L19) |
+| SW-DUR-01 | Claim/commit SQLite in production attach | **DONE** | `android/runtime-service/.../RuntimeControlPlane.kt`; `data/persistence/.../SqlDelightClaimLedgerStore.kt`, `SqlDelightCommitLedgerStore.kt` |
+| SW-DUR-02 | Session SQLite durable manager | **DONE** | `RuntimeControlPlane.kt`; `Sessions.sq`; `SqlDelightSessionStore` |
+| SW-DUR-03 | Durable **jobs** store bound on plane | **CLOSED** (baseline `dbf6f33`/`4a5bebe`) | `Jobs.sq`/`JobAttempts.sq`/`JobEvents.sq` under `data/persistence/src/main/sqldelight/`; `SqlDelightJobLedgerStore`; `RuntimeControlPlane.attach` → `JobManagerModule.createDurableManager(ports=controlDb.jobs)` (L357) + `jobs.reconcileAfterRestart()`; no `InMemoryJobStore` in production main |
 | SW-DUR-04 | Durable **secrets / access tokens / pairing** broker | **DONE** | SQLDelight: `AccessTokens.sq`, `PairingChallenges.sq`, `RevocationSubjects.sq`, `SecretBrokerKeys.sq` + `SqlDelightSecretLedgerStore`. Production: `ControlPlaneSecurityFactory` (Keystore-wrapped master + `EncryptedBlobSecretKeyVault` + SQLite HMAC verifiers). Wired: `RuntimeControlPlane.attach` → `securityStack`; `GatewayLifecycle` / `LoopbackTokenService` inject plane `TokenService`. Tests: `SqlDelightSecretLedgerStoreTest`, `DurableSecretBrokerTest`. InMemory defaults remain test-only. |
-| SW-DUR-05 | Durable content-report store (secondary) | **OPEN** | `features/ai-content-report/.../ContentReportModule.kt` L55 default `InMemoryContentReportStore`; plane bootstrap does not override |
-| SW-DUR-06 | Durable tool proposal ledger (secondary) | **OPEN** | `FeaturePackHost.kt` L135 `InMemoryToolProposalLedger` |
-| SW-DUR-07 | Model manager / catalog not process-memory only | **OPEN** (partial product need) | `RuntimeControlPlane.kt` L321 `ModelManagerModule.createInMemoryControlPlane()`; model-store FS ports exist under `data/model-store` but not fully bound as sole catalog authority |
-| SW-DUR-08 | SQLDelight subset vs full authority schema | **PARTIAL** | `.sq` covers claim/commit/session/schema only; jobs/tokens absent from sqldelight dir; `applySchema=false` on Android open (`RuntimeControlPlane.kt` L303) — document bootstrap vs `omnillm-schema.sql` migration path |
+| SW-DUR-05 | Durable content-report store (secondary) | **CLOSED** (baseline `dbf6f33`/`4a5bebe`) | `ContentReports.sq` + `SqlDelightContentReportStore`; `FeaturePackHost` → `ContentReportModule.createDurableApi(...)`; `payload_created_at`/`active_grant_id`/`receipt_*` columns in authority SQL (API-40..44 `1c66aff`) |
+| SW-DUR-06 | Durable tool proposal ledger (secondary) | **CLOSED** (baseline `dbf6f33`/`4a5bebe`) | `ToolProposals.sq`/`ToolResultClaims.sq` + `SqlDelightToolProposalStore`; `FeaturePackHost` → `ToolsFeatureModule.createDurableApi(ledger=toolProposalLedger)`; hermetic tests omit for `InMemoryToolProposalLedger` |
+| SW-DUR-07 | Model manager / catalog not process-memory only | **CLOSED** (baseline `dbf6f33`/`4a5bebe`) | `RuntimeControlPlane.attach` → `ModelManagerModule.createDurableControlPlane(installationPorts=controlDb.installations, leasePorts=controlDb.revisionLeases, modelStore=...)`; `Installations.sq`/`RevisionLeases.sq` + `SqlDelightInstallationStore`/`SqlDelightRevisionLeaseStore` |
+| SW-DUR-08 | SQLDelight subset vs full authority schema | **PARTIAL** | **26/51** tables projected (was claim/commit/session-only); remaining 25 marked `-- STATUS: PLANNED (not yet implemented)` in `specs/database/omnillm-schema.sql` (API-40..44 `1c66aff`); `applySchema=false` on Android open (`RuntimeControlPlane.kt` L342) — document bootstrap vs `omnillm-schema.sql` migration path |
 | SW-DUR-09 | Modelhub display/link ports process-memory | **OPEN** (low severity) | `WaveAWiring.kt` `InMemoryModelDisplayMetadataPort`, `InMemoryAcquisitionLinkStore` |
 
 ### 3.3 Engine / native execute path (honest cells)
 
 | ID | TODO | Status | Path evidence / action |
 |---|---|---|---|
-| SW-ENG-01 | Packaged `libomnillm_llama` CMake/JNI path | **DONE** (shim) | `android/native/src/main/cpp/CMakeLists.txt`, `omnillm_llama.{h,cpp}`, `jni_bridge.cpp`; consumers `:runtime-service`, `:workers` |
-| SW-ENG-02 | Document synthetic load+generate fixture path | **DONE** (doc) | `engines/llama-cpp/NATIVE.md` — synthetic stream in shim; `StubNativeBackend` for host unit tests only |
+| SW-ENG-01 | Packaged `libomnillm_llama` CMake/JNI path | **DONE** | `android/native/src/main/cpp/CMakeLists.txt`, `omnillm_llama.{h,cpp}`, `jni_bridge.cpp`; consumers `:runtime-service`, `:workers` |
+| SW-ENG-02 | Document synthetic load+generate fixture path | **DONE** (doc) | `engines/llama-cpp/NATIVE.md` — synthetic stream in shim (EXPERIMENTAL_FIXTURE); `StubNativeBackend` for host unit tests only |
 | SW-ENG-03 | Host unit: Plan→Reserve→Commit→Execute on stub | **DONE** | `engines/llama-cpp/src/test/.../LlamaCppEnginePipelineTest.kt` |
 | SW-ENG-04 | Production attach: JNI backend when `.so` present; never silent Stub | **DONE** | `EnginePackAttachment.attachAfterReady`; `LlamaCppModule.createEngineWithNativeOrNull` |
 | SW-ENG-05 | Keep cells UNQUALIFIED / registry UNKNOWN | **DONE** | `specs/engine-qualification-status.yaml`; each `engines/*/capability-matrix.yaml`; `EngineSelectionPolicy` |
-| SW-ENG-06 | Wire Orchestrator inference port to real engine adapter when native present (exploratory CONDITIONAL execute **without** elevating matrix) | **OPEN** | Today: `WaveAWiring.wire` L150–157 always `FailClosedInferenceEngine()` + `CapabilityLookup { UNKNOWN }`. Need: after `ensureEnginePacksAttached`, bind `InferenceEnginePort` from `EnginePackAttachment.llamaCppEngine` under explicit exploratory/CONDITIONAL policy; keep `capability-matrix.yaml` / qualification YAML unchanged |
-| SW-ENG-07 | AIDL chat/embed execute not permanent “engine execute path not yet attached” | **OPEN** | `OmniRuntimeFacade.kt` L79–90, L117–128 terminal fail-closed after claim |
-| SW-ENG-08 | HTTP gateway orchestrator path uses plane engine when attached | **OPEN** | `ControlPlaneHttpHandler.kt` CAPABILITY_UNSUPPORTED paths; ensure `GatewayLifecycle` receives live `orchestrator` with engine port (plane has orchestrator ref but engine still fail-closed) |
-| SW-ENG-09 | Host/instrumented path: load+generate via JNI when fixture/shim available | **OPEN** | Document/run: packaged shim path keys + privileged load ticket; optional host test that loads `JniNativeBackend` when library present (`JniNativeMappingTest` only checks mapping / load attempt). Synthetic fixture = empty/valid keys accepted by `omnillm_llama_load_model` (see C++ args) |
-| SW-ENG-10 | Full upstream llama.cpp pin (GGUF real weights) | **OPEN / optional for software launch** | `engines/llama-cpp/UPSTREAM.lock` still `NOT_LOCKED`; `NATIVE.md` swap steps. Shim + SW-ENG-06…09 sufficient for software DoD D4 if synthetic generate works end-to-end |
-| SW-ENG-11 | Peer engines remain stub/UNKNOWN (no fake load) | **DONE** (honest) | litert-lm / mlc-llm / mllm / ort-genai stubs; attach registers metadata only |
+| SW-ENG-06 | Wire Orchestrator inference port to real engine adapter when native present (exploratory CONDITIONAL execute **without** elevating matrix) | **CLOSED** (baseline `dbf6f33`/`4a5bebe`) | `WaveAWiring` binds `engine = deps.inferenceEngineOverride ?: binding.inferenceEngine` (`EngineExecuteBinding` → `DelegatingInferenceEngine` → `LlamaCppInferenceEngineAdapter`); real GGUF path via `RuntimeGgufModelSourceResolver` (READY install → `openReadOnly` + INV-010 re-verify → in-process generate); capability projection stays CONDITIONAL w/ `development_ship_mode` condition (COR-10); matrices UNCHANGED |
+| SW-ENG-07 | AIDL chat/embed execute not permanent “engine execute path not yet attached” | **CLOSED** (COR-03/04 `d0f1734`/`fdb4f91`, baseline wiring) | `OmniRuntimeFacade` chat streams through Orchestrator Plan→Reserve→Commit→Execute (sole claimer); SSE chat never throws inside the flow (honest terminal events); aggregated chat text real |
+| SW-ENG-08 | HTTP gateway orchestrator path uses plane engine when attached | **CLOSED** (baseline + SSE `d0f1734`) | `GatewayLifecycle` receives plane `orchestrator` + engine port; `/v1/chat/completions?stream` SSE framing (role/delta/finish_reason/[DONE]); CAPABILITY_UNSUPPORTED only when unbound |
+| SW-ENG-09 | Host/instrumented path: load+generate via JNI when fixture/shim available | **DONE** | `RealLlamaUpstreamInstrumentedTest` — connected test PASS on Pixel_7 AVD: gemma-3-270m-Q8_0.gguf (301MB) → `promptTokens=2 completionTokens=12 stop=COMPLETED`, `upstreamLinked=true` (logcat `OmniNativeE2E`) |
+| SW-ENG-10 | Full upstream llama.cpp pin (GGUF real weights) | **DONE** (lock) | `engines/llama-cpp/UPSTREAM.lock` **LOCKED**: b9999/47c7869, source/toolchain/artifact digests, 16 KB PASS; vendored under `android/native/src/main/cpp/third_party/llama.cpp` (BLD-01 `105856a`) |
+| SW-ENG-11 | Peer engines remain stub/UNKNOWN (no fake load) | **CLOSED — upgraded to real, still honest** | litert/ort/mllm/mlc now **real runtime backends** (`27115ff`/`2da721d`/`080dae0`/`4f98347`) with `integrationStatus` in `specs/engine-qualification-status.yaml`; locks LOCKED except mlc (pin); all remain UNQUALIFIED — device evidence is the only missing piece |
 
 ### 3.4 Feature Pack software E2E (12 packs)
 
-**Done:** all 12 domain services constructed on control plane (`GAP_CLOSEOUT.md` C; `FeaturePackHost.bootstrap` + `WaveAWiring.wire`).
-
-**Blocker for D5:** inference-adjacent packs still hard-wired to fail-closed ports **regardless of native presence**.
+**Done:** all 12 domain services constructed on control plane (`GAP_CLOSEOUT.md` C; `FeaturePackHost.bootstrap` + `WaveAWiring.wire`); inference-adjacent packs now route through the plane engine port (`EngineExecuteBinding` → `DelegatingInferenceEngine`), fail-closed only when unbound.
 
 | Pack | Module | Plane host | Software E2E unit path | Production inference / live path | Software TODO |
 |---|---|---|---|---|---|
-| admin | `features/admin` | Wave-A | `AdminFeatureHappyPathTest`, cancel/recover tests | Jobs via `AdminApiService` (jobs in-memory — SW-DUR-03) | SW-FEAT-01 jobs durability UX continuity |
-| auto-setup | `features/auto-setup` | Wave-A | module tests | `WaveAWiring` planOnly fail-closed L173–175 | SW-FEAT-02 bind plan to real orchestrator when engine exploratory allowed |
-| modelhub | `features/modelhub` | Wave-A | module tests | empty catalog port L191; in-memory display | SW-FEAT-03 catalog/suggested port + durable install jobs |
-| playground | `features/playground` | Wave-A | module tests | `PlaygroundInferencePort` permanent CAPABILITY_UNSUPPORTED L204–208 | **SW-FEAT-04** wire to orchestrator/engine when native present |
-| server | `features/server` | Wave-A | module tests | `ServerInferencePort` / smoke likely fail-closed (see `WaveAWiring` server ports) | **SW-FEAT-05** smoke + claim path via real engine when allowed |
-| dashboard | `features/dashboard` | Wave-A | module tests | projections from governor/capabilities | SW-FEAT-06 live metrics depth (observability still in-memory) |
-| lan | `features/lan` | Wave-B | policy + service tests | `ControlPlaneLanHost` + HTTP LAN routes when attached | SW-FEAT-07 durable pairing secrets (SW-DUR-04); UI destination polish (SW-UI-01) |
-| benchmark | `features/benchmark` | Wave-B | service tests | jobs-backed runs; no engine measure without SW-ENG-06 | **SW-FEAT-08** measurement path + UI destination (SW-UI-02) |
-| diagnostics | `features/diagnostics` | Wave-B | export tests | bundle builder present | SW-FEAT-09 export-preview/encryption UX depth vs product docs |
-| routing | `features/routing` | Wave-B | fallback policy tests | `FailClosedRoutingOrchestrator` L126 | **SW-FEAT-10** bind plane `Orchestrator` into `RoutingFeaturePorts` |
-| tools | `features/tools` | Wave-B | `ToolNonExecutionAndIdempotencyTest` | `FailClosedToolsInferencePort` L132 | **SW-FEAT-11** structured path via engine when CONDITIONAL; host tool non-execution preserved |
-| ai-content-report | `features/ai-content-report` | Wave-B | consent/race tests | API on plane; store in-memory | SW-FEAT-12 durable store (SW-DUR-05) |
+| admin | `features/admin` | Wave-A | `AdminFeatureHappyPathTest`, cancel/recover tests | Jobs via `AdminApiService` (jobs durable) | SW-FEAT-01 jobs durability UX continuity → **CLOSED** (durable) |
+| auto-setup | `features/auto-setup` | Wave-A | module tests | plan routed via plane engine when bound (dev) | SW-FEAT-02 → **CLOSED** (binding wired) |
+| modelhub | `features/modelhub` | Wave-A | module tests | durable install jobs + LOAD/UNLOAD via `ModelLoadRuntimePort` | SW-FEAT-03 catalog/suggested port + display metadata (in-memory) **PARTIAL** |
+| playground | `features/playground` | Wave-A | module tests | chat/embed via Orchestrator engine port (real GGUF path on llama) | **SW-FEAT-04** → **CLOSED** (wired; device stability pending) |
+| server | `features/server` | Wave-A | module tests | smoke + SSE chat via plane engine when bound | **SW-FEAT-05** → **CLOSED** (SSE stream live, COR-03) |
+| dashboard | `features/dashboard` | Wave-A | module tests | projections from governor/capabilities | SW-FEAT-06 live metrics depth (observability in-memory) **OPEN** |
+| lan | `features/lan` | Wave-B | policy + service tests | `ControlPlaneLanHost` + HTTP LAN routes; dedicated `Lan` destination | SW-FEAT-07 durable pairing → **CLOSED** (SW-DUR-04) |
+| benchmark | `features/benchmark` | Wave-B | service tests | jobs-backed runs; dedicated `Benchmark` destination + screen | **SW-FEAT-08** measurement on real engines → **PARTIAL** (needs device qualification) |
+| diagnostics | `features/diagnostics` | Wave-B | export tests | bundle builder present | SW-FEAT-09 export-preview/encryption UX depth **OPEN** |
+| routing | `features/routing` | Wave-B | fallback policy tests | plane Orchestrator bound into `RoutingFeaturePorts`; dedicated `Routing` destination | **SW-FEAT-10** → **CLOSED** (bound) |
+| tools | `features/tools` | Wave-B | `ToolNonExecutionAndIdempotencyTest` | structured path via engine when CONDITIONAL; durable proposal/claim ledger | **SW-FEAT-11** → **CLOSED** (ledger + adapter); host tool non-execution preserved |
+| ai-content-report | `features/ai-content-report` | Wave-B | consent/race tests | API on plane; store durable | SW-FEAT-12 durable store → **CLOSED** (SW-DUR-05) |
 
-#### Critical permanent fail-closed sites (must not remain after native-present software close)
+#### Fail-closed sites now (delegating, unbound-only — no permanent hard-wiring)
 
-| Site | Path |
-|---|---|
-| Orchestrator engine | `android/runtime-service/.../featurehost/FailClosedInferenceEngine.kt` |
-| Wave-A always injects it | `WaveAWiring.kt` L150–157 |
-| Playground chat/embed | `WaveAWiring.kt` L204–208 |
-| Routing | `FeaturePackHost.kt` L126 → `FailClosedFeaturePorts.kt` `FailClosedRoutingOrchestrator` |
-| Tools inference | `FeaturePackHost.kt` L132 → `FailClosedToolsInferencePort` |
-| AIDL chat/embed | `OmniRuntimeFacade.kt` L79–128 |
+| Site | Path | Status |
+|---|---|---|
+| Orchestrator engine | `featurehost/DelegatingInferenceEngine.kt` + `FailClosedInferenceEngine.kt` | Delegates to `EngineExecuteBinding.inferenceEngine` when bound; fail-closed fallback only |
+| Wave-A engine port | `WaveAWiring.kt` `engine = deps.inferenceEngineOverride ?: binding.inferenceEngine` | Real port wired (llama GGUF verified) |
+| Playground chat/embed | `WaveAWiring.kt` playground ports | Plane engine port; fail-closed when unbound |
+| Routing | `FeaturePackHost.kt` `FailClosedRoutingOrchestrator` | `binding = waveA.engineExecute` — live when bound |
+| Tools inference | `FeaturePackHost.kt` `FailClosedToolsInferencePort` | live when bound |
+| AIDL chat/embed | `OmniRuntimeFacade.kt` | Orchestrator Plan→Reserve→Commit→Execute stream (COR-03/04) |
 
-**Design constraint when closing:** exploratory execute may use CONDITIONAL runtime policy for packaged llama shim; **do not** write PASS evidence or set `qualificationStatus: QUALIFIED` / `registryExposure: SUPPORTED` in YAML.
+**Design constraint when closing:** exploratory execute uses CONDITIONAL runtime policy for the packaged llama shim; **do not** write PASS evidence or set `qualificationStatus: QUALIFIED` / `registryExposure: SUPPORTED` in YAML.
 
 ### 3.5 UI destinations (INV-001: Admin/projections only)
 
 | ID | TODO | Status | Path evidence / action |
 |---|---|---|---|
-| SW-UI-01 | LAN user surface | **PARTIAL** | LAN tab inside `ServerClientsScreen.kt` (`ServerTab.LAN`) + `LanAccessViewModel`; no dedicated `OmniDestination.Lan`. Product IA may accept tab; if IA requires primary destination, add to `OmniDestinations.kt` / `OmniNavHost.kt` |
-| SW-UI-02 | Benchmark destination + screen | **OPEN** | Domain: `features/benchmark/.../BenchmarkViewModel.kt`. Missing: `android/app-ui/.../screens/BenchmarkScreen.kt`, `OmniDestination.Benchmark`, nav rail/more list |
-| SW-UI-03 | Tools / structured destination + screen | **OPEN** | Domain: `features/tools`. Missing: Tools screen + `OmniDestination.Tools` |
-| SW-UI-04 | Existing primary destinations | **DONE** (shell) | Home, ModelHub, Playground, ServerClients, Dashboard, Settings, Diagnostics, Onboarding, ContentReport — `OmniDestinations.kt`, screens under `app-ui/.../screens/` |
+| SW-UI-01 | LAN user surface | **DONE** | Dedicated `OmniDestination.Lan` + screen in `OmniNavHost` (nav label/icon wired) |
+| SW-UI-02 | Benchmark destination + screen | **DONE** | `OmniDestination.Benchmark` + `BenchmarkScreen` wired into nav |
+| SW-UI-03 | Tools / structured destination + screen | **OPEN** | Domain: `features/tools`. Missing: Tools screen + `OmniDestination.Tools` (embedded in Playground / HTTP today) |
+| SW-UI-04 | Existing primary destinations | **DONE** (shell) | Home, ModelHub, Playground, ServerClients, Lan, Dashboard, Settings, Diagnostics, Onboarding, ContentReport, Routing, Benchmark — `OmniDestinations.kt`, screens under `app-ui/.../screens/` |
 | SW-UI-05 | Live Admin binder depth per screen | **PARTIAL** | Screens exist; depth varies (`BUILD_STATUS.md` §8 #9). Deepen projections without UI DB/native |
 
 ### 3.6 Transport / process topology (software)
@@ -193,17 +191,27 @@ Do **not** treat these as software blockers for monorepo “software ready.” R
 
 Respects ADR-010, INV-001, Plan purity, fail-closed, no fake SUPPORTED.
 
-1. **SW-DUR-03** jobs SQLite + plane bind  
-2. **SW-DUR-04** secrets/tokens SQLite + `LoopbackTokenService` / security stack  
-3. **SW-ENG-06 + SW-ENG-07 + SW-ENG-08** exploratory CONDITIONAL execute path for packaged llama shim (matrix stays UNKNOWN/UNQUALIFIED)  
-4. **SW-FEAT-04 / 05 / 10 / 11** playground, server, routing, tools ports → live orchestrator/engine  
-5. **SW-UI-02 / SW-UI-03** Benchmark + Tools destinations (LAN polish SW-UI-01 if IA requires)  
-6. **SW-DUR-05 / 06 / 07** secondary durability (content-report, tool ledger, model manager)  
-7. **SW-ENG-09** host/packaged load+generate proof (synthetic fixture documented in NATIVE.md)  
-8. ~~**SW-BUILD-04** README status refresh~~ (done)  
-9. Re-run: `./gradlew test` + `:android:app-ui:assembleRelease` + `checkNative16kb`
+Done since prior inventory (`PRODUCT_READINESS_CHECKLIST` 2026-08-06):
 
-**Stop conditions for “software ready”:** D1–D7 software items closed; qualification YAML still all UNQUALIFIED; no Play upload automation added.
+1. ~~**SW-DUR-03** jobs SQLite + plane bind~~ (closed, baseline `dbf6f33`/`4a5bebe`)  
+2. ~~**SW-DUR-04** secrets/tokens SQLite + security stack~~ (closed)  
+3. ~~**SW-ENG-06 + SW-ENG-07 + SW-ENG-08** exploratory CONDITIONAL execute path~~ (closed — real GGUF path + SSE chat; matrix stays UNKNOWN/UNQUALIFIED)  
+4. ~~**SW-FEAT-04 / 05 / 10 / 11** playground, server, routing, tools ports → live orchestrator/engine~~ (closed)  
+5. ~~**SW-UI-01 / SW-UI-02** LAN + Benchmark destinations~~ (closed; Routing also shipped)  
+6. ~~**SW-DUR-05 / 06 / 07** secondary durability (content-report, tool ledger, model manager)~~ (closed)  
+7. ~~**SW-ENG-09** host/packaged load+generate proof~~ (closed: emulator connected test PASS)  
+8. ~~**SW-ENG-10** llama upstream pin~~ (closed: LOCKED b9999)  
+
+Remaining software-closeable (this wave + later):
+
+9. **SW-UI-03** Tools destination + screen.  
+10. **SW-FEAT-03** modelhub catalog/suggested port + display metadata durable.  
+11. **SW-FEAT-06/09** live metrics depth + diagnostics export-preview UX.  
+12. Re-run: `./gradlew test` + `:android:app-ui:assembleRelease` + `checkNative16kb` per PR.
+
+**Device/human (not software-closeable):** engine qualification PASS cells on device matrix (Q1), crash-recovery on device, Play ops (OO-05…OO-11).
+
+**Stop conditions for “software ready”:** D1–D7 software items closed (SW-UI-03 last); qualification YAML still all UNQUALIFIED; no Play upload automation added.
 
 ---
 
@@ -256,18 +264,18 @@ rg "FailClosedInferenceEngine|engine execute path not yet attached|playground en
 
 | Feature | Module | Plane | Unit tests | UI surface | Inference/E2E software | Durability residual |
 |---|---|---|---|---|---|---|
-| FEAT-ADMIN | `:features:admin` | Yes | Yes | Home/Settings/Jobs | Jobs lifecycle OK | jobs InMemory |
-| FEAT-AUTOSETUP | `:features:auto-setup` | Yes | Yes | Onboarding | plan fail-closed | — |
-| FEAT-MODELHUB | `:features:modelhub` | Yes | Yes | ModelHubScreen | catalog empty / jobs mem | display InMemory |
-| FEAT-PLAYGROUND | `:features:playground` | Yes | Yes | PlaygroundScreen | **permanent fail-closed** | — |
-| FEAT-SERVER | `:features:server` | Yes | Yes | ServerClientsScreen | smoke/inference closed | tokens InMemory |
-| FEAT-LAN | `:features:lan` | Yes | Yes | Server tab LAN | policy E2E OK | pairing secrets mem |
+| FEAT-ADMIN | `:features:admin` | Yes | Yes | Home/Settings/Jobs | Jobs lifecycle OK | — |
+| FEAT-AUTOSETUP | `:features:auto-setup` | Yes | Yes | Onboarding | plane engine when bound | — |
+| FEAT-MODELHUB | `:features:modelhub` | Yes | Yes | ModelHubScreen | LOAD/UNLOAD durable | display metadata InMemory |
+| FEAT-PLAYGROUND | `:features:playground` | Yes | Yes | PlaygroundScreen | real GGUF path (llama) | — |
+| FEAT-SERVER | `:features:server` | Yes | Yes | ServerClientsScreen | SSE chat stream live | — |
+| FEAT-LAN | `:features:lan` | Yes | Yes | Lan destination | policy E2E OK | — |
 | FEAT-DASHBOARD | `:features:dashboard` | Yes | Yes | DashboardScreen | projection OK | metrics mem |
-| FEAT-BENCHMARK | `:features:benchmark` | Yes | Yes | **no destination** | engine measure closed | jobs mem |
+| FEAT-BENCHMARK | `:features:benchmark` | Yes | Yes | Benchmark destination | measure needs device evidence | — |
 | FEAT-DIAGNOSTICS | `:features:diagnostics` | Yes | Yes | DiagnosticsScreen | export software path | — |
-| FEAT-ROUTING | `:features:routing` | Yes | Yes | **no destination** | orchestrator fail-closed | — |
-| FEAT-TOOLS | `:features:tools` | Yes | Yes | **no destination** | inference fail-closed | ledger mem |
-| FEAT-AI-CONTENT-REPORT | `:features:ai-content-report` | Yes | Yes | ContentReportScreen | draft/queue software | store mem |
+| FEAT-ROUTING | `:features:routing` | Yes | Yes | Routing destination | orchestrator bound | — |
+| FEAT-TOOLS | `:features:tools` | Yes | Yes | **no destination (SW-UI-03)** | structured path via engine when CONDITIONAL | ledger durable |
+| FEAT-AI-CONTENT-REPORT | `:features:ai-content-report` | Yes | Yes | ContentReportScreen | draft/queue software | store durable |
 
 ---
 
@@ -292,7 +300,7 @@ rg "FailClosedInferenceEngine|engine execute path not yet attached|playground en
 | assembleRelease | `:android:app-ui` + `:android:companion-sandbox` **BUILD SUCCESSFUL** (unsigned) |
 | Gates re-run | `checkContractDrift` + `checkDependencyEdges` + `checkNative16kb` **OK** |
 | Residual human-only | §4 OUT_OF_SCOPE (OO-01…OO-14) — device, OEM, Play Console |
-| Top software residuals (non-packaging) | See SW-DUR-03, SW-ENG-06…, SW-FEAT-*, SW-UI-* above — not invent PASS evidence |
+| Top software residuals (non-packaging) | SW-UI-03 (Tools destination), SW-FEAT-03/06/09, SW-DUR-08/09, device qualification (Q1) — see SHIP_BACKLOG.md |
 
 ---
 

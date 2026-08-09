@@ -1,6 +1,6 @@
 # OmniLLM Android — Feature & Engine Software Audit
 
-**As-of:** 2026-08-06  
+**As-of:** 2026-08-09 (Stage 4 launch-readiness refresh)  
 **Repo:** `omnillm-android/`  
 **Docs authority:** `OmniLLM_Product_Documents/docs/70-features`, `docs/80-engines`, `specs/feature-capability-map.yaml`, `specs/engine-qualification-status.yaml`  
 **Scope:** Software implementation vs product design — **not** device PASS / OEM matrix.
@@ -25,12 +25,12 @@ All 12 packs are **constructed on the control plane** (`WaveAWiring` + `FeatureP
 | **FEAT-MODELHUB** | `docs/70-features/modelhub-acquisition.md` | **PASS** | `features/modelhub` + durable model manager / model-store FS on plane; UI `ModelHubScreen` (primary tab); acquisition jobs via durable `JobManager`. Residual: display/link ports may still be process-memory helpers (`WaveAWiring`); network download policy present, real large-file UX needs device. |
 | **FEAT-PLAYGROUND** | `docs/70-features/local-playground.md` | **PASS** (software) | `features/playground` + UI `PlaygroundScreen`; routes through Orchestrator + `EngineExecuteBinding`. Generate is fail-closed until exploratory flag + native; tools/structured tabs exist in playground. Residual: vision/audio capability UNKNOWN without evidence; real GGUF quality human-only. |
 | **FEAT-SERVER** | `docs/70-features/developer-server.md` | **PASS** | `features/server` + loopback HTTP gateway (`GatewayLifecycle` / `ControlPlaneHttpHandler`); UI Server tab; capability negotiation fail-closed on UNKNOWN. Residual: OpenAPI surface breadth vs full catalog may be partial on edge routes. |
-| **FEAT-LAN** | `docs/70-features/lan-access.md` | **PASS** | `features/lan` + `ControlPlaneLanHost` / TLS endpoint; durable pairing + tokens; default-off bind; UI LAN via Server/LAN destinations. Residual: real LAN device pairing + cert trust UX on hardware. |
+| **FEAT-LAN** | `docs/70-features/lan-access.md` | **PASS** | `features/lan` + `ControlPlaneLanHost` / TLS endpoint; durable pairing + tokens; default-off bind; dedicated `OmniDestination.Lan` (nav + screen). Residual: real LAN device pairing + cert trust UX on hardware. |
 | **FEAT-DASHBOARD** | `docs/70-features/dashboard-monitoring.md` | **PASS** | `features/dashboard` + UI primary tab; health/metrics with evidence labels via observability. Residual: long-lived live charts polish. |
-| **FEAT-BENCHMARK** | `docs/70-features/benchmark-research.md` | **PASS** | `features/benchmark` (21 main KT, 4 tests); hosted wave-B; UI `BenchmarkScreen` (drawer). Residual: measured device numbers not invented; jobs durable but real load depends on engine. |
+| **FEAT-BENCHMARK** | `docs/70-features/benchmark-research.md` | **PASS** | `features/benchmark` (21 main KT, 4 tests); hosted wave-B; dedicated `OmniDestination.Benchmark` + `BenchmarkScreen`; jobs durable. Residual: measured device numbers not invented; real load depends on engine qualification. |
 | **FEAT-DIAGNOSTICS** | `docs/70-features/diagnostics-export.md` | **PASS** | `features/diagnostics`; allowlist-first export + integrity seal; UI `DiagnosticsScreen`; tests cover redaction (payload vs allowlist schema). Residual: share intent / SAF on device. |
-| **FEAT-ROUTING** | `docs/70-features/multi-model-routing.md` | **PASS** | `features/routing` + Orchestrator candidate planner; UI `RoutingScreen`; fail-closed / no silent cross-revision fallback. Residual: multi-engine live routing limited by peer engine stubs. |
-| **FEAT-TOOLS** | `docs/70-features/structured-tools.md` | **PARTIAL** | Domain `features/tools` (17 main, 6 tests) + durable proposal ledger on plane + playground tools/structured tabs + HTTP tools API. **No dedicated Tools top-level destination** (embedded in Playground / HTTP). Residual: full tool sandbox companion depth on device. |
+| **FEAT-ROUTING** | `docs/70-features/multi-model-routing.md` | **PASS** | `features/routing` + Orchestrator candidate planner; dedicated `OmniDestination.Routing` + `RoutingScreen`; fail-closed / no silent cross-revision fallback. Residual: multi-engine live routing limited by device qualification (all engines UNQUALIFIED). |
+| **FEAT-TOOLS** | `docs/70-features/structured-tools.md` | **PARTIAL** | Domain `features/tools` (17 main, 6 tests) + **durable** proposal/claim ledger on plane (`ToolProposals.sq`/`ToolResultClaims.sq` + `SqlDelightToolProposalStore`) + playground tools/structured tabs + HTTP tools API. **No dedicated Tools top-level destination** (SW-UI-03 OPEN; embedded in Playground / HTTP). Residual: full tool sandbox companion depth on device. |
 | **FEAT-ADMIN** | `docs/70-features/administration-jobs.md` | **PASS** | `features/admin` + AIDL `IOmniAdmin` binder factory for UI; settings/jobs/snapshot; LOCAL_UI principal. Residual: every admin command projection vs full catalog. |
 | **FEAT-AI-CONTENT-REPORT** | `docs/70-features/ai-content-reporting.md` | **PASS** | `features/ai-content-report` + durable ledger on plane; UI `ContentReportScreen`. Residual: store/regulatory questionnaire is human Play work. |
 
@@ -50,29 +50,28 @@ All 12 packs are **constructed on the control plane** (`WaveAWiring` + `FeatureP
 
 Authority: `docs/80-engines/*`, `specs/engine-qualification-status.yaml`, per-module `capability-matrix.yaml`, `UPSTREAM.lock`.
 
-**Build posture:** `ProductBuildMode.DEVELOPMENT_SHIP_MODE = true`.  
-Develop/execute is **not** blocked by lab QUALIFIED/PASS. Lab cells in specs may still say UNQUALIFIED — that is **compliance bookkeeping**, not a “stop coding” rule.  
-**What still blocks “engines work”:** missing real SDK/native + model generate paths — see root **`SHIP_BACKLOG.md`**.
+**Build posture (BLD-02):** variant-scoped `ProductBuildMode` — debug/dev builds get dev-ship semantics via per-buildType `BuildConfig` (`OMNILLM_DEV_SHIP_MODE`), **release is always fail-closed** (`ProductBuildMode.FAIL_CLOSED`). Develop/execute is **not** blocked by lab QUALIFIED/PASS in dev builds; lab cells stay UNQUALIFIED — that is honest bookkeeping, not a “stop coding” rule. Dev-mode capability projection stays **CONDITIONAL** (explicit `development_ship_mode` condition), never fake SUPPORTED (COR-10).
+**What still blocks “engines work”:** device-verified inference evidence (all 5 engines are integrated with real backends but UNQUALIFIED) — see root **`SHIP_BACKLOG.md`**.
 
-| ID | engineId | Design (docs) | Software status | Runtime backend (fact) | Notes |
+| ID | engineId | Design (docs) | Software status | Runtime backend (fact) | Upstream lock / integration |
 |---|---|---|---|---|---|
 | **ENGINE-STANDARD** | — | BASELINE | **PASS** | N/A | SPI in `engines/api`; registry, placement, FakeEngine tests. |
-| **ENGINE-LLAMACPP** | `llama.cpp` | BASELINE | **PARTIAL** | JNI + **fixture** generate (not full GGUF) | Adapter + pipeline OK; need true upstream (E1). DEV mode may execute when bound. |
-| **ENGINE-LITERT** | `LiteRT-LM` | BASELINE | **PARTIAL** | StubSdk only | Need official AAR/SDK (E3). |
-| **ENGINE-MLC** | `MLC-LLM` | BASELINE | **PARTIAL** | Stub runtime | Need MLC Android runtime (E4). |
-| **ENGINE-MLLM** | `mllm` | BASELINE | **PARTIAL** | Server channel stub | Need AAR/server (E5). |
-| **ENGINE-ORTGENAI** | `ONNX-Runtime-GenAI` | BASELINE | **PARTIAL** | Stub GenAI | Need ORT+GenAI natives (E6). |
-| **ENGINE-QUALIFICATION-STATUS** | — | BASELINE | **PASS** (spec) | — | Spec cells for lab; DEV mode ignores PASS for execute. |
+| **ENGINE-LLAMACPP** | `llama.cpp` | BASELINE | **PASS (implementation)** | Real JNI `libomnillm_llama` (vendored b9999, upstream-linked; EXPERIMENTAL_FIXTURE loop always present) | **LOCKED** (b9999/47c7869, digests filled). Real GGUF verified on emulator (`RealLlamaUpstreamInstrumentedTest`). Still UNQUALIFIED. |
+| **ENGINE-LITERT** | `LiteRT-LM` | BASELINE | **PASS (implementation)** | `OfficialLitertLmSdkBridge` (typed official SDK, compile-verified) | **LOCKED** (v0.15.0) / `INTEGRATED_PENDING_QUALIFICATION`. No device inference yet. |
+| **ENGINE-MLC** | `MLC-LLM` | BASELINE | **PASS (implementation)** | `MlcEngineRuntimeBackend` binding generated mlc4j runtime | **NOT_LOCKED** (pin 2f78caa4) / `INTEGRATED` — load fail-closed until complete lock. |
+| **ENGINE-MLLM** | `mllm` | BASELINE | **PASS (implementation)** | `MllmServerBackend` (gomllm in-app server, loopback HTTP/SSE) | **LOCKED** (2.0.0/c67485a3) / `INTEGRATED_PENDING_QUALIFICATION`. |
+| **ENGINE-ORTGENAI** | `ONNX-Runtime-GenAI` | BASELINE | **PASS (implementation)** | `RealGenAiBackend` over onnxruntime-genai AAR Java API | **LOCKED** (0.14.0) / `INTEGRATED`. No device inference yet. |
+| **ENGINE-QUALIFICATION-STATUS** | — | BASELINE | **PASS** (spec) | — | `integrationStatus`/`evidenceNotes` formalized in schema (Stage 4); dev builds ignore PASS for execute. |
 
 ### Engine software vs “done”
 
 | Layer | Status | Action to finish |
 |---|---|---|
 | Registry registration after READY | Done | — |
-| DEV execute without PASS packs | Done (`ProductBuildMode`) | — |
-| Real llama GGUF generate | Partial | E1 |
-| Peer engines real backend | Missing | E3–E6 |
-| Playground/HTTP stable tokens | Partial | E2, I1, I5 |
+| Dev execute without PASS packs | Done (`ProductBuildMode`, variant-scoped) | — |
+| Real llama GGUF generate | **Done** (emulator-verified) | Device matrix / envelope evidence |
+| Peer engines real backend | **Done (implementation)** — litert/ort/mllm/mlc real bindings | Device qualification (Stage 5) |
+| Playground/HTTP stable tokens | Done (SSE chat + real adapter; COR-03/04) | Device stability on matrix |
 | Lab PASS / multi-device matrix | Optional for claims | Human later; not develop gate |
 
 ---
@@ -81,9 +80,9 @@ Develop/execute is **not** blocked by lab QUALIFIED/PASS. Lab cells in specs may
 
 | Category | Scaffold/host | True product depth |
 |---|---|---|
-| FEAT-* (12) | 12 modules + control plane host | Many main journeys still need depth (SHIP_BACKLOG F1–F12, M*, I*) |
-| ENGINE-* packs (5) | 5 adapters | **0/5** meet “real TEXT_GENERATION on device” Done definition yet |
-| Policy / honesty gates | Unblocked for develop | Flip `DEVELOPMENT_SHIP_MODE=false` only for compliance audit |
+| FEAT-* (12) | 12 modules + control plane host | Main journeys mostly present; device depth + Tools destination open (SHIP_BACKLOG F*, UI) |
+| ENGINE-* packs (5) | 5 **real** backends (llama real GGUF on emulator; litert/ort/mllm/mlc real bindings) | **0/5** have device-verified PASS cells — UNQUALIFIED by design until Stage 5 |
+| Policy / honesty gates | Dev builds unblocked; **release fail-closed** | `ProductBuildMode` variant-scoped (BLD-02); projections stay CONDITIONAL in dev (COR-10) |
 
 **Alignment:** Scaffold software packaging is strong; **feature/engine completion for ship** is tracked only in **`SHIP_BACKLOG.md`** (not “UNQUALIFIED = stop”).
 
