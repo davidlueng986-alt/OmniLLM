@@ -25,7 +25,13 @@ object GatewayLifecycle {
     private val gateway = AtomicReference<LoopbackHttpGateway?>(null)
     private val tokens = AtomicReference<LoopbackTokenService?>(null)
     private val handlerRef = AtomicReference<ControlPlaneHttpHandler?>(null)
-    private val bootstrapPlaintext = AtomicReference<String?>(null)
+    /**
+     * SEC-08: single-peek bootstrap token display state. Plaintext is exposed to
+     * the UI exactly once ([takeBootstrapTokenPlaintextOnce]); afterwards only
+     * the masked form is available and the staged Secret Broker receipt is wiped.
+     */
+    private val bootstrapDisplay = AtomicReference<BootstrapTokenDisplay?>(null)
+    private val bootstrapIssuanceKey = AtomicReference<String?>(null)
 
     fun tokenService(): LoopbackTokenService? = tokens.get()
 
@@ -37,11 +43,26 @@ object GatewayLifecycle {
             ?: error("control-plane HTTP handler not available")
     }
 
-    /** One-time bootstrap token plaintext for local UI display (null after clear). */
-    fun peekBootstrapTokenPlaintext(): String? = bootstrapPlaintext.get()
+    /**
+     * SEC-08 single-peek: first call returns the bootstrap token plaintext and
+     * immediately drops the in-memory reference plus wipes the staged Secret
+     * Broker receipt; all later calls return null (masked only).
+     */
+    fun takeBootstrapTokenPlaintextOnce(): String? {
+        val display = bootstrapDisplay.get() ?: return null
+        val plaintext = display.takePlaintextOnce() ?: return null
+        bootstrapIssuanceKey.get()?.let { issuanceKey ->
+            tokens.get()?.erasePlaintextReceipt(issuanceKey)
+        }
+        return plaintext
+    }
+
+    /** Masked bootstrap token for repeat display (never the plaintext). */
+    fun maskedBootstrapToken(): String? = bootstrapDisplay.get()?.masked()
 
     fun clearBootstrapTokenPlaintext() {
-        bootstrapPlaintext.set(null)
+        bootstrapDisplay.set(null)
+        bootstrapIssuanceKey.set(null)
     }
 
     fun isRunning(): Boolean = gateway.get()?.isRunning == true
@@ -83,7 +104,7 @@ object GatewayLifecycle {
                 Log.e(TAG, "Failed to start loopback HTTP gateway", e)
                 tokens.set(null)
                 handlerRef.set(null)
-                bootstrapPlaintext.set(null)
+                clearBootstrapTokenPlaintext()
                 null
             }
         }
@@ -94,7 +115,7 @@ object GatewayLifecycle {
             gateway.getAndSet(null)?.stop()
             tokens.set(null)
             handlerRef.set(null)
-            bootstrapPlaintext.set(null)
+            clearBootstrapTokenPlaintext()
             Log.i(TAG, "Loopback HTTP gateway stopped")
         }
     }
@@ -112,9 +133,11 @@ object GatewayLifecycle {
             secretBroker = stack.secretBroker,
             tokenService = stack.tokenService,
         )
-        if (bootstrapPlaintext.get() == null) {
+        if (bootstrapDisplay.get() == null) {
+            // SEC-08: issue with 1h default TTL; plaintext held for single-peek display.
             val issued = tokenService.issueBootstrapAdmin()
-            bootstrapPlaintext.set(issued.plaintext)
+            bootstrapDisplay.set(BootstrapTokenDisplay(issued.plaintext))
+            bootstrapIssuanceKey.set(issued.issuanceKey)
         }
         tokens.set(tokenService)
         val handler = ControlPlaneHttpHandler(

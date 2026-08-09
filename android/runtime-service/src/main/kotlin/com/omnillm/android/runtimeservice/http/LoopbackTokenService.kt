@@ -11,6 +11,7 @@ import com.omnillm.runtime.policy.security.InMemorySecretBroker
 import com.omnillm.runtime.policy.security.SecretBroker
 import com.omnillm.runtime.policy.security.TokenService
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Control-plane loopback token issuer / verifier (SEC-PROFILE, SEC-AUTH-NET §2).
@@ -124,12 +125,19 @@ class LoopbackTokenService(
     /**
      * Bootstrap a local admin token for first-run / UI (tokens.manage + broad scopes).
      * Plaintext returned once; store only verifier.
+     *
+     * SEC-08: default TTL is 1 hour ([BOOTSTRAP_ADMIN_TTL_SECONDS]) instead of the
+     * previous 24h, and is parameterizable so a future config-catalog wiring can
+     * drive it. Display side must use single-peek semantics ([BootstrapTokenDisplay]).
      */
-    fun issueBootstrapAdmin(scopes: Set<String> = BOOTSTRAP_SCOPES): IssuedToken =
+    fun issueBootstrapAdmin(
+        scopes: Set<String> = BOOTSTRAP_SCOPES,
+        ttlSeconds: Long = BOOTSTRAP_ADMIN_TTL_SECONDS,
+    ): IssuedToken =
         issue(
             principalId = "http-local-admin",
             scopes = scopes,
-            ttlSeconds = 86_400L,
+            ttlSeconds = ttlSeconds,
             loopbackOnly = true,
             label = "bootstrap",
             clientId = "local-admin",
@@ -191,6 +199,14 @@ class LoopbackTokenService(
             is OmniResult.Err -> null
         }
 
+    /**
+     * SEC-08: wipe the staged plaintext receipt so the plaintext can never be
+     * re-fetched via [takePlaintextOnce] (used after first UI display).
+     */
+    fun erasePlaintextReceipt(issuanceKey: String) {
+        broker.erasePlaintextReceipt(issuanceKey)
+    }
+
     fun tokenService(): TokenService = tokens
 
     fun secretBroker(): SecretBroker = broker
@@ -229,6 +245,9 @@ class LoopbackTokenService(
     }
 
     companion object {
+        /** SEC-08: bootstrap admin token default lifetime — 1 hour (was 24h). */
+        const val BOOTSTRAP_ADMIN_TTL_SECONDS: Long = 3_600L
+
         /**
          * Broad loopback local-admin scopes for bootstrap
          * (`LOCAL_ADMIN_HTTP` in access-control-catalog.yaml).
@@ -260,4 +279,40 @@ class LoopbackTokenService(
             "tokens.manage",
         )
     }
+}
+
+/**
+ * Single-peek display state for the bootstrap admin token plaintext (SEC-08).
+ *
+ * The plaintext is exposed to the UI exactly once — the first
+ * [takePlaintextOnce] returns it and immediately drops the in-memory reference
+ * (minimizing the plaintext window). Afterwards only [masked] is available and
+ * the staged Secret Broker receipt must be erased by the caller so
+ * [LoopbackTokenService.takePlaintextOnce] cannot resurrect it.
+ */
+class BootstrapTokenDisplay(
+    plaintext: String,
+) {
+    @Volatile
+    private var retained: String? = plaintext
+
+    private val suffix: String = plaintext.takeLast(4)
+    private val shown = AtomicBoolean(false)
+
+    /** First call returns the plaintext once; all later calls return null. */
+    @Synchronized
+    fun takePlaintextOnce(): String? {
+        if (!shown.compareAndSet(false, true)) return null
+        val value = retained
+        retained = null
+        return value
+    }
+
+    fun hasBeenShown(): Boolean = shown.get()
+
+    /** True while the plaintext is still retained in memory. */
+    fun isRetained(): Boolean = retained != null
+
+    /** Masked form safe for repeat display (suffix only, never the secret). */
+    fun masked(): String = "bootstrap-••••-$suffix"
 }
