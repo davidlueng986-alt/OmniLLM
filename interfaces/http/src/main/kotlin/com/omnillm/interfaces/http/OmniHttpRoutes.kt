@@ -10,11 +10,14 @@ import com.omnillm.interfaces.http.gateway.GatewayConfig
 import com.omnillm.interfaces.http.sse.SseFraming
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.PartData
+import io.ktor.http.content.forEachPart
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.request.header
 import io.ktor.server.request.receive
+import io.ktor.server.request.receiveMultipart
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.header
 import io.ktor.server.response.respondText
@@ -25,8 +28,11 @@ import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.routing
+import io.ktor.utils.io.readRemaining
+import kotlinx.io.readByteArray
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.serializer
+import java.io.ByteArrayOutputStream
 
 /**
  * Ktor routes matching `specs/openapi/omnillm.openapi.yaml`.
@@ -142,13 +148,10 @@ fun Route.omniHttpRoutes(
             OmniErrorHttp.respond(call, OmniError.INVALID_REQUEST(message = "invalid async request JSON"))
             return@post
         }
-        if (!ClaimShape.isValidAsyncInferenceClaim(
-                AsyncInferenceRequestClaimDto(req.requestId, req.idempotencyKey, req.operation),
-            )
-        ) {
+        if (!ClaimShape.isValidAsyncInferenceRequest(req)) {
             OmniErrorHttp.respond(
                 call,
-                OmniError.INVALID_REQUEST(message = "invalid request claim shape"),
+                OmniError.INVALID_REQUEST(message = "invalid request claim shape or payload oneOf mismatch"),
             )
             return@post
         }
@@ -227,15 +230,114 @@ fun Route.omniHttpRoutes(
             )
             return@put
         }
-        val bytes = call.receive<ByteArray>()
-        if (bytes.size.toLong() > config.maxAssetUploadBytes) {
+        // API-06: OpenAPI defines the upload body as multipart/form-data
+        // (AssetUploadRequest: command + content + expected_sha256 + expected_bytes).
+        val multipart = try {
+            call.receiveMultipart()
+        } catch (e: Exception) {
+            OmniErrorHttp.respond(
+                call,
+                OmniError.INVALID_REQUEST(message = "expected multipart/form-data upload body"),
+            )
+            return@put
+        }
+        var commandJson: String? = null
+        var expectedSha256: String? = null
+        var expectedBytes: Long? = null
+        var contentSeen = false
+        var tooBig = false
+        val seenNames = mutableListOf<String>()
+        val content = ByteArrayOutputStream()
+        multipart.forEachPart { part ->
+            try {
+                part.name?.let { seenNames += "$it:${part::class.simpleName}" }
+                when (part) {
+                    is PartData.FormItem -> when (part.name) {
+                        "command" -> commandJson = part.value
+                        "expected_sha256" -> expectedSha256 = part.value
+                        "expected_bytes" -> expectedBytes = part.value.toLongOrNull()
+                    }
+                    is PartData.BinaryItem -> if (part.name == "content" && !tooBig) {
+                        contentSeen = true
+                        val chunk = part.provider().readByteArray()
+                        if (content.size().toLong() + chunk.size.toLong() > config.maxAssetUploadBytes) {
+                            tooBig = true
+                        } else {
+                            content.write(chunk)
+                        }
+                    }
+                    // FileItem (filename present) extends PartData directly in Ktor 3 —
+                    // its provider() yields a ByteReadChannel.
+                    is PartData.FileItem -> if (part.name == "content" && !tooBig) {
+                        contentSeen = true
+                        val chunk = part.provider().readRemaining().readByteArray()
+                        if (content.size().toLong() + chunk.size.toLong() > config.maxAssetUploadBytes) {
+                            tooBig = true
+                        } else {
+                            content.write(chunk)
+                        }
+                    }
+                    // Ktor streams binary parts without a filename as BinaryChannelItem.
+                    is PartData.BinaryChannelItem -> if (part.name == "content" && !tooBig) {
+                        contentSeen = true
+                        val chunk = part.provider().readRemaining().readByteArray()
+                        if (content.size().toLong() + chunk.size.toLong() > config.maxAssetUploadBytes) {
+                            tooBig = true
+                        } else {
+                            content.write(chunk)
+                        }
+                    }
+                    else -> Unit
+                }
+            } finally {
+                part.dispose()
+            }
+        }
+        if (tooBig) {
             OmniErrorHttp.respond(
                 call,
                 OmniError.TRANSPORT_TOO_LARGE(message = "asset upload exceeds gateway limit"),
             )
             return@put
         }
-        when (val r = handler.uploadAsset(principal, id, bytes, length, null)) {
+        if (!contentSeen || commandJson == null) {
+            OmniErrorHttp.respond(
+                call,
+                OmniError.INVALID_REQUEST(
+                    message = "multipart upload requires 'command' and 'content' parts",
+                    details = mapOf("seenParts" to seenNames.joinToString(",")),
+                ),
+            )
+            return@put
+        }
+        val cmd = runCatching {
+            HttpJson.codec.decodeFromString(CommandRequestDto.serializer(), commandJson!!)
+        }.getOrElse {
+            OmniErrorHttp.respond(
+                call,
+                OmniError.INVALID_REQUEST(message = "invalid CommandRequest in multipart 'command' part"),
+            )
+            return@put
+        }
+        if (!ClaimShape.isValidCommandRequest(cmd)) {
+            OmniErrorHttp.respond(
+                call,
+                OmniError.INVALID_REQUEST(message = "invalid CommandRequest claim shape"),
+            )
+            return@put
+        }
+        val bytes = content.toByteArray()
+        when (
+            val r = handler.uploadAsset(
+                principal,
+                id,
+                bytes,
+                bytes.size.toLong(),
+                cmd,
+                expectedSha256,
+                expectedBytes,
+            )
+        ) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
             is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
         }
@@ -263,8 +365,14 @@ fun Route.omniHttpRoutes(
     delete(OpenApiPaths.OMNI_ASSET_BY_ID) {
         val principal = call.requirePrincipal("deleteAsset", authenticator, transport) ?: return@delete
         val id = call.parameters["assetId"] ?: return@delete call.missingPath("assetId")
-        when (val r = handler.deleteAsset(principal, id)) {
-            is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
+        // API-05: OpenAPI DELETE /assets/{assetId} requires a CommandRequest body
+        // (idempotency claim) and answers 204 No Content on success.
+        val cmd = call.receiveCommandOrError() ?: return@delete
+        when (val r = handler.deleteAsset(principal, id, cmd)) {
+            is HttpHandlerResult.Ok -> call.respondText(
+                text = "",
+                status = HttpStatusCode.NoContent,
+            )
             is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
         }
     }
@@ -323,6 +431,7 @@ fun Route.omniHttpRoutes(
 
     get(OpenApiPaths.OMNI_METRICS_DETAIL) {
         val principal = call.requirePrincipal("getMetricDetail", authenticator, transport) ?: return@get
+        if (!call.requireLoopbackOnly("getMetricDetail", transport)) return@get
         when (val r = handler.getMetricDetail(principal)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
             is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
@@ -331,6 +440,7 @@ fun Route.omniHttpRoutes(
 
     get(OpenApiPaths.OMNI_SETTINGS) {
         val principal = call.requirePrincipal("getSettings", authenticator, transport) ?: return@get
+        if (!call.requireLoopbackOnly("getSettings", transport)) return@get
         when (val r = handler.getSettings(principal)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
             is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
@@ -339,6 +449,7 @@ fun Route.omniHttpRoutes(
 
     patch(OpenApiPaths.OMNI_SETTINGS) {
         val principal = call.requirePrincipal("patchSettings", authenticator, transport) ?: return@patch
+        if (!call.requireLoopbackOnly("patchSettings", transport)) return@patch
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@patch
         val req = runCatching {
             HttpJson.codec.decodeFromString(SettingsPatchDto.serializer(), bodyText)
@@ -354,6 +465,7 @@ fun Route.omniHttpRoutes(
 
     get(OpenApiPaths.OMNI_CLIENTS) {
         val principal = call.requirePrincipal("listClients", authenticator, transport) ?: return@get
+        if (!call.requireLoopbackOnly("listClients", transport)) return@get
         when (val r = handler.listClients(principal, call.request.queryParameters["page_token"])) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
             is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
@@ -362,6 +474,7 @@ fun Route.omniHttpRoutes(
 
     post(OpenApiPaths.OMNI_CLIENT_REVOKE) {
         val principal = call.requirePrincipal("revokeClient", authenticator, transport) ?: return@post
+        if (!call.requireLoopbackOnly("revokeClient", transport)) return@post
         val id = call.parameters["clientId"] ?: return@post call.missingPath("clientId")
         val cmd = call.receiveCommandOrError() ?: return@post
         when (val r = handler.revokeClient(principal, id, cmd)) {
@@ -373,6 +486,7 @@ fun Route.omniHttpRoutes(
     // --- LAN ---
     post(OpenApiPaths.OMNI_LAN_ENABLE) {
         val principal = call.requirePrincipal("enableLan", authenticator, transport) ?: return@post
+        if (!call.requireLoopbackOnly("enableLan", transport)) return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
             HttpJson.codec.decodeFromString(LanEnableRequestDto.serializer(), bodyText)
@@ -388,6 +502,7 @@ fun Route.omniHttpRoutes(
 
     post(OpenApiPaths.OMNI_LAN_DISABLE) {
         val principal = call.requirePrincipal("disableLan", authenticator, transport) ?: return@post
+        if (!call.requireLoopbackOnly("disableLan", transport)) return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
             HttpJson.codec.decodeFromString(LanEnableRequestDto.serializer(), bodyText)
@@ -403,6 +518,7 @@ fun Route.omniHttpRoutes(
 
     post(OpenApiPaths.OMNI_LAN_PAIRING_CHALLENGES) {
         val principal = call.requirePrincipal("createLanPairingChallenge", authenticator, transport) ?: return@post
+        if (!call.requireLoopbackOnly("createLanPairingChallenge", transport)) return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
             HttpJson.codec.decodeFromString(LanPairingChallengeCreateRequestDto.serializer(), bodyText)
@@ -438,6 +554,7 @@ fun Route.omniHttpRoutes(
     // --- Diagnostics ---
     post(OpenApiPaths.OMNI_DIAGNOSTICS_EXPORTS) {
         val principal = call.requirePrincipal("createDiagnosticExport", authenticator, transport) ?: return@post
+        if (!call.requireLoopbackOnly("createDiagnosticExport", transport)) return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
             HttpJson.codec.decodeFromString(DiagnosticExportRequestDto.serializer(), bodyText)
@@ -530,6 +647,7 @@ fun Route.omniHttpRoutes(
 
     get(OpenApiPaths.OMNI_TOKENS) {
         val principal = call.requirePrincipal("listTokens", authenticator, transport) ?: return@get
+        if (!call.requireLoopbackOnly("listTokens", transport)) return@get
         when (val r = handler.listTokens(principal, call.request.queryParameters["page_token"])) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
             is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
@@ -538,6 +656,7 @@ fun Route.omniHttpRoutes(
 
     post(OpenApiPaths.OMNI_TOKEN_REVOKE) {
         val principal = call.requirePrincipal("revokeToken", authenticator, transport) ?: return@post
+        if (!call.requireLoopbackOnly("revokeToken", transport)) return@post
         val id = call.parameters["tokenId"] ?: return@post call.missingPath("tokenId")
         val cmd = call.receiveCommandOrError() ?: return@post
         when (val r = handler.revokeToken(principal, id, cmd)) {
@@ -652,6 +771,29 @@ private suspend fun ApplicationCall.receiveCommandOrError(): CommandRequestDto? 
     return dto
 }
 
+/**
+ * API-13: enforce `x-omnillm-allowed-transports` for the listed operations.
+ * Rejects with FORBIDDEN when the current [transport] is not allowed.
+ */
+private suspend fun ApplicationCall.requireLoopbackOnly(
+    operationId: String,
+    transport: HttpTransportKind,
+): Boolean {
+    if (transport == HttpTransportKind.LOOPBACK) return true
+    OmniErrorHttp.respond(
+        this,
+        OmniError.FORBIDDEN(
+            message = "$operationId is loopback-only (x-omnillm-allowed-transports)",
+            details = mapOf(
+                "operation" to operationId,
+                "transport" to transport.name,
+                "allowed" to "LOOPBACK",
+            ),
+        ),
+    )
+    return false
+}
+
 private suspend fun ApplicationCall.missingPath(name: String) {
     OmniErrorHttp.respond(this, OmniError.INVALID_REQUEST(message = "missing path parameter $name"))
 }
@@ -753,7 +895,9 @@ object NotImplementedHttpHandler : OmniHttpHandlerPort {
         assetId: String,
         body: ByteArray,
         contentLength: Long?,
-        commandJson: String?,
+        command: CommandRequestDto?,
+        expectedSha256: String?,
+        expectedBytes: Long?,
     ) = unsupported<CommandResultDto>("uploadAsset")
 
     override suspend fun commitAsset(
@@ -765,8 +909,11 @@ object NotImplementedHttpHandler : OmniHttpHandlerPort {
     override suspend fun getAsset(principal: HttpPrincipal, assetId: String) =
         unsupported<AssetInfoDto>("getAsset")
 
-    override suspend fun deleteAsset(principal: HttpPrincipal, assetId: String) =
-        unsupported<CommandResultDto>("deleteAsset")
+    override suspend fun deleteAsset(
+        principal: HttpPrincipal,
+        assetId: String,
+        command: CommandRequestDto,
+    ) = unsupported<CommandResultDto>("deleteAsset")
 
     override suspend fun createJob(principal: HttpPrincipal, request: JobSpecDto) =
         unsupported<JobInfoDto>("createJob")
@@ -793,7 +940,7 @@ object NotImplementedHttpHandler : OmniHttpHandlerPort {
         unsupported<SettingsSnapshotDto>("getSettings")
 
     override suspend fun patchSettings(principal: HttpPrincipal, request: SettingsPatchDto) =
-        unsupported<SettingsSnapshotDto>("patchSettings")
+        unsupported<CommandResultDto>("patchSettings")
 
     override suspend fun listClients(principal: HttpPrincipal, pageToken: String?) =
         unsupported<ClientPageDto>("listClients")

@@ -139,8 +139,35 @@ data class AsyncInferenceRequestDto(
     @SerialName("request_id") val requestId: String,
     @SerialName("idempotency_key") val idempotencyKey: String,
     val operation: String,
-    val model: String? = null,
-    val payload: JsonObject? = null,
+    /** OpenAPI oneOf: CHAT ⇒ this payload; EMBEDDING ⇒ [embedding]. */
+    val chat: NativeChatPayloadDto? = null,
+    /** OpenAPI oneOf: EMBEDDING ⇒ this payload; CHAT ⇒ [chat]. */
+    val embedding: NativeEmbeddingPayloadDto? = null,
+)
+
+/** OpenAPI `#/components/schemas/NativeChatPayload` (durable chat payload). */
+@Serializable
+data class NativeChatPayloadDto(
+    val model: String,
+    val messages: List<ChatMessageDto>,
+    @SerialName("max_tokens") val maxTokens: Int? = null,
+    val temperature: Double? = null,
+    @SerialName("top_p") val topP: Double? = null,
+    val stop: List<String>? = null,
+    val user: String? = null,
+    @SerialName("omnillm_fallback") val omnillmFallback: FallbackDto? = null,
+    @SerialName("omnillm_deadline_ms") val omnillmDeadlineMs: Long? = null,
+)
+
+/** OpenAPI `#/components/schemas/NativeEmbeddingPayload` (durable embedding payload). */
+@Serializable
+data class NativeEmbeddingPayloadDto(
+    val model: String,
+    val input: JsonElement,
+    @SerialName("encoding_format") val encodingFormat: String = "float",
+    val dimensions: Int? = null,
+    val user: String? = null,
+    @SerialName("omnillm_deadline_ms") val omnillmDeadlineMs: Long? = null,
 )
 
 @Serializable
@@ -273,33 +300,41 @@ data class ContentReportReceiptDto(
 @Serializable
 data class TokenIssueRequestDto(
     val command: CommandRequestDto,
-    val label: String? = null,
+    @SerialName("client_id") val clientId: String,
+    @SerialName("display_name") val displayName: String,
     val scopes: List<String> = emptyList(),
-    @SerialName("ttl_seconds") val ttlSeconds: Long? = null,
+    @SerialName("expires_in_seconds") val expiresInSeconds: Long? = null,
 )
 
 @Serializable
 data class TokenIssueResultDto(
     @SerialName("token_id") val tokenId: String,
+    @SerialName("client_id") val clientId: String,
     /** Plaintext returned only once at issuance (SEC-PROFILE). */
     val token: String,
     val scopes: List<String> = emptyList(),
     @SerialName("expires_at") val expiresAt: String,
+    @SerialName("revocation_epoch") val revocationEpoch: Long = 0L,
+    @SerialName("receipt_expires_at") val receiptExpiresAt: String? = null,
     @SerialName("loopback_only") val loopbackOnly: Boolean = true,
 )
 
+/** OpenAPI `#/components/schemas/TokenInfo` (metadata list entry). */
 @Serializable
-data class TokenMetaDto(
+data class TokenInfoDto(
     @SerialName("token_id") val tokenId: String,
+    @SerialName("client_id") val clientId: String? = null,
+    val state: String,
     val scopes: List<String> = emptyList(),
+    @SerialName("issued_at") val issuedAt: String,
     @SerialName("expires_at") val expiresAt: String,
-    val revoked: Boolean = false,
-    val label: String? = null,
+    @SerialName("revocation_epoch") val revocationEpoch: Long = 0L,
+    @SerialName("last_seen_at") val lastSeenAt: String? = null,
 )
 
 @Serializable
 data class TokenPageDto(
-    val items: List<TokenMetaDto> = emptyList(),
+    val items: List<TokenInfoDto> = emptyList(),
     @SerialName("next_page_token") val nextPageToken: String? = null,
 )
 

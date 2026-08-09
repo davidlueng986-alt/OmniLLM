@@ -74,4 +74,30 @@ object ClaimShape {
         if (dto.operation != "CHAT" && dto.operation != "EMBEDDING") return false
         return true
     }
+
+    /**
+     * Full `AsyncInferenceRequest` shape conformance (API-01): claim fields plus
+     * the OpenAPI `oneOf` — `operation: CHAT` requires a non-empty `chat` payload
+     * (and no `embedding`); `operation: EMBEDDING` requires `embedding` (and no
+     * `chat`).
+     */
+    fun isValidAsyncInferenceRequest(dto: AsyncInferenceRequestDto): Boolean {
+        if (!isValidAsyncInferenceClaim(
+                AsyncInferenceRequestClaimDto(dto.requestId, dto.idempotencyKey, dto.operation),
+            )
+        ) {
+            return false
+        }
+        return when (dto.operation) {
+            "CHAT" -> dto.chat != null &&
+                dto.embedding == null &&
+                dto.chat.model.isNotBlank() &&
+                dto.chat.messages.isNotEmpty() &&
+                dto.chat.messages.all { it.role.isNotBlank() }
+            "EMBEDDING" -> dto.embedding != null &&
+                dto.chat == null &&
+                dto.embedding.model.isNotBlank()
+            else -> false
+        }
+    }
 }

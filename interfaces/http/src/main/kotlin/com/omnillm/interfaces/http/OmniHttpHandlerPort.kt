@@ -82,12 +82,20 @@ interface OmniHttpHandlerPort {
         request: AssetCreateRequestDto,
     ): HttpHandlerResult<AssetInfoDto>
 
+    /**
+     * OpenAPI `PUT /omni/v1/assets/{assetId}/content` — multipart AssetUploadRequest.
+     * [command] is the parsed CommandRequest part (idempotency claim; null only for
+     * legacy raw-byte callers); [expectedSha256] / [expectedBytes] are enforced
+     * when present.
+     */
     suspend fun uploadAsset(
         principal: HttpPrincipal,
         assetId: String,
         body: ByteArray,
         contentLength: Long?,
-        commandJson: String?,
+        command: CommandRequestDto?,
+        expectedSha256: String? = null,
+        expectedBytes: Long? = null,
     ): HttpHandlerResult<CommandResultDto>
 
     suspend fun commitAsset(
@@ -101,9 +109,14 @@ interface OmniHttpHandlerPort {
         assetId: String,
     ): HttpHandlerResult<AssetInfoDto>
 
+    /**
+     * OpenAPI `DELETE /omni/v1/assets/{assetId}`: requires a [CommandRequestDto]
+     * body (idempotency claim) and succeeds with 204.
+     */
     suspend fun deleteAsset(
         principal: HttpPrincipal,
         assetId: String,
+        command: CommandRequestDto,
     ): HttpHandlerResult<CommandResultDto>
 
     // --- Jobs ---
@@ -135,10 +148,15 @@ interface OmniHttpHandlerPort {
 
     suspend fun getSettings(principal: HttpPrincipal): HttpHandlerResult<SettingsSnapshotDto>
 
+    /**
+     * OpenAPI `PATCH /omni/v1/settings` projects [CommandResultDto] (spec
+     * 200 → CommandResult). The patched snapshot remains readable via
+     * [getSettings].
+     */
     suspend fun patchSettings(
         principal: HttpPrincipal,
         request: SettingsPatchDto,
-    ): HttpHandlerResult<SettingsSnapshotDto>
+    ): HttpHandlerResult<CommandResultDto>
 
     suspend fun listClients(
         principal: HttpPrincipal,

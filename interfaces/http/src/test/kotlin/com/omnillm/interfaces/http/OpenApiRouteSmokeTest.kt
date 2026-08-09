@@ -213,8 +213,10 @@ class OpenApiRouteSmokeTest {
 
     @Test
     fun smoke_createAsyncInferenceRequest() = withAuth {
+        // API-01: OpenAPI AsyncInferenceRequest is a oneOf — CHAT requires the
+        // `chat` payload (NativeChatPayload), never a flat model/payload pair.
         val body =
-            """{"request_id":"$uuid","idempotency_key":"async-1","operation":"CHAT","model":"demo"}"""
+            """{"request_id":"$uuid","idempotency_key":"async-1","operation":"CHAT","chat":{"model":"demo","messages":[{"role":"user","content":"hi"}]}}"""
         val r = post("/omni/v1/requests") {
             header("Authorization", "Bearer good")
             contentType(ContentType.Application.Json)
@@ -225,6 +227,19 @@ class OpenApiRouteSmokeTest {
         val text = r.bodyAsText()
         assertTrue(text.contains(uuid))
         assertTrue(text.contains("RECEIVED") || text.contains("query"))
+    }
+
+    @Test
+    fun smoke_createAsyncInferenceRequest_rejectsOneOfMismatch() = withAuth {
+        // CHAT without a `chat` payload violates the OpenAPI oneOf — 400, not 202.
+        val body =
+            """{"request_id":"$uuid","idempotency_key":"async-2","operation":"CHAT","model":"demo"}"""
+        val r = post("/omni/v1/requests") {
+            header("Authorization", "Bearer good")
+            contentType(ContentType.Application.Json)
+            setBody(body)
+        }
+        assertEquals(HttpStatusCode.BadRequest, r.status)
     }
 
     @Test
