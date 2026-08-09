@@ -49,6 +49,7 @@ declarations:
     import ai.omnillm.api.OmniAdminSnapshot;
     import ai.omnillm.api.OmniConsentGrant;
     import ai.omnillm.api.OmniContentReportReceipt;
+    import android.os.ParcelFileDescriptor;
     interface IOmniAdmin {
       OmniJobInfo startJob(in OmniJobSpec spec);
       OmniJobInfo getJob(String jobId);
@@ -65,13 +66,37 @@ declarations:
       CommandResult submitContentReport(String reportId, String consentGrantId,
           in OmniCommandRequest command);
       OmniContentReportReceipt getContentReportReceipt(String reportId);
+      /**
+       * LOCAL_UI playground chat (FEAT-PLAYGROUND). Runs on control plane Orchestrator.
+       * Exploratory CONDITIONAL only when native attached + runtime.exploratoryExecuteEnabled;
+       * never elevates engine cells to SUPPORTED. Result JSON in resultCanonicalJson.
+       */
       CommandResult executePlaygroundChat(String modelRevisionId, String userMessage,
           String requestId, String idempotencyKey, in OmniCommandRequest command);
+      /** Reply-loss / query path for playground request (no re-execute). */
       CommandResult queryPlaygroundRequest(String requestId);
+      /** Cancel in-flight playground request. */
       CommandResult cancelPlaygroundRequest(String requestId, in OmniCommandRequest command);
+      /**
+       * LOCAL_UI developer-server smoke (FEAT-SERVER). Same exploratory honesty rules.
+       * Result JSON in resultCanonicalJson.
+       */
       CommandResult executeServerSmoke(String modelRevisionId, String requestId,
           String idempotencyKey, in OmniCommandRequest command);
+      /**
+       * Honest capability projection for UI negotiation (UNKNOWN / CONDITIONAL / …).
+       * Never invents SUPPORTED without evidence.
+       */
       String getInferenceCapabilityState(String capabilityId, String modelRevisionId);
+      /**
+       * LOCAL_UI local-file / SAF import: UI opens the document and passes a
+       * read-only PFD + content digests. Runtime materializes via AcquisitionPipeline
+       * (quarantine → verify → READY). Never elevates trust beyond LOCAL_IMPORT.
+       */
+      OmniJobInfo importLocalFile(in ParcelFileDescriptor contentFd, String displayName,
+          String expectedSha256, long expectedBytes, String modelRevisionId,
+          String artifactPackageId, String installationId, String jobId,
+          in OmniCommandRequest command);
     }
 - name: IOmniBinding
   kind: interface
@@ -329,8 +354,31 @@ declarations:
 - name: OmniImportJobParameters
   kind: parcelable
   package: ai.omnillm.api
-  source: "package ai.omnillm.api;\n\n@JavaDerive(toString=true)\nparcelable OmniImportJobParameters {\n  String assetId;\n\
-    \  @nullable String expectedFormat;\n  @nullable String expectedSha256;\n}"
+  source: |
+    package ai.omnillm.api;
+
+    import android.os.ParcelFileDescriptor;
+
+    @JavaDerive(toString=true)
+    parcelable OmniImportJobParameters {
+      String assetId;
+      @nullable String expectedFormat;
+      @nullable String expectedSha256;
+      /** LOCAL_UI SAF import: installation target (opaque). */
+      @nullable String installationId;
+      /** Content-addressed revision id (64 hex) derived from package identity. */
+      @nullable String modelRevisionId;
+      /** Artifact package id (64 hex). */
+      @nullable String artifactPackageId;
+      @nullable String displayName;
+      long expectedBytes;
+      boolean hasExpectedBytes;
+      /**
+       * Read-only FD for local file bytes (UI process → runtime control plane).
+       * Never a filesystem path string (INV-001 / ADR-010).
+       */
+      @nullable ParcelFileDescriptor contentFd;
+    }
 - name: OmniJobEvent
   kind: parcelable
   package: ai.omnillm.api
