@@ -17,8 +17,9 @@
 # - LOCKED 2026-08-09: sourceDigest = SHA-256 of `git archive --format=tar b9999`
 #   (full upstream archive; the vendored tree is the library-pruned copy of the
 #   same commit); toolchainDigest = SHA-256 of the recorded toolchain identifiers;
-#   artifactDigest = SHA-256 of the packaged libomnillm_llama.so (debug variant;
-#   release re-capture is a release gate — see notes.artifactReleaseRecapture).
+#   artifactDigest = SHA-256 of the packaged libomnillm_llama.so (release variant,
+#   recaptured 2026-08-09 — closes launch-readiness gate R16; see
+#   notes.artifactReleaseRecapture).
 # - Qualification cells remain UNQUALIFIED until device evidence; a complete lock
 #   is a supply-chain requirement, not a SUPPORTED claim.
 
@@ -85,10 +86,13 @@ artifact:
   # EngineBuildId string published with this lock (opaque; not a native pointer)
   # Complete supply-chain lock (b9999 + source/toolchain/artifact digests).
   engineBuildId: "llama-cpp-b9999-android"
-  # SHA-256 of packaged native artifact(s) — debug variant, captured 2026-08-09:
-  #   arm64-v8a: e3bad99122e3b00a7cf5fb3f8889b705c34e810cdf3bd360326dc5ae82205730
-  #   x86_64:    193503acd9d9bc1a35a9c5e625540de233a566ec1d62c61b3f4618f839d3548c
-  artifactDigest: "e3bad99122e3b00a7cf5fb3f8889b705c34e810cdf3bd360326dc5ae82205730"
+  # Build variant the artifactDigest was captured from. R16 release gate (closed
+  # 2026-08-09): digest MUST come from the release-variant build being shipped.
+  variant: "release"
+  # SHA-256 of packaged native artifact(s) — release variant, recaptured 2026-08-09:
+  #   arm64-v8a: 7f4a8f9287e7905dad441983f913195941786329032d88a7b11b4bbca5c9dd66
+  #   x86_64:    f26e228616c3d5f12a3c9f3ab1a0ab6d73f8d6f0e952a5e3c8866110fbac4970
+  artifactDigest: "7f4a8f9287e7905dad441983f913195941786329032d88a7b11b4bbca5c9dd66"
   # Optional secondary digests (split APKs, debug symbols index)
   symbolIndexDigest: ""
 
@@ -105,7 +109,7 @@ notes:
   nativeArtifact: "libomnillm_llama.so packaged by :android:native (links llama.cpp b9999; always has EXPERIMENTAL_FIXTURE C++ loop)"
   vendorPath: "android/native/src/main/cpp/third_party/llama.cpp"
   vendorFetch: "See android/native/src/main/cpp/third_party/README.md (git clone --depth 1 --branch b9999)"
-  artifactReleaseRecapture: "artifactDigest captured from debug variant on 2026-08-09; release build re-capture required before Play submission (release gate)"
+  artifactReleaseRecapture: "CLOSED 2026-08-09 (release gate R16): artifactDigest recaptured from the release-variant build (arm64-v8a + x86_64), variant: release — the shipped release APK contains this exact artifact"
   placementHint: "Trusted signed code + verified catalog model may use privileged/crash-contained; untrusted GGUF → isolated CPU or companion UID acceleration"
   failClosed: "Incomplete lock ⇒ Registry exposure UNKNOWN; dry-load never elevates trust; missing .so ⇒ no production adapter; unknown capability fail closed"
   qualificationStatus: "UNQUALIFIED — do not mark QUALIFIED_WITH_ENVELOPE / SUPPORTED without device evidence"
