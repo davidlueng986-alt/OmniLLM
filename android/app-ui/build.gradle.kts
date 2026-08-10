@@ -157,4 +157,7 @@ dependencies {
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
+    // AndroidJUnitRunner (androidx.test:runner) — required for instrumented smoke
+    // tests to start (BLD-11 / launch-readiness fix; CI gate connectedAndroidTest).
+    androidTestImplementation(libs.androidx.test.runner)
 }
