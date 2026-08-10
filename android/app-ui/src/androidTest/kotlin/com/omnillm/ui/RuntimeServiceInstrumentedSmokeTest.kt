@@ -30,7 +30,9 @@ class RuntimeServiceInstrumentedSmokeTest {
 
     @Test
     fun packageIsMainApp_notCompanion() {
-        assertEquals("com.omnillm", context.packageName)
+        // Debug buildType applies applicationIdSuffix "-debug" (build.gradle.kts);
+        // assert the build-time application id, not a hard-coded release id.
+        assertEquals(BuildConfig.APPLICATION_ID, context.packageName)
         assertNotEquals(
             RuntimeServiceModule.Companion.PACKAGE_NAME,
             context.packageName,
