@@ -24,10 +24,10 @@ minSdk = "28"
 buildTools = "36.0.0"
 # App / companion version line (coherent software release; bump together unless
 # companion protocol requires independent versionCode — see PACKAGING.md).
-appVersionCode = "1"
-appVersionName = "0.1.0"
-companionVersionCode = "1"
-companionVersionName = "0.1.0"
+appVersionCode = "2"
+appVersionName = "0.2.0"
+companionVersionCode = "2"
+companionVersionName = "0.2.0"
 
 # --- Libraries (skeleton placeholders; pin further at feature implementation) ---
 coroutines = "1.10.2"
