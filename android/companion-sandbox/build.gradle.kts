@@ -3,12 +3,33 @@ plugins {
     // AGP 9.x embeds Kotlin — do not apply org.jetbrains.kotlin.android (duplicate kotlin extension).
 }
 
+import java.io.FileInputStream
+import java.util.Properties
+
 android {
     namespace = "com.omnillm.companion"
     // Same Play target/compile lock as main app (PLAY-TARGET-API-2026). Companion is a
     // separate APK/applicationId (ADR-007) — never merge into com.omnillm AAB.
     compileSdk = libs.versions.compileSdk.get().toInt()
     ndkVersion = libs.versions.ndk.get()
+
+    // Local release signing (BLD-07 / RELEASE_CHECKLIST §B): sign release builds
+    // with the gitignored root keystore.properties when present — same upload key
+    // as the main app (ADR-007 BIND_SANDBOX signature permission). Absent file
+    // (CI/PR) leaves the release signingConfig unset => unsigned fallback.
+    signingConfigs {
+        val ksFile = rootProject.file("keystore.properties")
+        if (ksFile.exists()) {
+            val props = Properties()
+            ksFile.inputStream().use { props.load(it) }
+            create("release") {
+                storeFile = file(props.getProperty("storeFile"))
+                storePassword = props.getProperty("storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
+            }
+        }
+    }
 
     defaultConfig {
         // Different package / Linux UID from main app (com.omnillm) — ADR-007 / SEC-EXTERNAL-SANDBOX.
@@ -40,6 +61,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Sign with the local upload keystore when keystore.properties exists
+            // (same key as main app — ADR-007 BIND_SANDBOX signature permission);
+            // otherwise the APK stays unsigned (CI/PR builds never sign locally).
+            if (signingConfigs.findByName("release") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

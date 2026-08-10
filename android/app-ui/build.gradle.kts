@@ -4,11 +4,32 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+import java.io.FileInputStream
+import java.util.Properties
+
 android {
     namespace = "com.omnillm.ui"
     // PLAY-TARGET-API-2026 / ANDROID-BASELINE: Play builds lock compile + target to API 36.
     compileSdk = libs.versions.compileSdk.get().toInt()
     ndkVersion = libs.versions.ndk.get()
+
+    // Local release signing (BLD-07 / RELEASE_CHECKLIST §B): sign release builds
+    // with the gitignored root keystore.properties when present (points to the
+    // offline upload keystore — never commit keystores). Absent file (CI/PR)
+    // leaves the release signingConfig unset => unsigned fallback.
+    signingConfigs {
+        val ksFile = rootProject.file("keystore.properties")
+        if (ksFile.exists()) {
+            val props = Properties()
+            ksFile.inputStream().use { props.load(it) }
+            create("release") {
+                storeFile = file(props.getProperty("storeFile"))
+                storePassword = props.getProperty("storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "com.omnillm"
@@ -44,6 +65,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Sign with the local upload keystore when keystore.properties exists;
+            // otherwise the APK stays unsigned (CI/PR builds never sign locally).
+            if (signingConfigs.findByName("release") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
