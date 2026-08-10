@@ -36,7 +36,7 @@ python tools/ci/check_apk_16kb_zipalign.py android/companion-sandbox/build/outpu
 
 | Check | Expected |
 |---|---|
-| versionName / versionCode | Catalog `0.1.0` / `1` (main + companion lockstep unless protocol forces companion-only bump) |
+| versionName / versionCode | Catalog `0.2.0` / `2` (main + companion lockstep unless protocol forces companion-only bump) |
 | Signing | Optional CI secrets or local upload keystore — **never commit** keystores |
 | R8 minify | Default **off** until §H smoke sign-off |
 | detekt | **Not configured** — intentionally skipped; AGP lint + unit tests + architecture gates required |
@@ -65,7 +65,7 @@ Artifacts:
 | minSdk | 28 | product decision (`README.md`) |
 | NDK | 28.2.13676358 | `ndk` — **ANDROID-16KB** |
 | Build-Tools | 36.0.0 | `buildTools` |
-| versionName / versionCode | `0.1.0` / `1` | `appVersionName` / `appVersionCode` |
+| versionName / versionCode | `0.2.0` / `2` | `appVersionName` / `appVersionCode` |
 
 Play policy claim (`PLAY-TARGET-API-2026`): starting **2026-08-31**, new apps and updates must target **Android 16 / API 36** (form-factor exceptions per official policy). Source: https://developer.android.com/google/play/requirements/target-sdk — re-fetch before submit.
 
