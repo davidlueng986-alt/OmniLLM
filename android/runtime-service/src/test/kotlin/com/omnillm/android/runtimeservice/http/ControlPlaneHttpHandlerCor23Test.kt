@@ -215,6 +215,9 @@ class ControlPlaneHttpHandlerCor23Test {
                     command = cmd("issue-$principalId"),
                     clientId = "client-$principalId",
                     displayName = "test-$principalId",
+                    // D23d: issuance requires explicit scopes + TTL (no fallbacks).
+                    scopes = listOf("inference.create"),
+                    expiresInSeconds = 3600,
                 ),
             )
         } as HttpHandlerResult.Ok).body.tokenId

@@ -2451,13 +2451,37 @@ class ControlPlaneHttpHandler(
     ): HttpHandlerResult<TokenIssueResultDto> {
         enforceAccess(principal, "issue-rotate-revoke-tokens", AccessScope.tokens_manage)
             ?.let { return it }
+        // D23d: TokenIssueRequest (spec :2650-2684) requires scopes (minItems 1)
+        // and expires_in_seconds (min 60 / max 31536000). No silent fallbacks —
+        // a sloppy caller must not mint a broad bootstrap token by omission.
+        if (request.scopes.isEmpty()) {
+            return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "scopes must be non-empty (spec minItems 1)",
+                    details = mapOf("parameter" to "scopes"),
+                ),
+            )
+        }
+        val ttl = request.expiresInSeconds
+            ?: return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "expires_in_seconds is required (spec required)",
+                    details = mapOf("parameter" to "expires_in_seconds"),
+                ),
+            )
+        if (ttl !in 60L..31_536_000L) {
+            return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "expires_in_seconds must be 60..31536000 (spec bounds)",
+                    details = mapOf("parameter" to "expires_in_seconds"),
+                ),
+            )
+        }
         val claim = claimCommand(principal, "ISSUE_TOKEN", request.command)
         if (claim is HttpHandlerResult.Err) return claim
-        val scopes = request.scopes.ifEmpty { LoopbackTokenService.BOOTSTRAP_SCOPES.toList() }.toSet()
-        val ttl = request.expiresInSeconds ?: 86_400L
         val issued = tokenService.issue(
             principalId = "http-issued:${principal.principalId}",
-            scopes = scopes,
+            scopes = request.scopes.toSet(),
             ttlSeconds = ttl,
             loopbackOnly = true,
             label = request.displayName,
