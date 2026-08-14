@@ -35,7 +35,19 @@ data class UpstreamLock(
     val buildFlags: String? = null,
     val abis: List<String> = emptyList(),
     val pageSizeEvidence: String? = null,
+    /**
+     * Artifact digest. Legacy scalar locks record a single SHA-256 here.
+     * Per-ABI locks (D2 "stripped-packaged") record `artifactDigest` as a
+     * nested map (see [artifactDigestByAbi]) and expose a deterministic
+     * aggregate ("<abi>=<digest>,..." sorted by ABI) so string consumers keep
+     * non-blank evidence; use [artifactDigestFor] for a real ABI lookup.
+     */
     val artifactDigest: String? = null,
+    /**
+     * Per-ABI artifact digests (D2 "stripped-packaged" policy, e.g.
+     * `arm64-v8a: <sha256>`, `x86_64: <sha256>`). Empty for legacy scalar locks.
+     */
+    val artifactDigestByAbi: Map<String, String> = emptyMap(),
     val symbolIndexDigest: String? = null,
     val engineBuildIdRaw: String? = null,
     val testedPlatform: String? = null,
@@ -63,6 +75,18 @@ data class UpstreamLock(
     }
 
     /**
+     * Digest for a specific ABI. With a per-ABI map, returns the recorded
+     * digest or null (fail-closed) for unknown/blank entries. With a legacy
+     * scalar lock the scalar applies to every ABI.
+     */
+    fun artifactDigestFor(abi: String): String? {
+        if (artifactDigestByAbi.isNotEmpty()) {
+            return artifactDigestByAbi[abi]?.takeIf { it.isNotBlank() }
+        }
+        return artifactDigest?.takeIf { it.isNotBlank() }
+    }
+
+    /**
      * Complete lock gate for qualification eligibility.
      * Empty digests or missing ABI/observedAt keep the lock incomplete.
      */
@@ -75,7 +99,9 @@ data class UpstreamLock(
         val hasPatch = patchSetPresent
         val hasToolchain = !toolchainDigest.isNullOrBlank()
         val hasAbis = abis.isNotEmpty()
-        val hasArtifact = !artifactDigest.isNullOrBlank()
+        val hasArtifact = !artifactDigest.isNullOrBlank() &&
+            (artifactDigestByAbi.isEmpty() ||
+                (abis.isNotEmpty() && abis.all { artifactDigestByAbi[it]?.isNotBlank() == true }))
         val hasObserved = !observedAt.isNullOrBlank()
         val hasLicense = !licenseDigest.isNullOrBlank()
         val hasBuildId = !engineBuildIdRaw.isNullOrBlank()
@@ -141,19 +167,33 @@ object UpstreamLockLoader {
     fun parseSimpleLock(text: String): UpstreamLock {
         val flat = mutableMapOf<String, String>()
         val listValues = mutableMapOf<String, MutableList<String>>()
+        val mapValues = mutableMapOf<String, MutableMap<String, String>>()
         var section = ""
+        // Pending nested map header (path + indent), e.g. "artifactDigest:"
+        // followed by indented "<abi>: <digest>" entries.
+        var mapHeader: Pair<String, Int>? = null
         for (rawLine in text.lineSequence()) {
             val line = rawLine.substringBefore('#').trimEnd()
             if (line.isBlank()) continue
+            val indent = line.length - line.trimStart().length
             val trimmed = line.trim()
             if (trimmed.startsWith("#")) continue
-            // section headers like "upstream:" with no value
+            // section headers like "upstream:" with no value, and nested map
+            // headers like "artifactDigest:" with no value
             if (trimmed.endsWith(":") && !trimmed.contains(" ")) {
                 val key = trimmed.removeSuffix(":").trim()
                 if (!key.contains(".")) {
-                    section = key
+                    if (indent == 0) {
+                        section = key
+                        mapHeader = null
+                    } else {
+                        mapHeader = "$section.$key" to indent
+                    }
                     continue
                 }
+            }
+            if (mapHeader != null && indent <= mapHeader.second) {
+                mapHeader = null
             }
             if (!trimmed.contains(':')) continue
             val colon = trimmed.indexOf(':')
@@ -161,6 +201,10 @@ object UpstreamLockLoader {
             var value = trimmed.substring(colon + 1).trim()
             if (value.startsWith("\"") && value.endsWith("\"") && value.length >= 2) {
                 value = value.substring(1, value.length - 1)
+            }
+            if (mapHeader != null && indent > mapHeader.second) {
+                mapValues.getOrPut(mapHeader.first) { mutableMapOf() }[key] = value
+                continue
             }
             val path = if (section.isNotEmpty()) "$section.$key" else key
             if (value.startsWith("[") && value.endsWith("]")) {
@@ -196,6 +240,21 @@ object UpstreamLockLoader {
         }
 
         val patchRaw = g("upstream.patchDigest", "patchDigest")
+        // Per-ABI artifactDigest map (D2 "stripped-packaged"): nested entries
+        // under artifact.artifactDigest, e.g. arm64-v8a / x86_64.
+        val artifactDigestByAbi: Map<String, String> =
+            mapValues["artifact.artifactDigest"]?.toMap() ?: emptyMap()
+        // Legacy scalar (single digest for every ABI) or deterministic
+        // aggregate ("<abi>=<digest>" pairs sorted by ABI) so string consumers
+        // keep non-blank evidence without pretending to be a single digest.
+        val artifactDigest: String? =
+            if (artifactDigestByAbi.isNotEmpty()) {
+                artifactDigestByAbi.entries
+                    .sortedBy { it.key }
+                    .joinToString(",") { "${it.key}=${it.value}" }
+            } else {
+                g("artifact.artifactDigest", "artifactDigest")?.ifBlank { null }
+            }
         return UpstreamLock(
             schemaVersion = g("schemaVersion")?.toIntOrNull() ?: 1,
             engineId = g("engineId") ?: "llama.cpp",
@@ -221,7 +280,8 @@ object UpstreamLockLoader {
             buildFlags = g("build.buildFlags", "buildFlags")?.ifBlank { null },
             abis = list("build.abis", "abis"),
             pageSizeEvidence = g("build.pageSizeEvidence")?.ifBlank { null },
-            artifactDigest = g("artifact.artifactDigest", "artifactDigest")?.ifBlank { null },
+            artifactDigest = artifactDigest,
+            artifactDigestByAbi = artifactDigestByAbi,
             symbolIndexDigest = g("artifact.symbolIndexDigest")?.ifBlank { null },
             engineBuildIdRaw = g("artifact.engineBuildId", "engineBuildId")?.ifBlank { null },
             testedPlatform = g("testedProfile.platform")?.ifBlank { null },
