@@ -64,6 +64,12 @@ class PaginationCursorTest {
             requestRegistry = ledgers.requestRegistry,
             commandLedger = ledgers.commandLedger,
             tokenService = LoopbackTokenService(),
+            // C-11: pagination tests burst >60 admissions — disable the rate
+            // dimension so they test pagination, not rate limiting.
+            rateLimiter = com.omnillm.runtime.policy.acl.PrincipalRateLimiter(
+                rpsLimit = { 0 },
+                concurrencyLimit = { 0 },
+            ),
         )
     }
 
