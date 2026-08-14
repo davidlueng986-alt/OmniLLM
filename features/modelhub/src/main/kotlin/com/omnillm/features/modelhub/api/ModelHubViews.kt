@@ -152,6 +152,12 @@ data class ModelCard(
     val performanceRecorded: Boolean,
     val pinned: Boolean,
     val liveReferenceCount: Int,
+    /**
+     * Durable installation resource version — the delete CAS target (COR-18).
+     * Null when catalog-only (no installation row) or unknown (fail closed).
+     * Must equal the version the delete CAS compares against (single source).
+     */
+    val resourceVersion: Long? = null,
     val riskFlags: List<String> = emptyList(),
     val rejectReason: String? = null,
     val activeJobId: String? = null,
@@ -170,6 +176,9 @@ data class ModelCard(
             "unknown compatibilityStatus: $compatibilityStatus"
         }
         require(liveReferenceCount >= 0) { "liveReferenceCount must be non-negative" }
+        resourceVersion?.let {
+            require(it >= 0L) { "resourceVersion must be non-negative" }
+        }
     }
 
     val isInstalledReady: Boolean get() = installationState == "READY"

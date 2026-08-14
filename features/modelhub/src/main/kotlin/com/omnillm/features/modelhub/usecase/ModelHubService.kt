@@ -1015,6 +1015,11 @@ class ModelHubService(
             loaded = loaded,
             refs = refs,
             activeJob = job,
+            // COR-18 (D7): the card projects the SAME version the delete CAS
+            // compares against — one authority, so a fresh snapshot always
+            // carries a version that delete accepts (converges after load /
+            // restart; null → fail closed).
+            resourceVersion = resourceVersions.currentVersion(installationId),
         )
     }
 
