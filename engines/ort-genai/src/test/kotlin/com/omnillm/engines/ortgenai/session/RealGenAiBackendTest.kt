@@ -270,6 +270,55 @@ class RealGenAiBackendTest {
     }
 
     @Test
+    fun cancelRegistry_boundedByCap_evictsOldest() {
+        val (backend, _, _) = openedPipeline(FakeGenAiRuntime())
+        for (i in 0 until 1100) {
+            backend.requestCancel("op-cancel-$i")
+        }
+        assertTrue(
+            "cancel registry must be bounded by cap",
+            backend.cancelRegistry.size <= BoundedCancelRegistry.MAX_CANCEL_TOKENS,
+        )
+        assertFalse("oldest cancel intent must be evicted", backend.cancelRegistry.contains("op-cancel-0"))
+        assertTrue("newest cancel intent must survive", backend.cancelRegistry.contains("op-cancel-1099"))
+    }
+
+    @Test
+    fun generate_completes_purgesCancelToken() {
+        val (backend, _, session) = openedPipeline(FakeGenAiRuntime())
+        backend.requestCancel("op-purge")
+        val first = backend.generate(
+            session = session,
+            request = GenAiGenerateRequest(
+                operationToken = "op-purge",
+                promptDigestHex = IdentityHashing.sha256Hex("hello world"),
+                maxTokens = 8,
+                promptUtf8 = "hello world",
+            ),
+            cancelFlag = { false },
+            onEvent = {},
+        )
+        assertTrue(first is GenAiResult.Err)
+        assertEquals(GenAiErrorCode.CANCELLED, (first as GenAiResult.Err).error.code)
+        assertFalse(
+            "completed operation must purge its cancel token",
+            backend.cancelRegistry.contains("op-purge"),
+        )
+        val second = backend.generate(
+            session = session,
+            request = GenAiGenerateRequest(
+                operationToken = "op-purge",
+                promptDigestHex = IdentityHashing.sha256Hex("hello world"),
+                maxTokens = 2,
+                promptUtf8 = "hello world",
+            ),
+            cancelFlag = { false },
+            onEvent = {},
+        )
+        assertTrue("purged cancel intent ⇒ re-invocation runs normally", second is GenAiResult.Ok)
+    }
+
+    @Test
     fun stagePrompt_suppliesContentByDigest() {
         val runtime = FakeGenAiRuntime()
         val (backend, _, session) = openedPipeline(runtime)

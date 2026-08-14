@@ -235,6 +235,26 @@ class OfficialLitertLmSdkBridgeTest {
     }
 
     @Test
+    fun officialBridge_cancelRegistry_boundedByCap() {
+        val bridge = OfficialLitertLmSdkBridge()
+        for (i in 0 until 1100) {
+            bridge.requestCancel("op-cancel-$i")
+        }
+        assertTrue(
+            "cancel registry must be bounded by cap",
+            bridge.cancelRequestedRegistry.size <= BoundedCancelRegistry.MAX_CANCEL_TOKENS,
+        )
+        assertFalse(
+            "oldest cancel intent must be evicted",
+            bridge.cancelRequestedRegistry.contains("op-cancel-0"),
+        )
+        assertTrue(
+            "newest cancel intent must survive",
+            bridge.cancelRequestedRegistry.contains("op-cancel-1099"),
+        )
+    }
+
+    @Test
     fun officialBridge_closeUnknownTokens_isIdempotentOk() {
         val bridge = OfficialLitertLmSdkBridge()
         assertTrue(bridge.closeConversation(SdkConversationToken("nope")) is SdkResult.Ok)
