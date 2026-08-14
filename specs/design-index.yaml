@@ -415,7 +415,7 @@ documents:
   status: BASELINE
   authority: NORMATIVE
   owner: feature-team
-- id: FEATURE-SYSTEM
+- id: FEAT-SYSTEM
   title: 功能設計系統
   path: docs/70-features/feature-design-system.md
   status: BASELINE

@@ -1216,6 +1216,13 @@ machines:
     actions:
     - audit
 - id: ASSET
+  # C-08c (2026-08-15): hybrid persistence — asset METADATA (identity, owner,
+  # state, sizes, digests, TTL, pin_count, resource_version) is durable via
+  # SQLDelight (Assets.sq); content BYTES stay in the runtime-owned quarantine
+  # directory referenced by storage_key (never in SQL). After restart the
+  # record reloads and TTL is enforced AT ACCESS time (expired content refused;
+  # state advances to EXPIRED lazily). States unchanged and verified against
+  # specs/database/omnillm-schema.sql + OpenAPI AssetInfo enum.
   initial: CREATED
   terminal:
   - CONSUMED

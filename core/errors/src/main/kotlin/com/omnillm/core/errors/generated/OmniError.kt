@@ -28,6 +28,13 @@ sealed class OmniError {
         override val code: OmniErrorCode = OmniErrorCode.INVALID_REQUEST
     }
 
+    data class MODEL_FORMAT_INVALID(
+        override val message: String? = null,
+        override val details: Map<String, String> = emptyMap(),
+    ) : OmniError() {
+        override val code: OmniErrorCode = OmniErrorCode.MODEL_FORMAT_INVALID
+    }
+
     data class UNAUTHORIZED(
         override val message: String? = null,
         override val details: Map<String, String> = emptyMap(),
@@ -205,6 +212,7 @@ sealed class OmniError {
             details: Map<String, String> = emptyMap(),
         ): OmniError = when (code) {
             OmniErrorCode.INVALID_REQUEST -> INVALID_REQUEST(message, details)
+            OmniErrorCode.MODEL_FORMAT_INVALID -> MODEL_FORMAT_INVALID(message, details)
             OmniErrorCode.UNAUTHORIZED -> UNAUTHORIZED(message, details)
             OmniErrorCode.FORBIDDEN -> FORBIDDEN(message, details)
             OmniErrorCode.NOT_FOUND -> NOT_FOUND(message, details)

@@ -234,6 +234,36 @@ settings:
   - administrator-policy
   - product-default
   clampAllowed: true
+- key: security.principalRpsLimit
+  type: integer
+  min: 0
+  default: 60
+  class: LOCAL_ADMIN
+  description: >
+    C-11 (SEC-AUTH-NET): per-principal request rate limit (token bucket,
+    refill = limit/sec). 0 disables this dimension (fail-open, documented) —
+    operators who set 0 accept unbounded request rate on that axis. Denial
+    surfaces as RATE_LIMITED (429, retryable). Mirrors runtime/policy
+    ConfigurationCatalog.securityLimits (DEFAULT_PRINCIPAL_RPS_LIMIT=60).
+  allowedSources:
+  - administrator-policy
+  - product-default
+  clampAllowed: false
+- key: security.principalConcurrentRequests
+  type: integer
+  min: 0
+  default: 8
+  class: LOCAL_ADMIN
+  description: >
+    C-11 (SEC-AUTH-NET): per-principal in-flight request quota (bounded leases,
+    auto-expired after the lease window). 0 disables this dimension
+    (fail-open, documented). Denial surfaces as RATE_LIMITED (429, retryable).
+    Mirrors runtime/policy ConfigurationCatalog.securityLimits
+    (DEFAULT_PRINCIPAL_CONCURRENT_REQUESTS=8).
+  allowedSources:
+  - administrator-policy
+  - product-default
+  clampAllowed: false
 invariants:
 - device-local settings cannot silently alter public wire semantics
 - resource-increasing changes require plan/reservation/commit

@@ -9,6 +9,18 @@ errors:
   requiredClientAction: correct-request
   redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
     diagnostic bundle
+- code: MODEL_FORMAT_INVALID
+  httpStatus: 400
+  category: semantic
+  retryable: false
+  requiredClientAction: correct-request
+  description: >
+    C-03 (2026-08-15): a file declared/labeled as a supported model format (e.g.
+    GGUF) failed header-level validation and is rejected before install.
+    Reserved for format-level import failures (GgufHeaderValidator + import dry
+    load); the modelhub pipeline swap from INVALID_REQUEST is a follow-up.
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
 - code: UNAUTHORIZED
   httpStatus: 401
   category: semantic

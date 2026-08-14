@@ -56,12 +56,12 @@ Authority: `docs/80-engines/*`, `specs/engine-qualification-status.yaml`, per-mo
 | ID | engineId | Design (docs) | Software status | Runtime backend (fact) | Upstream lock / integration |
 |---|---|---|---|---|---|
 | **ENGINE-STANDARD** | — | BASELINE | **PASS** | N/A | SPI in `engines/api`; registry, placement, FakeEngine tests. |
-| **ENGINE-LLAMACPP** | `llama.cpp` | BASELINE | **PASS (implementation)** | Real JNI `libomnillm_llama` (vendored b9999, upstream-linked; EXPERIMENTAL_FIXTURE loop always present) | **LOCKED** (b9999/47c7869, digests filled). Real GGUF verified on emulator (`RealLlamaUpstreamInstrumentedTest`). Still UNQUALIFIED. |
-| **ENGINE-LITERT** | `LiteRT-LM` | BASELINE | **PASS (implementation)** | `OfficialLitertLmSdkBridge` (typed official SDK, compile-verified) | **LOCKED** (v0.15.0) / `INTEGRATED_PENDING_QUALIFICATION`. No device inference yet. |
-| **ENGINE-MLC** | `MLC-LLM` | BASELINE | **PASS (implementation)** | `MlcEngineRuntimeBackend` binding generated mlc4j runtime | **NOT_LOCKED** (pin 2f78caa4) / `INTEGRATED` — load fail-closed until complete lock. |
-| **ENGINE-MLLM** | `mllm` | BASELINE | **PASS (implementation)** | `MllmServerBackend` (gomllm in-app server, loopback HTTP/SSE) | **LOCKED** (2.0.0/c67485a3) / `INTEGRATED_PENDING_QUALIFICATION`. |
-| **ENGINE-ORTGENAI** | `ONNX-Runtime-GenAI` | BASELINE | **PASS (implementation)** | `RealGenAiBackend` over onnxruntime-genai AAR Java API | **LOCKED** (0.14.0) / `INTEGRATED`. No device inference yet. |
-| **ENGINE-QUALIFICATION-STATUS** | — | BASELINE | **PASS** (spec) | — | `integrationStatus`/`evidenceNotes` formalized in schema (Stage 4); dev builds ignore PASS for execute. |
+| **ENGINE-LLAMACPP** | `llama.cpp` | BASELINE | **PASS (implementation)** | Real JNI `libomnillm_llama` (vendored b9999, upstream-linked; EXPERIMENTAL_FIXTURE loop always present) | **LOCKED** (b9999/47c7869, digests filled; artifactDigest stripped-packaged, D2 `756f5e1`). Real GGUF verified on emulator (`RealLlamaUpstreamInstrumentedTest`). Still UNQUALIFIED. |
+| **ENGINE-LITERT** | `LiteRT-LM` | BASELINE | **PASS (implementation)** | `OfficialLitertLmSdkBridge` (typed official SDK, compile-verified); **C-07 (`1bd00fd`): attached LIVE on control plane when policy + SDK present** (`EnginePackAttachment.registerPeerEngines`), else metadata-only | **LOCKED** (v0.15.0) / `INTEGRATED_PENDING_QUALIFICATION`. No device inference yet; attachability ≠ qualification. |
+| **ENGINE-MLC** | `MLC-LLM` | BASELINE | **PASS (implementation)** | `MlcEngineRuntimeBackend` binding generated mlc4j runtime; **metadata-only on plane (C-07 decision)** | **NOT_LOCKED** (pin 2f78caa4) / `INTEGRATED` — load fail-closed until complete lock. |
+| **ENGINE-MLLM** | `mllm` | BASELINE | **PASS (implementation)** | `MllmServerBackend` (gomllm in-app server, loopback HTTP/SSE); **D3 (`6b1af0c`): post-start identity probe — SERVER_CRASH/SERVER_IMPERSONATED fail-closed; metadata-only on plane (C-07)** | **LOCKED** (2.0.0/c67485a3) / `INTEGRATED_PENDING_QUALIFICATION`. Residual: upstream server has no auth (D4, adapter-enforced credentials; see threat-model). |
+| **ENGINE-ORTGENAI** | `ONNX-Runtime-GenAI` | BASELINE | **PASS (implementation)** | `RealGenAiBackend` over onnxruntime-genai AAR Java API; **C-07 (`1bd00fd`): attached LIVE on control plane when policy + API present**, else metadata-only | **LOCKED** (0.14.0) / `INTEGRATED`. No device inference yet; attachability ≠ qualification. |
+| **ENGINE-QUALIFICATION-STATUS** | — | BASELINE | **PASS** (spec) | — | `integrationStatus`/`evidenceNotes` formalized in schema (Stage 4); `controlPlaneAttach` added (C-07); dev builds ignore PASS for execute. |
 
 ### Engine software vs “done”
 

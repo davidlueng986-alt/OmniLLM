@@ -4,7 +4,7 @@ All notable changes to this monorepo. Format inspired by Keep a Changelog;
 findings referenced by their launch-readiness IDs (BLD-*, COR-*, API-*, SEC-*,
 TST-*, FTR-*). Honest statuses only — no invented device evidence.
 
-## [Unreleased / 0.2.0] — next (version bump decided by Stage 6)
+## [Unreleased / 0.2.0-rc2] — GA-hardening wave (C-01..C-15 + D fixes)
 
 Launch-readiness fix wave (Stage 4 of 7, branch `fix/launch-readiness`).
 
@@ -71,6 +71,46 @@ Launch-readiness fix wave (Stage 4 of 7, branch `fix/launch-readiness`).
 ### Docs / status
 
 - **FTR-06** — readiness docs refreshed to code reality (BUILD_STATUS, FEATURE_AUDIT, PRODUCT_READINESS_CHECKLIST, SHIP_BACKLOG, GAP_INVENTORY/CLOSEOUT, engine-registry-attachment); BLD-02 variant-scoped language replaces old "const = true" claims; engines documented real-but-UNQUALIFIED; UI destinations (LAN/Routing/Benchmark) verified; SW-UI-03 Tools left OPEN.
+
+---
+
+## [Unreleased / 0.2.0-rc2] — GA-hardening wave (C-01..C-15 + D fixes)
+
+GA-hardening campaign (2026-08-15, branch `fix/ga-*` waves A–C merged at `231a994`). Fixes follow the D/C/R fix ledger (`FIX_LEDGER`); no device evidence invented — all engines remain UNQUALIFIED.
+
+### Capability fixes (C-01..C-15)
+
+- **C-01** `20242f5` — durable CommitLedger injected into Orchestrator production wiring.
+- **C-02** `2fde031`/`4cee252` — control plane surfaces engine token deltas as visible assistant text (sync + SSE `delta.content`).
+- **C-03** `cd4c10d`/`0d37094` — GGUF header validation + dry-load on import (non-GGUF labeled gguf rejected fail-closed). `MODEL_FORMAT_INVALID` catalog entry added (specs); pipeline swap from `INVALID_REQUEST` is a follow-up (G1).
+- **C-04** `fc0b5a5` — honest capability projection for dashboard (no blanket SUPPORTED).
+- **C-05** `08a74df` — real admin model projections on binder path.
+- **C-06** `8988303` — diagnostics/routing/content-report ViewModels attached in production UiSession.
+- **C-07** `a4b582b`/`1bd00fd`/`ea1455e` — LiteRT-LM + ORT-GenAI backends attached LIVE on control plane when policy + SDK/API present (mlc/mllm stay metadata-only); `MultiEngineInferenceRouter` routes by engineBuildId; attachability ≠ qualification (cells stay UNQUALIFIED/UNKNOWN).
+- **C-08a/b/c** `9e3ccf6`/`e661a22`/`e8b84ae`/`cfcbdd1` — request restart-fence into finishRecovery (D5); durable ClientRegistration store (`ClientRegistrations.sq` + `client_registration_epoch` singleton, INV-017 fence survives restart); durable asset metadata (hybrid: metadata in SQLDelight, content bytes on quarantine disk, TTL enforced at access).
+- **C-11** `020d9e1`/`f1109d8` — principal-scoped rate + concurrency admission (`PrincipalRateLimiter`, denial = RATE_LIMITED 429 retryable); config keys `security.principalRpsLimit` (default 60, 0=disabled) / `security.principalConcurrentRequests` (default 8, 0=disabled).
+
+### D fixes
+
+- **D2** `1a20092`/`756f5e1`/`3bff161`/`0d7c4f4`/`38efc4c` — stripped-packaged llama.cpp artifactDigest gate (`verify_llama_digest.py` in root check); byte-reproducible `.so` (`-ffile-prefix-map`); per-ABI artifactDigest map.
+- **D3** `6b1af0c` — mllm post-start identity probe + fail-closed port-squat detection (SERVER_CRASH / SERVER_IMPERSONATED).
+- **D6** `d493260` — `ProductModePolicy` wired into production projection + RiskAck gate (modes default OFF; research widens diagnostics only; risky requires one-use RiskAck bound to settings resourceVersion; re-ack after restart; in-memory ledger — durable adapter G2).
+- **D7** `1dddf64` — unified resourceVersion source (durable installation record; delete CAS converges after load/restart).
+- **D8** `630ef6c` — durable path models + fail-closes response_format/tools/tool_choice.
+- **D18** `91b8cee` — admin result JSON built with kotlinx.serialization.
+- **D19** `87f4012` — bounded cancel-token bookkeeping (litert/ort/mllm).
+- **D21** `99a32af` — provenance policy: tag == HEAD == APK embedded revision must align pre-GA.
+- **D22** `3f2ed23` — `specs/README.md`: drop machine-specific absolute Windows path.
+- **D23a–g** `b0d2ea7`/`7f12acf`/`69bbc85`/`9bc4450`/`371f2b0`/`3099993`/`91b8cee`/`a02bc30` — CommandResult.error carries ledger FAILED code; TokenIssueResult no longer emits non-spec `loopback_only`; cursor pagination for listTokens/listClients/listOwnJobs; token issuance rejects empty scopes + out-of-range TTL; engine-silent responses OMIT `omnillm` instead of partial object; admin playground chat digest hashes full content; DiagnosticExportRequest categories modeled.
+
+### Interfaces / wire
+
+- `371f2b0` — `OmniExecutionInfo` three fields (actual_model_revision_id / engine_build_id / backend) + enclosing `omnillm` object now conditional (D23e; OpenAPI mirrored).
+
+### Specs / docs
+
+- Specs synced (docs-mirror wave): `omnillm-schema.sql` (assets/client_registrations IMPLEMENTED + epoch singleton), `error-catalog.yaml` (+`MODEL_FORMAT_INVALID`), `configuration-catalog.yaml` (+C-11 keys), `openapi` (D23e conditional + SSE notes), `engine-qualification-status.yaml` (C-07 `controlPlaneAttach`, D3/D4 mllm), `state-machines.yaml` (ASSET C-08c note), authority-registry/design-index `FEATURE-SYSTEM` → `FEAT-SYSTEM` (canonical; docs package had zero leftovers).
+- Status docs refreshed: BUILD_STATUS (module tree real/attached/metadata-only, 0.2.0/2), PRODUCT_READINESS_CHECKLIST (SW-BUILD-06, SW-DUR-08 counts), CHANGELOG (this section), SHIP_BACKLOG (P4 done + G1–G6), FEATURE_AUDIT (C-07/D3 engine rows), product-modes.md §5/§6 (D6), llama-cpp.md §1/§10 (stripped-packaged digests), threat-model.md (mllm impersonation residual).
 
 ---
 

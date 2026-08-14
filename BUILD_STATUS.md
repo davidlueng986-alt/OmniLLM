@@ -22,10 +22,10 @@
 | Feature Packs | **12/12 modules** + **12/12 hosted on control plane** (`FeaturePackHost` wave-A+B in `RuntimeControlPlane.attach`) |
 | Engine Packs | **5 real adapters + `engines:api`**; attach-after-READY present; dev builds allow all engines native/SDK when wired; **all engines remain UNQUALIFIED** (device evidence is Stage 5) |
 | Native engine `.so` / NDK sources | **llama.cpp b9999 vendored + LOCKED + real GGUF verified on emulator** (`upstreamLinked=true`; gemma-3-270m-Q8_0.gguf 301MB → 12 completion tokens, logcat `OmniNativeE2E`); LiteRT/MLC/mllm/ORT have **real runtime integrations** (typed SDK bridge / runtime binding / server backend) but no device-verified inference — honest UNQUALIFIED |
-| Durable DB writer | **Claim/commit/session/jobs/model-manager/content-report/tools/secrets/tokens/pairing SQLite-backed** via `ControlPlaneDatabase` + SQLDelight stores in production `RuntimeControlPlane.attach` (observability metrics/traces + binder-level registries remain process-memory) |
+| Durable DB writer | **Claim/commit/session/jobs/model-manager/content-report/tools/secrets/tokens/pairing/client-registrations/assets SQLite-backed** via `ControlPlaneDatabase` + SQLDelight stores in production `RuntimeControlPlane.attach` (C-08b/c: `ClientRegistrations.sq` + epoch singleton, `Assets.sq` hybrid — metadata durable, content bytes on quarantine disk with access-time TTL); observability metrics/traces + stream-session registries remain process-memory |
 | Unit / host tests | `./gradlew test` **BUILD SUCCESSFUL** (2026-08-09 full-suite verification); host unit tests + `RealLlamaUpstreamInstrumentedTest` (**connected test PASS on Pixel_7 AVD**) |
 | Local APK artifacts observed | `app-ui` debug + unsigned release; `companion-sandbox` debug + release under `build/outputs/apk/` (16 KB zip-align OK) |
-| App version line | **0.1.0** / `versionCode` **1** (main + companion via `libs.versions.toml`) |
+| App version line | **0.2.0** / `versionCode` **2** (main + companion via `libs.versions.toml`; bump `a19d535`) |
 | CI workflows | `.github/workflows/ci.yml`, `release.yml` — test + assemble + contract drift + 16 KB + dep edges; local parity `tools/ci/local_ci.{sh,ps1}` |
 | ProGuard / R8 | Keep rules for AIDL + JNI wired; release `isMinifyEnabled=false` until smoke (see `RELEASE_CHECKLIST` §H) |
 | detekt | **Intentionally skipped** (not configured; documented in `tools/ci/README.md`) |
@@ -70,11 +70,11 @@ omnillm-android/
 │
 ├── engines/
 │   ├── api                         # OmniEngine SPI, registry, FakeEngine
-│   ├── llama-cpp                   # Adapter + StubNativeBackend
-│   ├── litert-lm                   # Adapter + StubSdkBackend
-│   ├── mlc-llm                     # Adapter + exploratory runtime stub
-│   ├── mllm                        # Adapter + private server channel stub
-│   └── ort-genai                   # Adapter stub (no ORT/GenAI natives)
+│   ├── llama-cpp                   # Adapter + real JniNativeBackend (vendored b9999)
+│   ├── litert-lm                   # Adapter + real typed SDK backend (C-07: attached live when SDK present)
+│   ├── mlc-llm                     # Adapter + real runtime binding (metadata-only on plane)
+│   ├── mllm                        # Adapter + real server backend (metadata-only on plane; D3 identity probe)
+│   └── ort-genai                   # Adapter + real GenAI backend (C-07: attached live when API present)
 │
 ├── interfaces/
 │   ├── http                        # OpenAPI projection, Ktor loopback gateway
@@ -343,12 +343,12 @@ Ordered by impact on “can run real local inference on device.”
 22. ~~Model manager process-memory~~ → **closed**: `ModelManagerModule.createDurableControlPlane` (installations + revision leases).  
 23. ~~Engine backends missing~~ → **closed (implementation)**: llama b9999 real GGUF; litert/ort/mllm/mlc real runtime bindings; locks LOCKED except mlc (pin). **Device evidence remains open** (Stage 5).  
 24. ~~AIDL spec drift~~ → **closed** (API-20 `cfe003f`): aidl yaml = implementation truth; `extract_aidl.py --check` drift gate added.  
-25. ~~Schema vs `.sq` drift~~ → **closed** (API-40..44 `1c66aff`): 26 tables IMPLEMENTED / 25 PLANNED marked in authority SQL.
+25. ~~Schema vs `.sq` drift~~ → **closed** (API-40..44 `1c66aff`): 26 tables IMPLEMENTED / 25 PLANNED marked in authority SQL; **C-08b/c (`e661a22`/`e8b84ae`/`cfcbdd1`) flipped `assets` + `client_registrations` to IMPLEMENTED** (28/51 + epoch singleton now projected).
 
 ### Open — software residual (not packaging)
 
-6. **SQLDelight is a subset** — **26/51 tables** now projected (claims/commits/sessions/jobs/content-report/tools/secrets/tokens/pairing/model-manager/catalog-trust); remaining 25 marked PLANNED in authority SQL; bootstrap `applySchema=false` path vs full product DB design residual.  
-7. **Process-memory residuals** — observability metrics/traces, binder-level registries (client registrations, stream sessions), modelhub display/link ports.  
+6. **SQLDelight is a subset** — **28/51 tables + `client_registration_epoch` singleton** now projected (claims/commits/sessions/jobs/content-report/tools/secrets/tokens/pairing/model-manager/catalog-trust/client-registrations/assets); remaining 23 marked PLANNED in authority SQL; bootstrap `applySchema=false` path vs full product DB design residual.  
+7. **Process-memory residuals** — observability metrics/traces, stream-session binder registries (client registrations **now durable**, C-08b), modelhub display/link ports.  
 9. **UI depth** — Compose screens/shell exist; **Tools top-level destination still missing** (SW-UI-03); LAN/Routing/Benchmark destinations now exist.  
 18. **Inference depth** — real backends in; **device-verified inference evidence missing** (all cells UNQUALIFIED); stable Playground/HTTP generate on device is Stage 5.
 
