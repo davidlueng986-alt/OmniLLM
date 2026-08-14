@@ -9,7 +9,7 @@
 schemaVersion: 1
 engineId: llama.cpp
 designStatus: BASELINE
-upstreamLockStatus: NOT_LOCKED
+upstreamLockStatus: LOCKED
 qualificationStatus: UNQUALIFIED
 registryExposure: UNKNOWN
 runtimeCapabilityDefault: UNKNOWN
