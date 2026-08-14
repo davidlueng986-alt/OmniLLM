@@ -30,11 +30,8 @@ import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -71,15 +68,18 @@ import androidx.compose.material.icons.filled.Speed
 @Composable
 fun OmniNavHost(
     session: UiSession,
+    router: DeepLinkRouter,
     initialDestination: OmniDestination = OmniDestination.Home,
     modifier: Modifier = Modifier,
 ) {
-    var current by remember { mutableStateOf(initialDestination) }
+    // D24: navigation state lives in the router so warm-start deep links
+    // (onNewIntent) recompose into the new destination.
+    val current = router.current
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
     fun navigate(dest: OmniDestination) {
-        current = dest
+        router.navigate(dest)
         scope.launch { drawerState.close() }
     }
 

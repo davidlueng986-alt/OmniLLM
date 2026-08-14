@@ -67,6 +67,30 @@ sealed class OmniDestination(
         }
 
         /**
+         * Parse a full deep-link URI (`omnillm://app/<path>` or host-style
+         * `https://…/<path>`). D24: warm-start re-navigation (onNewIntent)
+         * shares this resolver with cold start — one validation path,
+         * fail-closed on unknown schemes / routes.
+         */
+        fun fromDeepLinkUri(uri: String?): OmniDestination? {
+            if (uri.isNullOrBlank()) return null
+            val lower = uri.lowercase()
+            val path: String = when {
+                lower.startsWith("omnillm://") ->
+                    stripQueryFragment(uri.substringAfter("//").substringAfter('/', missingDelimiterValue = ""))
+                lower.startsWith("omnillm:") ->
+                    stripQueryFragment(uri.substringAfter("omnillm:"))
+                lower.startsWith("https://") || lower.startsWith("http://") ->
+                    stripQueryFragment(uri.substringAfter("//").substringAfter('/', missingDelimiterValue = ""))
+                else -> return null
+            }
+            return fromDeepLinkPath(path)
+        }
+
+        private fun stripQueryFragment(value: String): String =
+            value.substringBefore('?').substringBefore('#')
+
+        /**
          * Parse deep-link path segments. Only opaque IDs are accepted.
          * Fail closed on unknown routes (INV-018 spirit for navigation).
          */

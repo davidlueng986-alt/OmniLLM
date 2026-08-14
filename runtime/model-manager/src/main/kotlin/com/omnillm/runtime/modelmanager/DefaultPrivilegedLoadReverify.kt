@@ -6,6 +6,7 @@ import com.omnillm.engines.api.PlacementClassLabels
 import com.omnillm.runtime.modelmanager.ports.PrivilegedLoadReverifyPort
 import com.omnillm.runtime.modelmanager.ports.PrivilegedLoadTicket
 import com.omnillm.runtime.modelmanager.ports.PrivilegedReverifyRequest
+import com.omnillm.runtime.modelmanager.supply.SupplyChainHooks
 import java.util.UUID
 import com.omnillm.core.identity.InstallationId as IdentityInstallationId
 
@@ -185,6 +186,37 @@ class DefaultPrivilegedLoadReverify(
                 readyContent = readyContent,
                 signatureChainOk = { false },
                 revocationOk = { false },
+                placementClassFor = { PlacementClassLabels.TRUST_PLACEMENT_REQUIRED },
+            )
+
+        /**
+         * C-14: hooks-backed factory — signature and revocation decisions
+         * consult the LIVE [SupplyChainHooks] surface (bootstrap + catalog
+         * trust). Pre-provisioning (no embedded root) the hooks report no
+         * trust ⇒ identical fail-closed behavior to
+         * [failClosedUntilSupplyWired]; once a root is provisioned and
+         * bootstrapped at control-plane attach, the real checks fire.
+         *
+         * Placement stays `TRUST_PLACEMENT_REQUIRED` until the placement
+         * policy itself is hook-wired (documented conservative step) — the
+         * ticket dimensions are the hook evidence, placement is the policy.
+         */
+        fun hooksBacked(
+            readyContent: ReadyContentPort,
+            supplyChain: SupplyChainHooks,
+            nowEpochMs: () -> Long = { System.currentTimeMillis() },
+        ): DefaultPrivilegedLoadReverify =
+            DefaultPrivilegedLoadReverify(
+                readyContent = readyContent,
+                signatureChainOk = { request ->
+                    supplyChain.isInstalledRevisionSignatureOk(request.modelRevisionId.hex)
+                },
+                revocationOk = { request ->
+                    !supplyChain.isInstalledRevisionRevoked(
+                        request.modelRevisionId.hex,
+                        nowEpochMs(),
+                    )
+                },
                 placementClassFor = { PlacementClassLabels.TRUST_PLACEMENT_REQUIRED },
             )
     }
