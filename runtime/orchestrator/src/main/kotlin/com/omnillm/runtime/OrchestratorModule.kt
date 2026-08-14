@@ -9,6 +9,7 @@ import com.omnillm.runtime.orchestrator.InferenceEnginePort
 import com.omnillm.runtime.orchestrator.Orchestrator
 import com.omnillm.runtime.orchestrator.OrchestratorFactory
 import com.omnillm.runtime.orchestrator.SessionCompatibilityCheck
+import com.omnillm.runtime.requestregistry.CommitLedger
 import com.omnillm.runtime.requestregistry.RequestRegistry
 
 /**
@@ -34,6 +35,12 @@ object OrchestratorModule {
         issuerBootId: String,
         runtimeEpoch: Long,
         clockMonotonic: () -> Long = { System.nanoTime() },
+        /**
+         * Durable commit recovery ledger (C-01). Production control plane
+         * injects the SQLite-backed ledger so INTENT_RECORDED survives restart
+         * (REL-RECOVERY); tests may leave it null (scaffold only).
+         */
+        commitLedger: CommitLedger? = null,
     ): Orchestrator =
         OrchestratorFactory.create(
             registry = registry,
@@ -46,6 +53,7 @@ object OrchestratorModule {
             issuerBootId = issuerBootId,
             runtimeEpoch = runtimeEpoch,
             clockMonotonic = clockMonotonic,
+            commitLedger = commitLedger,
         )
 
     /**

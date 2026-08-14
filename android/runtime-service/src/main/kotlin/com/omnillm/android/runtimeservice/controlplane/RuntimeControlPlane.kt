@@ -20,6 +20,7 @@ import com.omnillm.data.modelstore.ModelStorePort
 import com.omnillm.data.modelstore.StorageLayout
 import com.omnillm.data.persistence.CommitReconcileResult
 import com.omnillm.data.persistence.ControlPlaneDatabase
+import com.omnillm.data.persistence.RequestReconcileResult
 import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.ports.ledger.ControlPlaneWriter
 import com.omnillm.data.persistence.OmniLlmDatabase
@@ -251,21 +252,22 @@ class RuntimeControlPlane private constructor(
     }
 
     /**
-     * REL-RECOVERY: mark unfinished commits RECONCILING, then READY when durable.
-     * Exposed for FGS path that already entered RECOVERING.
+     * REL-RECOVERY: mark unfinished commits + requests RECONCILING, then READY
+     * when durable. Exposed for FGS path that already entered RECOVERING.
+     *
+     * C-08a (D5): the request restart-fence ([reconcileUnfinishedRequests]) is
+     * part of the production recovery path — non-terminal REQUEST rows must not
+     * survive a restart in a stuck state. Fencing is idempotent: SQL/InMemory
+     * implementations skip terminal and already-RECONCILING rows.
      */
     fun finishRecovery(): LifecycleStepResult {
-        val reconcile = runCatching { controlPlaneDb.reconcileUnfinishedCommits() }
-            .getOrElse { t ->
-                Log.e(TAG, "commit reconcile failed", t)
-                return lifecycle.recoveryPartial().also {
-                    Log.w(
-                        TAG,
-                        "RECOVERY_PARTIAL reason=reconcile_failed: ${t.message}",
-                    )
-                }
+        val fences = runRecoveryFences(controlPlaneDb)
+        if (fences == null) {
+            return lifecycle.recoveryPartial().also {
+                Log.w(TAG, "RECOVERY_PARTIAL reason=reconcile_failed")
             }
-        return applyReconcileResult(reconcile)
+        }
+        return applyReconcileResult(fences.first)
     }
 
     private fun applyReconcileResult(reconcile: CommitReconcileResult): LifecycleStepResult {
@@ -310,6 +312,37 @@ class RuntimeControlPlane private constructor(
 
     companion object {
         private const val TAG = "OmniControlPlane"
+
+        /**
+         * C-08a (D5): the full restart fence — commits **then** requests — as
+         * executed by [RuntimeControlPlane.finishRecovery]. JVM-testable (no
+         * Android runtime dependency) so the production recovery path is
+         * covered by unit tests.
+         *
+         * Returns null when any fence failed (fail-closed: recovery must not
+         * proceed READY if open work could not be fenced). Idempotent: a second
+         * call on an already-fenced DB marks zero rows.
+         */
+        fun runRecoveryFences(
+            controlPlaneDb: ControlPlaneDatabase,
+        ): Pair<CommitReconcileResult, RequestReconcileResult>? {
+            val commitReconcile = runCatching { controlPlaneDb.reconcileUnfinishedCommits() }
+                .getOrElse { t ->
+                    logW("commit reconcile failed: ${t.message}")
+                    return null
+                }
+            val requestReconcile = runCatching { controlPlaneDb.reconcileUnfinishedRequests() }
+                .getOrElse { t ->
+                    logW("request reconcile failed: ${t.message}")
+                    return null
+                }
+            return commitReconcile to requestReconcile
+        }
+
+        /** Host unit tests have no android.util.Log runtime — swallow. */
+        private fun logW(msg: String) {
+            runCatching { Log.w(TAG, msg) }
+        }
 
         /**
          * COR-23h: drain live sessions via the SESSION FSM before a runtime
@@ -469,7 +502,11 @@ class RuntimeControlPlane private constructor(
                     clock = clock,
                 )
                 val assetQuarantine = File(appContext.cacheDir, "omnillm-asset-quarantine")
-                val registrations = ClientRegistrationStore()
+                // C-08b: registrations + the global revocation epoch are durable
+                // (SQLDelight under ControlPlaneDatabase; single writer ADR-010).
+                val registrations = ClientRegistrationStore(
+                    durable = controlDb.clientRegistrations,
+                )
                 val streamSessions = StreamSessionRegistry()
                 val planeRef = AtomicReference<RuntimeControlPlane?>(null)
 
@@ -548,6 +585,9 @@ class RuntimeControlPlane private constructor(
                         // ARC-05: inject the plane's own registry instead of the
                         // process-global locator.
                         streamSessions = { streamSessions },
+                        // C-01: orchestrator INTENT must be durable — the same
+                        // SQLite-backed CommitLedger already wired to the registry.
+                        commitLedger = commits,
                     ),
                 )
 
@@ -574,9 +614,12 @@ class RuntimeControlPlane private constructor(
                     lanTlsEndpoint = lanTlsEndpoint,
                     lanBindNetwork = true,
                 )
+                // C-08c hybrid: asset metadata durable (SQLDelight); content
+                // bytes stay in the quarantine dir with TTL enforced on access.
                 val assetBroker = AssetHandleBroker(
                     commandLedger = commands,
                     quarantineDir = assetQuarantine,
+                    durable = controlDb.assetRecords,
                 )
 
                 val plane = RuntimeControlPlane(

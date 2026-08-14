@@ -35,6 +35,10 @@ class ControlPlaneDatabase private constructor(
     val secrets: SqlDelightSecretLedgerStore,
     /** Tool proposals + host result claims (FEAT-TOOLS / ADR-010). */
     val toolProposals: ToolProposalLedgerPorts,
+    /** AIDL/binder ClientRegistration rows + global revocation epoch (C-08b). */
+    val clientRegistrations: ClientRegistrationPorts,
+    /** Asset metadata records (C-08c hybrid; content bytes stay on disk). */
+    val assetRecords: AssetLedgerPorts,
     private val clock: () -> String,
 ) {
     /**
@@ -142,6 +146,8 @@ class ControlPlaneDatabase private constructor(
                 catalogTrust = SqlDelightCatalogTrustStore(database, writerRole),
                 secrets = SqlDelightSecretLedgerStore(database, writerRole),
                 toolProposals = SqlDelightToolProposalStore(database, writerRole),
+                clientRegistrations = SqlDelightClientRegistrationStore(database, writerRole),
+                assetRecords = SqlDelightAssetStore(database, writerRole),
                 clock = clock,
             )
         }

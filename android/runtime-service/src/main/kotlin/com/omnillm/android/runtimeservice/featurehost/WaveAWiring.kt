@@ -78,6 +78,7 @@ import com.omnillm.runtime.orchestrator.OrchestrationRequest
 import com.omnillm.runtime.orchestrator.Orchestrator
 import com.omnillm.runtime.orchestrator.PlanningResult
 import com.omnillm.runtime.requestregistry.RequestRegistry
+import com.omnillm.runtime.requestregistry.CommitLedger
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -144,6 +145,14 @@ object WaveAWiring {
          * hardcoded capacities (512MiB anon / 8GiB file / 64 threads / 1024 FDs).
          */
         val settings: () -> com.omnillm.runtime.policy.SettingsSnapshot? = { null },
+        /**
+         * Durable commit recovery ledger (C-01). Production control plane
+         * injects the SQLite-backed [CommitLedger] so orchestrator
+         * INTENT_RECORDED / outcome rows survive restart (REL-RECOVERY).
+         * Null in unit scaffolds — orchestrator then runs without intent
+         * persistence (existing test behavior unchanged).
+         */
+        val commitLedger: CommitLedger? = null,
     )
 
     fun bootstrapForTest(
@@ -218,6 +227,7 @@ object WaveAWiring {
             health = HealthLookup { HealthSnapshot() },
             issuerBootId = deps.bootId(),
             runtimeEpoch = deps.runtimeEpoch(),
+            commitLedger = deps.commitLedger,
         )
 
         val planner = CandidatePlanner(

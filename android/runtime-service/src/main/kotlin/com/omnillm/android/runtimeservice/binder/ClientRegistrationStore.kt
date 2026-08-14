@@ -2,27 +2,39 @@ package com.omnillm.android.runtimeservice.binder
 
 import com.omnillm.core.canonical.generated.AccessScope
 import com.omnillm.core.contracts.PrincipalId
+import com.omnillm.data.persistence.ClientRegistrationPorts
+import com.omnillm.data.persistence.ClientRegistrationRow
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * In-process ClientRegistration store for AIDL Runtime Binding
+ * ClientRegistration store for AIDL Runtime Binding
  * (CORE-INTERFACE §7, ANDROID-BINDER §3, access-control-catalog).
  *
  * Principal is **observed UID + Android user**, never caller self-reported package.
- * Durable DB projection is TODO; this is the control-plane authority for the
- * runtime process until persistence wires CLIENT_REGISTRATION rows (ADR-010).
+ *
+ * C-08b: when wired with the control-plane SQLDelight backing ([durable]),
+ * registrations + the global revocation epoch are durable across runtime
+ * restart (ADR-010 single writer). Without [durable] the store is process-local
+ * (unit scaffolds and callers that predate the wiring).
  *
  * CLIENT_REGISTRATION states (catalog): PENDING | ACTIVE | SUSPENDED |
  * REVOCATION_REQUESTED | DRAINING | REVOKED | EXPIRED.
  */
-class ClientRegistrationStore {
+class ClientRegistrationStore(
+    /** Durable control-plane backing (C-08b); null keeps legacy in-memory mode. */
+    private val durable: ClientRegistrationPorts? = null,
+) {
 
     private val byHandle = ConcurrentHashMap<String, ClientRegistration>()
     private val revocationEpoch = AtomicLong(0L)
 
-    fun currentRevocationEpoch(): Long = revocationEpoch.get()
+    private fun epoch(): Long = durable?.currentRevocationEpoch() ?: revocationEpoch.get()
+
+    private fun bumpEpoch(): Long = durable?.bumpRevocationEpoch() ?: revocationEpoch.incrementAndGet()
+
+    fun currentRevocationEpoch(): Long = epoch()
 
     /**
      * Issue an ACTIVE registration for [principal] with [scopes].
@@ -50,15 +62,39 @@ class ClientRegistrationStore {
             packageCandidates = principal.packageCandidates,
             grantedScopes = granted,
             state = "ACTIVE",
-            revocationEpochAtIssue = revocationEpoch.get(),
+            revocationEpochAtIssue = epoch(),
             displayName = displayName,
             createdAtEpochMillis = System.currentTimeMillis(),
         )
-        byHandle[handle] = reg
+        if (durable != null) {
+            val now = System.currentTimeMillis()
+            durable.tx.inTransaction {
+                durable.registrations.upsert(
+                    ClientRegistrationRow(
+                        registrationId = reg.registrationHandle,
+                        principalId = reg.principalId.value,
+                        observedUid = reg.callingUid,
+                        userId = reg.userId,
+                        transport = TRANSPORT_AIDL,
+                        state = reg.state,
+                        scopes = reg.grantedScopes,
+                        packageCandidates = reg.packageCandidates,
+                        displayName = reg.displayName,
+                        revocationEpochAtIssue = reg.revocationEpochAtIssue,
+                        createdAtEpochMillis = now,
+                        updatedAtEpochMillis = now,
+                    ),
+                )
+            }
+        } else {
+            byHandle[handle] = reg
+        }
         return reg
     }
 
-    fun find(handle: String): ClientRegistration? = byHandle[handle]
+    fun find(handle: String): ClientRegistration? =
+        durable?.registrations?.findByRegistrationId(handle)?.toModel()
+            ?: byHandle[handle]
 
     /**
      * Resolve registration only when handle exists, UID matches observation,
@@ -68,11 +104,11 @@ class ClientRegistrationStore {
         handle: String,
         observed: ObservedPrincipal,
     ): ClientRegistration? {
-        val reg = byHandle[handle] ?: return null
+        val reg = find(handle) ?: return null
         if (reg.callingUid != observed.callingUid) return null
         if (reg.userId != observed.userId) return null
         if (reg.state != "ACTIVE") return null
-        if (revocationEpoch.get() > reg.revocationEpochAtIssue && reg.state == "ACTIVE") {
+        if (epoch() > reg.revocationEpochAtIssue && reg.state == "ACTIVE") {
             // Epoch fence: treat as revoked until explicit re-issue (INV-017).
             return null
         }
@@ -87,29 +123,61 @@ class ClientRegistrationStore {
     fun requireScope(registration: ClientRegistration, scope: AccessScope): Boolean =
         hasScope(registration, scope)
 
-    /** Bump global revocation epoch and mark all ACTIVE as REVOCATION_REQUESTED. */
+    /** Bump global revocation epoch and mark all ACTIVE/SUSPENDED as REVOKED. */
     fun revokeAll(): Long {
-        val next = revocationEpoch.incrementAndGet()
-        byHandle.replaceAll { _, reg ->
-            if (reg.state == "ACTIVE" || reg.state == "SUSPENDED") {
-                reg.copy(state = "REVOKED")
-            } else {
-                reg
+        val next = bumpEpoch()
+        if (durable != null) {
+            val now = System.currentTimeMillis()
+            durable.tx.inTransaction {
+                for (row in durable.registrations.listAll()) {
+                    if (row.state == "ACTIVE" || row.state == "SUSPENDED") {
+                        durable.registrations.updateState(
+                            row.registrationId,
+                            "REVOKED",
+                            java.time.Instant.ofEpochMilli(now).toString(),
+                        )
+                    }
+                }
+            }
+        } else {
+            byHandle.replaceAll { _, reg ->
+                if (reg.state == "ACTIVE" || reg.state == "SUSPENDED") {
+                    reg.copy(state = "REVOKED")
+                } else {
+                    reg
+                }
             }
         }
         return next
     }
 
     fun revoke(handle: String): Boolean {
+        if (durable != null) {
+            val existing = durable.registrations.findByRegistrationId(handle) ?: return false
+            durable.tx.inTransaction {
+                durable.registrations.updateState(
+                    existing.registrationId,
+                    "REVOKED",
+                    java.time.Instant.ofEpochMilli(System.currentTimeMillis()).toString(),
+                )
+            }
+            bumpEpoch()
+            return true
+        }
         val existing = byHandle[handle] ?: return false
         byHandle[handle] = existing.copy(state = "REVOKED")
         revocationEpoch.incrementAndGet()
         return true
     }
 
-    fun snapshot(): List<ClientRegistration> = byHandle.values.toList()
+    fun snapshot(): List<ClientRegistration> =
+        durable?.registrations?.listAll()?.map { it.toModel() }
+            ?: byHandle.values.toList()
 
     companion object {
+        /** Durable transport label: this store is the AIDL binding authority. */
+        const val TRANSPORT_AIDL: String = "AIDL"
+
         /** APP_CLIENT profile scopes from access-control-catalog.yaml. */
         val APP_CLIENT_DEFAULT_SCOPES: Set<String> = setOf(
             "models.read",
@@ -166,3 +234,18 @@ data class ClientRegistration(
     val displayName: String?,
     val createdAtEpochMillis: Long,
 )
+
+/** Map a durable row back to the binder-facing model (C-08b). */
+private fun ClientRegistrationRow.toModel(): ClientRegistration =
+    ClientRegistration(
+        registrationHandle = registrationId,
+        principalId = PrincipalId.parse(principalId),
+        callingUid = observedUid ?: -1,
+        userId = userId ?: 0,
+        packageCandidates = packageCandidates,
+        grantedScopes = scopes,
+        state = state,
+        revocationEpochAtIssue = revocationEpochAtIssue,
+        displayName = displayName,
+        createdAtEpochMillis = createdAtEpochMillis,
+    )

@@ -1,0 +1,64 @@
+﻿-- Asset metadata durable store (C-08c hybrid).
+-- Authority base: specs/database/omnillm-schema.sql#assets (STATUS: PLANNED -> IMPLEMENTED)
+-- Docs-mirror agent: flip STATUS and port the extension columns below
+-- (resource_version, pin_count) into specs/database/omnillm-schema.sql.
+--
+-- Hybrid design (honest and bounded): asset METADATA (identity, owner, state,
+-- sizes, digests, TTL, pin count) is durable; the content BYTES stay in the
+-- runtime-owned quarantine directory and are referenced by storage_key. After
+-- a restart the record is reloaded and the TTL is enforced at access time
+-- (expired content is refused; state advances to EXPIRED lazily). Bytes are
+-- never stored in SQL.
+
+CREATE TABLE assets (
+  asset_id TEXT NOT NULL PRIMARY KEY,
+  principal_id TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  state TEXT NOT NULL,
+  max_bytes INTEGER NOT NULL CHECK(max_bytes>0),
+  actual_bytes INTEGER,
+  expected_digest TEXT,
+  actual_digest TEXT,
+  content_type_hint TEXT,
+  storage_key TEXT,
+  expires_at TEXT NOT NULL,
+  resource_version INTEGER NOT NULL DEFAULT 1,
+  pin_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+selectByAssetId:
+SELECT asset_id, principal_id, purpose, state, max_bytes, actual_bytes,
+       expected_digest, actual_digest, content_type_hint, storage_key,
+       expires_at, resource_version, pin_count, created_at, updated_at
+FROM assets
+WHERE asset_id = ?;
+
+listAll:
+SELECT asset_id, principal_id, purpose, state, max_bytes, actual_bytes,
+       expected_digest, actual_digest, content_type_hint, storage_key,
+       expires_at, resource_version, pin_count, created_at, updated_at
+FROM assets
+ORDER BY created_at ASC;
+
+upsertAsset:
+INSERT INTO assets(
+  asset_id, principal_id, purpose, state, max_bytes, actual_bytes,
+  expected_digest, actual_digest, content_type_hint, storage_key,
+  expires_at, resource_version, pin_count, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(asset_id) DO UPDATE SET
+  principal_id = excluded.principal_id,
+  purpose = excluded.purpose,
+  state = excluded.state,
+  max_bytes = excluded.max_bytes,
+  actual_bytes = excluded.actual_bytes,
+  expected_digest = excluded.expected_digest,
+  actual_digest = excluded.actual_digest,
+  content_type_hint = excluded.content_type_hint,
+  storage_key = excluded.storage_key,
+  expires_at = excluded.expires_at,
+  resource_version = excluded.resource_version,
+  pin_count = excluded.pin_count,
+  updated_at = excluded.updated_at;

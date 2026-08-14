@@ -17,6 +17,8 @@ import com.omnillm.core.contracts.IdempotencyKey
 import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniErrorCode
 import com.omnillm.data.modelstore.MaterializeBounds
+import com.omnillm.data.persistence.AssetLedgerPorts
+import com.omnillm.data.persistence.AssetRecordRow
 import com.omnillm.runtime.requestregistry.ClaimOutcome
 import com.omnillm.runtime.requestregistry.CommandLedger
 import java.io.File
@@ -32,11 +34,19 @@ import java.util.concurrent.atomic.AtomicBoolean
  * owner/TTL/READY/pin semantics as HTTP AssetHandle.
  *
  * No filesystem paths are exposed on the wire (ASSET invariant).
+ *
+ * C-08c hybrid durability: when [durable] (control-plane SQLDelight ledger) is
+ * present, asset METADATA rows survive restart; content BYTES stay in
+ * [quarantineDir] on disk (never in SQL) and the TTL is enforced at access
+ * time — expired content is refused and the record advances to EXPIRED lazily.
+ * Records are reloaded from the ledger at construction.
  */
 class AssetHandleBroker(
     private val commandLedger: CommandLedger,
     private val quarantineDir: File,
     private val bounds: MaterializeBounds = MaterializeBounds.DEFAULT,
+    /** C-08c: durable metadata backing (ADR-010 single writer); null = legacy in-memory. */
+    private val durable: AssetLedgerPorts? = null,
 ) {
     private val assets = ConcurrentHashMap<String, AssetRecord>()
     private val lock = Any()
@@ -44,6 +54,11 @@ class AssetHandleBroker(
     init {
         if (!quarantineDir.exists()) {
             quarantineDir.mkdirs()
+        }
+        if (durable != null) {
+            for (row in durable.assets.listAll()) {
+                assets[row.assetId] = row.toAssetRecord()
+            }
         }
     }
 
@@ -156,6 +171,7 @@ class AssetHandleBroker(
             succeedCommand(commandId, assetIdRaw)
             return toInfo(prev)
         }
+        persist(record)
         succeedCommand(commandId, assetIdRaw)
         return toInfo(record)
     }
@@ -528,7 +544,39 @@ class AssetHandleBroker(
             val cur = assets[assetId] ?: return null
             val next = transform(cur)
             assets[assetId] = next
+            persist(next)
             return next
+        }
+    }
+
+    /**
+     * C-08c: persist the metadata row on every mutation. Content bytes are
+     * never written to SQL — [AssetRecord.materializePath] (quarantine file)
+     * is referenced by storageKey only.
+     */
+    private fun persist(record: AssetRecord) {
+        val durable = durable ?: return
+        val now = System.currentTimeMillis()
+        durable.tx.inTransaction {
+            durable.assets.upsert(
+                AssetRecordRow(
+                    assetId = record.assetId,
+                    ownerPrincipalId = record.ownerPrincipalId,
+                    purpose = record.purpose,
+                    state = record.state,
+                    maxBytes = record.maxBytes,
+                    bytes = record.bytes,
+                    expectedSha256 = record.expectedSha256,
+                    sha256 = record.sha256,
+                    contentTypeHint = record.contentTypeHint,
+                    storageKey = record.materializePath,
+                    expiresAtEpochMillis = record.expiresAtEpochMillis,
+                    resourceVersion = record.resourceVersion,
+                    pinCount = record.pinCount,
+                    createdAtEpochMillis = record.createdAtEpochMillis,
+                    updatedAtEpochMillis = now,
+                ),
+            )
         }
     }
 
@@ -686,3 +734,22 @@ data class AssetRecord(
     val pinCount: Int,
     val createdAtEpochMillis: Long,
 )
+
+/** Map a durable metadata row back to the broker's working record (C-08c). */
+private fun AssetRecordRow.toAssetRecord(): AssetRecord =
+    AssetRecord(
+        assetId = assetId,
+        ownerPrincipalId = ownerPrincipalId,
+        purpose = purpose,
+        maxBytes = maxBytes,
+        contentTypeHint = contentTypeHint,
+        expectedSha256 = expectedSha256,
+        state = state,
+        bytes = bytes,
+        sha256 = sha256,
+        expiresAtEpochMillis = expiresAtEpochMillis,
+        resourceVersion = resourceVersion,
+        materializePath = storageKey,
+        pinCount = pinCount,
+        createdAtEpochMillis = createdAtEpochMillis,
+    )
