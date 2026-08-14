@@ -123,6 +123,31 @@ tasks.register("toolsCodegen") {
 }
 
 // ---------------------------------------------------------------------------
+// llama.cpp stripped-packaged digest gate (BLD-D2 / ENGINE-LLAMACPP §4)
+// Fail closed: the release APK's stripped libomnillm_llama.so per ABI must
+// match engines/llama-cpp/UPSTREAM.lock artifactDigest (variant
+// "stripped-packaged"). Also re-asserts the D1 build-info pin (upstream
+// commit embedded). APK source: app-ui release APK, or the AGP
+// stripped_native_libs intermediates when no APK is assembled yet.
+// ---------------------------------------------------------------------------
+val checkLlamaArtifactDigest by tasks.registering(Exec::class) {
+    group = "verification"
+    description =
+        "Fail when stripped-packaged libomnillm_llama.so digests drift from engines/llama-cpp/UPSTREAM.lock (D1/D2)"
+    workingDir = rootDir
+    commandLine(
+        pythonExecutable(),
+        "tools/ci/verify_llama_digest.py",
+        "--repo-root",
+        rootDir.absolutePath,
+    )
+    inputs.file("tools/ci/verify_llama_digest.py")
+    inputs.file("engines/llama-cpp/UPSTREAM.lock")
+    // Not hard-depended on :android:app-ui:assembleRelease: the gate must be
+    // able to fail fast when the APK is absent (missing artifact is a failure).
+}
+
+// ---------------------------------------------------------------------------
 // Native 16 KB packaging gates (ANDROID-NATIVE / ANDROID-16KB)
 // Fail closed: no .so at all is a build break (missing packaged natives), and
 // misaligned .so also fail (see tools/ci/check_elf_16kb_alignment.py).
@@ -173,6 +198,8 @@ tasks.register("check") {
     // BLD-13: aggregate the native packaging proof (libomnillm_llama.so for
     // arm64-v8a + x86_64) so root `check` fails closed when natives are missing.
     dependsOn(":android:native:verifyNativeLibsPresent")
+    // BLD-D2: stripped-packaged llama.cpp digest lock gate.
+    dependsOn(checkLlamaArtifactDigest)
 }
 
 // ---------------------------------------------------------------------------
