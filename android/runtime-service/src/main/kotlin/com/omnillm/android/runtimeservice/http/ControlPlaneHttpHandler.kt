@@ -227,7 +227,7 @@ class ControlPlaneHttpHandler(
         enforceAccess(principal, "list-models", AccessScope.models_read)?.let { return it }
         // COR-23a: real cursor pagination — pageToken is honored, never ignored.
         val all = modelCatalog()
-        val from = decodePageCursor(pageToken)
+        val from = decodePageCursor(CURSOR_PREFIX_MODELS, pageToken)
             ?: return HttpHandlerResult.Err(
                 OmniError.INVALID_REQUEST(message = "malformed page token"),
             )
@@ -241,7 +241,7 @@ class ControlPlaneHttpHandler(
         }
         val page = all.drop(from).take(MODELS_PAGE_SIZE)
         val nextToken = if (from + page.size < all.size) {
-            encodePageCursor(from + page.size)
+            encodePageCursor(CURSOR_PREFIX_MODELS, from + page.size)
         } else {
             null
         }
@@ -257,15 +257,16 @@ class ControlPlaneHttpHandler(
     }
 
     /**
-     * Opaque cursor: `base64url("models-v1:<index>")`. Unparseable tokens fail
+     * Opaque cursor: `base64url("<prefix>:<index>")`. Unparseable tokens fail
      * closed with INVALID_REQUEST (never silently treated as page one).
+     * Prefixes isolate collections so a token can never page another list.
      */
-    private fun encodePageCursor(index: Int): String {
-        val raw = "models-v1:$index".toByteArray(Charsets.UTF_8)
+    private fun encodePageCursor(prefix: String, index: Int): String {
+        val raw = "$prefix:$index".toByteArray(Charsets.UTF_8)
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw)
     }
 
-    private fun decodePageCursor(token: String?): Int? {
+    private fun decodePageCursor(prefix: String, token: String?): Int? {
         if (token == null || token.isBlank()) return 0
         val raw = try {
             Base64.getUrlDecoder().decode(token)
@@ -273,10 +274,59 @@ class ControlPlaneHttpHandler(
             return null
         }
         val text = String(raw, Charsets.UTF_8)
-        if (!text.startsWith("models-v1:")) return null
-        val index = text.removePrefix("models-v1:").toIntOrNull() ?: return null
+        if (!text.startsWith("$prefix:")) return null
+        val index = text.removePrefix("$prefix:").toIntOrNull() ?: return null
         if (index < 0) return null
         return index
+    }
+
+    /**
+     * D23c: shared cursor pagination for the other paged collections. The
+     * source is sorted by id so page slices are stable across calls.
+     * Malformed tokens fail closed with INVALID_REQUEST; cursors beyond the
+     * collection fail closed with CURSOR_GONE (mirrors listModels).
+     */
+    private data class CursorSlice<T>(
+        val items: List<T>,
+        val nextPageToken: String?,
+        val error: HttpHandlerResult<Nothing>? = null,
+    )
+
+    private fun <T> cursorSlice(
+        prefix: String,
+        pageToken: String?,
+        items: List<T>,
+        pageSize: Int,
+        idOf: (T) -> String,
+    ): CursorSlice<T> {
+        val sorted = items.sortedBy(idOf)
+        val from = decodePageCursor(prefix, pageToken)
+            ?: return CursorSlice(
+                items = emptyList(),
+                nextPageToken = null,
+                error = HttpHandlerResult.Err(
+                    OmniError.INVALID_REQUEST(message = "malformed page token"),
+                ),
+            )
+        if (from > sorted.size) {
+            return CursorSlice(
+                items = emptyList(),
+                nextPageToken = null,
+                error = HttpHandlerResult.Err(
+                    OmniError.CURSOR_GONE(
+                        message = "page cursor beyond collection",
+                        details = mapOf("cursor" to from.toString()),
+                    ),
+                ),
+            )
+        }
+        val page = sorted.drop(from).take(pageSize)
+        val next = if (from + page.size < sorted.size) {
+            encodePageCursor(prefix, from + page.size)
+        } else {
+            null
+        }
+        return CursorSlice(items = page, nextPageToken = next)
     }
 
     // ----- Inference ---------------------------------------------------------
@@ -1600,10 +1650,21 @@ class ControlPlaneHttpHandler(
         pageToken: String?,
     ): HttpHandlerResult<JobPageDto> {
         enforceAccess(principal, "read-own-jobs", AccessScope.jobs_read_own)?.let { return it }
-        val items = jobManager.listOwn(PrincipalId.parse(principal.principalId)).map { toJobInfo(it) }
+        val slice = cursorSlice(
+            CURSOR_PREFIX_JOBS,
+            pageToken,
+            jobManager.listOwn(PrincipalId.parse(principal.principalId)).map { toJobInfo(it) },
+            PAGE_SIZE,
+            idOf = { it.jobId },
+        )
+        slice.error?.let { return it }
         // API-07: JobPage requires snapshot_version — monotonic runtime epoch.
         return HttpHandlerResult.Ok(
-            JobPageDto(items = items, snapshotVersion = resourceVersion()),
+            JobPageDto(
+                items = slice.items,
+                nextPageToken = slice.nextPageToken,
+                snapshotVersion = resourceVersion(),
+            ),
         )
     }
 
@@ -1782,8 +1843,22 @@ class ControlPlaneHttpHandler(
             }
         }
         val items = lanItems ?: clients.values.toList()
+        // D23c: real cursor pagination (mirrors listModels) — pageToken honored,
+        // deterministic sort by client_id.
+        val slice = cursorSlice(
+            CURSOR_PREFIX_CLIENTS,
+            pageToken,
+            items,
+            PAGE_SIZE,
+            idOf = { it.clientId },
+        )
+        slice.error?.let { return it }
         return HttpHandlerResult.Ok(
-            ClientPageDto(items = items, snapshotVersion = resourceVersion()),
+            ClientPageDto(
+                items = slice.items,
+                nextPageToken = slice.nextPageToken,
+                snapshotVersion = resourceVersion(),
+            ),
         )
     }
 
@@ -2435,9 +2510,23 @@ class ControlPlaneHttpHandler(
                 lastSeenAt = it.lastSeenAt?.toString(),
             )
         }
+        // D23c: real cursor pagination (mirrors listModels) — pageToken honored,
+        // deterministic sort by token_id.
+        val slice = cursorSlice(
+            CURSOR_PREFIX_TOKENS,
+            pageToken,
+            items,
+            PAGE_SIZE,
+            idOf = { it.tokenId },
+        )
+        slice.error?.let { return it }
         // API-07: TokenPage requires snapshot_version — monotonic runtime epoch.
         return HttpHandlerResult.Ok(
-            TokenPageDto(items = items, snapshotVersion = resourceVersion()),
+            TokenPageDto(
+                items = slice.items,
+                nextPageToken = slice.nextPageToken,
+                snapshotVersion = resourceVersion(),
+            ),
         )
     }
 
@@ -2737,6 +2826,15 @@ class ControlPlaneHttpHandler(
 
         /** COR-23a: listModels page size (cursor-paginated). */
         const val MODELS_PAGE_SIZE: Int = 50
+
+        /** D23c: shared page size for the cursor-paginated token/job/client lists. */
+        const val PAGE_SIZE: Int = 50
+
+        /** D23c: opaque cursor prefixes — one per collection (never cross-page). */
+        const val CURSOR_PREFIX_MODELS: String = "models-v1"
+        const val CURSOR_PREFIX_TOKENS: String = "tokens-v1"
+        const val CURSOR_PREFIX_JOBS: String = "jobs-v1"
+        const val CURSOR_PREFIX_CLIENTS: String = "clients-v1"
 
         /** API-10: LAN pairing challenge_id is a client-generated UUID. */
         internal val CLAIM_UUID =
