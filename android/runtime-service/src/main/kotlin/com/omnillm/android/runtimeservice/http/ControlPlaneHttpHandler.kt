@@ -461,12 +461,16 @@ class ControlPlaneHttpHandler(
                                         // No token accounting exists on the control-plane
                                         // stream API — honest zeros, never invented counts.
                                         usage = UsageDto(),
-                                        omnillm = OmniExecutionInfoDto(
+                                        // D23e: honest omission — when the engine exposed
+                                        // no routing facts the omnillm object is omitted
+                                        // entirely (never a partial fabricated object).
+                                        omnillm = OmniExecutionInfoDto.ofFactsOrNull(
                                             requestId = requestId,
                                             actualModelRevisionId = handle.actualModelRevisionId,
                                             engineBuildId = handle.engineBuildId,
                                             backend = handle.backend,
                                             degradations = handle.degradedReasons,
+                                            evidenceLabel = null,
                                         ),
                                     ),
                                 )

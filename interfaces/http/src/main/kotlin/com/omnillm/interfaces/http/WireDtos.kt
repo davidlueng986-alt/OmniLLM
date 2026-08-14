@@ -190,6 +190,15 @@ data class UsageDto(
  * OpenAPI `OmniExecutionInfo` (:2179-2209) — required on chat/embedding
  * responses. request_id is always populated; routing facts are omitted
  * (not fabricated) when the engine does not expose them.
+ *
+ * D23e honest-omission rule: the spec marks actual_model_revision_id /
+ * engine_build_id / backend as REQUIRED, but the engine is sometimes silent
+ * and fabricating placeholders would be dishonest. Per [ofFactsOrNull], an
+ * engine-silent response OMITS the whole object (nullable [ChatCompletionResponseDto.omnillm]
+ * serializes as absent), so the wire never carries a schema-invalid partial
+ * object and never invents facts. Spec amendment suggestion (for the specs
+ * agent): make the three fields — and/or the object — conditional on the
+ * engine actually reporting them.
  */
 @Serializable
 data class OmniExecutionInfoDto(
@@ -199,11 +208,50 @@ data class OmniExecutionInfoDto(
     val backend: String? = null,
     val degradations: List<String> = emptyList(),
     @SerialName("evidence_label") val evidenceLabel: EvidenceLabel? = null,
-)
+) {
+    companion object {
+        /**
+         * D23e: honest omission — returns null when the engine exposed NO
+         * routing facts (nothing honest to report). Callers embed the result
+         * in the response DTO; null → the object is omitted from the wire
+         * entirely. When facts exist, exactly those facts are carried and the
+         * rest stay absent (never fabricated).
+         */
+        fun ofFactsOrNull(
+            requestId: String,
+            actualModelRevisionId: String?,
+            engineBuildId: String?,
+            backend: String?,
+            degradations: List<String>,
+            evidenceLabel: EvidenceLabel?,
+        ): OmniExecutionInfoDto? =
+            if (actualModelRevisionId == null &&
+                engineBuildId == null &&
+                backend == null &&
+                degradations.isEmpty() &&
+                evidenceLabel == null
+            ) {
+                null
+            } else {
+                OmniExecutionInfoDto(
+                    requestId = requestId,
+                    actualModelRevisionId = actualModelRevisionId,
+                    engineBuildId = engineBuildId,
+                    backend = backend,
+                    degradations = degradations,
+                    evidenceLabel = evidenceLabel,
+                )
+            }
+    }
+}
 
 /**
  * API-07: ChatCompletionResponse requires usage + omnillm (:2210-2261).
  * additionalProperties:false — no extra envelope fields.
+ *
+ * D23e: [omnillm] is nullable — an engine-silent response omits the object
+ * entirely (honest omission) instead of emitting a schema-invalid partial
+ * object; see [OmniExecutionInfoDto.ofFactsOrNull].
  */
 @Serializable
 data class ChatCompletionResponseDto(
@@ -213,7 +261,7 @@ data class ChatCompletionResponseDto(
     val model: String,
     val choices: List<ChatCompletionChoiceDto>,
     val usage: UsageDto = UsageDto(),
-    val omnillm: OmniExecutionInfoDto,
+    val omnillm: OmniExecutionInfoDto? = null,
 )
 
 @Serializable
@@ -226,6 +274,7 @@ data class EmbeddingDataDto(
 /**
  * API-07: EmbeddingResponse requires usage + omnillm (:2262-2311).
  * Embedding usage schema only requires prompt_tokens/total_tokens.
+ * D23e: [omnillm] nullable — honest omission when the engine is silent.
  */
 @Serializable
 data class EmbeddingResponseDto(
@@ -234,7 +283,7 @@ data class EmbeddingResponseDto(
     val model: String,
     val data: List<EmbeddingDataDto>,
     val usage: UsageDto = UsageDto(),
-    val omnillm: OmniExecutionInfoDto,
+    val omnillm: OmniExecutionInfoDto? = null,
 )
 
 @Serializable
