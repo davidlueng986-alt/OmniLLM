@@ -27,7 +27,9 @@ import com.omnillm.interfaces.admin.AdminCommandResult
 import com.omnillm.interfaces.admin.AdminJobEventBatch
 import com.omnillm.interfaces.admin.AdminJobEventSink
 import com.omnillm.interfaces.admin.LocalUiPrincipal
+import com.omnillm.runtime.policy.ConfigurationCatalog
 import com.omnillm.runtime.policy.SettingValue
+import com.omnillm.runtime.policy.acl.PrincipalRateLimiter
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -37,14 +39,55 @@ import kotlinx.coroutines.runBlocking
  * Never returned from the exported RuntimeBindingService.
  * All durable mutations return [CommandResult] (no void success claims).
  * Stream ACK / closeSubscription are delivery-control, not domain mutations.
+ *
+ * C-11: every public AIDL entry runs inside [withAdmission] — the single
+ * LOCAL_UI principal takes a rate token + concurrency lease
+ * (security.principalRpsLimit / security.principalConcurrentRequests;
+ * 0 = disabled fail-open). The lease is released when the call returns or
+ * throws (inline try/finally — binder has no response-completion hook).
  */
 class OmniAdminFacade(
     private val context: Context,
+    /**
+     * C-11: hermetic limiter for tests; the default resolves limits from the
+     * effective settings via the attached control plane.
+     */
+    rateLimiter: PrincipalRateLimiter? = null,
 ) : IOmniAdmin.Stub() {
 
     private val deathRecipients = java.util.concurrent.ConcurrentHashMap<String, IBinder.DeathRecipient>()
 
-    override fun getSnapshot(): OmniAdminSnapshot {
+    /** C-11: LOCAL_UI admission limiter (rate + concurrency leases). */
+    private val admission: PrincipalRateLimiter = rateLimiter ?: PrincipalRateLimiter(
+        rpsLimit = { securityLimits().principalRpsLimit },
+        concurrencyLimit = { securityLimits().principalConcurrentRequests },
+    )
+
+    private fun securityLimits(): ConfigurationCatalog.SecurityLimits =
+        RuntimeControlPlane.get()?.policyManager
+            ?.let { ConfigurationCatalog.securityLimits(it.settingsSnapshot()) }
+            ?: ConfigurationCatalog.securityLimits(null)
+
+    /**
+     * C-11: admission wrapper for every public AIDL entry. Inline + try/finally
+     * so both direct returns and exceptions release the concurrency lease.
+     */
+    private inline fun <T> withAdmission(block: () -> T): T {
+        val lease = admission.tryAcquire(LOCAL_UI_ADMISSION_KEY)
+            ?: throw RemoteException(
+                BinderErrors.omniError(
+                    OmniErrorCode.RATE_LIMITED,
+                    "LOCAL_UI admission rate/concurrency limit exceeded",
+                ).message,
+            )
+        try {
+            return block()
+        } finally {
+            lease.release()
+        }
+    }
+
+    override fun getSnapshot(): OmniAdminSnapshot = withAdmission {
         val principal = assertLocalUi()
         val api = requireApi()
         val domain = api.getSnapshot(principal)
@@ -69,12 +112,12 @@ class OmniAdminFacade(
         return AdminAidlMapper.toAidlSnapshot(domain, models)
     }
 
-    override fun getSettings(): OmniSettingsSnapshot {
+    override fun getSettings(): OmniSettingsSnapshot = withAdmission {
         val principal = assertLocalUi()
         return AdminAidlMapper.toAidlSettings(requireApi().getSettings(principal))
     }
 
-    override fun applySettings(patch: OmniSettingsPatch?): CommandResult {
+    override fun applySettings(patch: OmniSettingsPatch?): CommandResult = withAdmission {
         val principal = assertLocalUi()
         val command = AdminAidlMapper.toDomainCommand(patch?.command)
             ?: return failed(
@@ -102,7 +145,7 @@ class OmniAdminFacade(
         )
     }
 
-    override fun startJob(spec: OmniJobSpec?): OmniJobInfo {
+    override fun startJob(spec: OmniJobSpec?): OmniJobInfo = withAdmission {
         val principal = assertLocalUi()
         ensureRuntimeAccepting()
         val domainSpec = AdminAidlMapper.toDomainJobSpec(spec)
@@ -132,7 +175,7 @@ class OmniAdminFacade(
         }
     }
 
-    override fun getJob(jobId: String?): OmniJobInfo {
+    override fun getJob(jobId: String?): OmniJobInfo = withAdmission {
         val principal = assertLocalUi()
         return when (val result = requireApi().getJob(principal, jobId.orEmpty())) {
             is OmniResult.Ok -> AdminAidlMapper.toAidlJobInfo(result.value)
@@ -142,7 +185,7 @@ class OmniAdminFacade(
         }
     }
 
-    override fun cancelJob(jobId: String?, command: OmniCommandRequest?): CommandResult {
+    override fun cancelJob(jobId: String?, command: OmniCommandRequest?): CommandResult = withAdmission {
         val principal = assertLocalUi()
         val domainCommand = AdminAidlMapper.toDomainCommand(command)
             ?: return failed(
@@ -154,14 +197,14 @@ class OmniAdminFacade(
         )
     }
 
-    override fun queryCommand(commandId: String?): CommandResult {
+    override fun queryCommand(commandId: String?): CommandResult = withAdmission {
         val principal = assertLocalUi()
         return AdminAidlMapper.toAidlCommandResult(
             requireApi().queryCommand(principal, commandId.orEmpty()),
         )
     }
 
-    override fun observeJobs(cursor: String?, credit: Int, observer: IJobObserver?): String {
+    override fun observeJobs(cursor: String?, credit: Int, observer: IJobObserver?): String = withAdmission {
         val principal = assertLocalUi()
         if (observer == null) {
             throw RemoteException(
@@ -204,21 +247,23 @@ class OmniAdminFacade(
     }
 
     override fun ackJobEvents(subscriptionId: String?, streamEpoch: Long, eventToExclusive: Long) {
-        val principal = assertLocalUi()
         // Delivery control ??not a durable domain mutation (no CommandResult on AIDL).
-        val result = requireApi().ackJobEvents(
-            principal,
-            subscriptionId.orEmpty(),
-            streamEpoch,
-            eventToExclusive,
-        )
-        if (result is OmniResult.Err) {
-            // Fail closed silently for unknown sub after death; otherwise surface via RemoteException
-            // only for clear client bugs (epoch mismatch).
-            if (result.error.code != OmniErrorCode.NOT_FOUND) {
-                throw RemoteException(
-                    AdminAidlMapper.toAidlError(result.error).message ?: result.error.code.code,
-                )
+        withAdmission {
+            val principal = assertLocalUi()
+            val result = requireApi().ackJobEvents(
+                principal,
+                subscriptionId.orEmpty(),
+                streamEpoch,
+                eventToExclusive,
+            )
+            if (result is OmniResult.Err) {
+                // Fail closed silently for unknown sub after death; otherwise surface via RemoteException
+                // only for clear client bugs (epoch mismatch).
+                if (result.error.code != OmniErrorCode.NOT_FOUND) {
+                    throw RemoteException(
+                        AdminAidlMapper.toAidlError(result.error).message ?: result.error.code.code,
+                    )
+                }
             }
         }
     }
@@ -227,7 +272,10 @@ class OmniAdminFacade(
         val principal = assertLocalUi()
         val id = subscriptionId.orEmpty()
         unlinkDeath(id)
-        requireApi().closeSubscription(principal, id)
+        // C-11: delivery-control op also admits/releases (bounded UI traffic).
+        withAdmission {
+            requireApi().closeSubscription(principal, id)
+        }
     }
 
     override fun reviewContentReport(
@@ -236,7 +284,7 @@ class OmniAdminFacade(
         warningPolicyVersion: String?,
         localUserProfileId: String?,
         command: OmniCommandRequest?,
-    ): OmniConsentGrant {
+    ): OmniConsentGrant = withAdmission {
         val principal = assertLocalUi()
         ensureRuntimeAccepting()
         val domainCommand = AdminAidlMapper.toDomainCommand(command)
@@ -308,7 +356,7 @@ class OmniAdminFacade(
         reportId: String?,
         consentGrantId: String?,
         command: OmniCommandRequest?,
-    ): CommandResult {
+    ): CommandResult = withAdmission {
         val principal = assertLocalUi()
         ensureRuntimeAccepting()
         val domainCommand = AdminAidlMapper.toDomainCommand(command)
@@ -352,7 +400,7 @@ class OmniAdminFacade(
         }
     }
 
-    override fun getContentReportReceipt(reportId: String?): OmniContentReportReceipt {
+    override fun getContentReportReceipt(reportId: String?): OmniContentReportReceipt = withAdmission {
         val principal = assertLocalUi()
         if (reportId.isNullOrBlank()) {
             throw RemoteException(BinderErrors.notFound("content report receipt not found").message)
@@ -378,7 +426,7 @@ class OmniAdminFacade(
         requestId: String?,
         idempotencyKey: String?,
         command: OmniCommandRequest?,
-    ): CommandResult {
+    ): CommandResult = withAdmission {
         val principal = assertLocalUi()
         ensureRuntimeAccepting()
         val domainCommand = AdminAidlMapper.toDomainCommand(command)
@@ -445,7 +493,7 @@ class OmniAdminFacade(
         }
     }
 
-    override fun queryPlaygroundRequest(requestId: String?): CommandResult {
+    override fun queryPlaygroundRequest(requestId: String?): CommandResult = withAdmission {
         val principal = assertLocalUi()
         val reqId = requestId?.takeIf { it.isNotBlank() }
             ?: return failed("", OmniError.INVALID_REQUEST(message = "requestId required"))
@@ -469,7 +517,7 @@ class OmniAdminFacade(
     override fun cancelPlaygroundRequest(
         requestId: String?,
         command: OmniCommandRequest?,
-    ): CommandResult {
+    ): CommandResult = withAdmission {
         val principal = assertLocalUi()
         val domainCommand = AdminAidlMapper.toDomainCommand(command)
             ?: return failed(
@@ -519,7 +567,7 @@ class OmniAdminFacade(
         requestId: String?,
         idempotencyKey: String?,
         command: OmniCommandRequest?,
-    ): CommandResult {
+    ): CommandResult = withAdmission {
         val principal = assertLocalUi()
         ensureRuntimeAccepting()
         val domainCommand = AdminAidlMapper.toDomainCommand(command)
@@ -579,7 +627,7 @@ class OmniAdminFacade(
     override fun getInferenceCapabilityState(
         capabilityId: String?,
         modelRevisionId: String?,
-    ): String {
+    ): String = withAdmission {
         assertLocalUi()
         val capRaw = capabilityId?.takeIf { it.isNotBlank() } ?: return "UNKNOWN"
         val model = modelRevisionId.orEmpty()
@@ -652,7 +700,7 @@ class OmniAdminFacade(
         installationId: String?,
         jobId: String?,
         command: OmniCommandRequest?,
-    ): OmniJobInfo {
+    ): OmniJobInfo = withAdmission {
         assertLocalUi()
         ensureRuntimeAccepting()
         val plane = RuntimeControlPlane.get()
@@ -929,6 +977,14 @@ class OmniAdminFacade(
         AdminAidlMapper.toAidlCommandResult(
             AdminCommandResult.failed(commandId.orEmpty(), error),
         )
+
+    companion object {
+        /**
+         * C-11: the admin facade is same-app LOCAL_UI only (assertLocalUi) —
+         * one quota key for the whole surface.
+         */
+        const val LOCAL_UI_ADMISSION_KEY: String = "local-ui"
+    }
 
     private fun linkObserverDeath(subscriptionId: String, binder: IBinder) {
         val recipient = IBinder.DeathRecipient {

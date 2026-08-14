@@ -1,4 +1,4 @@
-package com.omnillm.runtime.policy
+﻿package com.omnillm.runtime.policy
 
 /**
  * Machine-readable configuration catalog projection
@@ -261,7 +261,7 @@ object ConfigurationCatalog {
             admissionBound = false,
             requiresPlanReservationCommit = false,
             // Research Mode: raw diagnostics + backend selection options.
-            // Off by default — honest capability projection (FTR-03).
+            // Off by default ??honest capability projection (FTR-03).
             defaultValue = SettingValue.BoolValue(false),
         ),
         SettingDefinition(
@@ -351,6 +351,38 @@ object ConfigurationCatalog {
             requiresPlanReservationCommit = false,
             defaultValue = SettingValue.IntValue(DEFAULT_PROBE_DEADLINE_MS),
         ),
+
+        // ----- C-11: principal admission rate limits (SEC-AUTH-NET) ----------
+        // Spec entries for specs/configuration-catalog.yaml are coordinated
+        // with the specs agent (mirror keys + bounds). 0 = disabled (fail-open,
+        // documented: operators who set 0 accept unbounded traffic on that
+        // axis; the default is enforced).
+        SettingDefinition(
+            key = "security.principalRpsLimit",
+            type = SettingType.INTEGER,
+            min = 0.0,
+            max = null,
+            enumValues = null,
+            settingClass = SettingClass.LOCAL_ADMIN,
+            allowedSources = setOf("administrator-policy", "product-default"),
+            clampAllowed = false,
+            admissionBound = false,
+            requiresPlanReservationCommit = false,
+            defaultValue = SettingValue.IntValue(DEFAULT_PRINCIPAL_RPS_LIMIT.toLong()),
+        ),
+        SettingDefinition(
+            key = "security.principalConcurrentRequests",
+            type = SettingType.INTEGER,
+            min = 0.0,
+            max = null,
+            enumValues = null,
+            settingClass = SettingClass.LOCAL_ADMIN,
+            allowedSources = setOf("administrator-policy", "product-default"),
+            clampAllowed = false,
+            admissionBound = false,
+            requiresPlanReservationCommit = false,
+            defaultValue = SettingValue.IntValue(DEFAULT_PRINCIPAL_CONCURRENT_REQUESTS.toLong()),
+        ),
     ).associateBy { it.key }
 
     // ----- Catalog defaults (must match the values the control plane used
@@ -361,6 +393,34 @@ object ConfigurationCatalog {
     const val DEFAULT_THREAD_CAP: Long = 64L
     const val DEFAULT_FD_CAP: Long = 1024L
     const val DEFAULT_PROBE_DEADLINE_MS: Long = 30_000L
+
+    /** C-11: default principal request rate (per second); 0 = disabled. */
+    const val DEFAULT_PRINCIPAL_RPS_LIMIT: Int = 60
+
+    /** C-11: default principal in-flight request quota; 0 = disabled. */
+    const val DEFAULT_PRINCIPAL_CONCURRENT_REQUESTS: Int = 8
+
+    /**
+     * C-11: effective principal admission limits from the settings snapshot.
+     * A limit of 0 disables that dimension (fail-open, documented) ??the
+     * defaults (60 rps / 8 in-flight) are enforced unless explicitly changed.
+     */
+    data class SecurityLimits(
+        val principalRpsLimit: Int = DEFAULT_PRINCIPAL_RPS_LIMIT,
+        val principalConcurrentRequests: Int = DEFAULT_PRINCIPAL_CONCURRENT_REQUESTS,
+    )
+
+    /** Resolve C-11 limits; absent/invalid keys fall back to the defaults. */
+    fun securityLimits(snapshot: SettingsSnapshot?): SecurityLimits {
+        if (snapshot == null) return SecurityLimits()
+        return SecurityLimits(
+            principalRpsLimit = snapshot.values["security.principalRpsLimit"]
+                ?.asLongOrNull()?.coerceAtLeast(0L)?.toInt() ?: DEFAULT_PRINCIPAL_RPS_LIMIT,
+            principalConcurrentRequests = snapshot.values["security.principalConcurrentRequests"]
+                ?.asLongOrNull()?.coerceAtLeast(0L)?.toInt()
+                ?: DEFAULT_PRINCIPAL_CONCURRENT_REQUESTS,
+        )
+    }
 
     /** Effective multi-dimensional governor capacity (ARC-10). */
     data class GovernorCapacities(
@@ -524,7 +584,7 @@ data class HardConstraintContribution(
     }
 }
 
-/** Deterministic merge result (DATA-CONFIG §3, §7). */
+/** Deterministic merge result (DATA-CONFIG 禮3, 禮7). */
 data class EffectiveSetting(
     val key: String,
     val effectiveValue: SettingValue,

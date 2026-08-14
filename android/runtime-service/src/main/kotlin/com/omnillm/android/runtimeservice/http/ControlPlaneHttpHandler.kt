@@ -83,9 +83,11 @@ import com.omnillm.runtime.job.JobManager
 import com.omnillm.runtime.job.JobParameters
 import com.omnillm.runtime.job.JobRecord
 import com.omnillm.runtime.orchestrator.Orchestrator
+import com.omnillm.runtime.policy.ConfigurationCatalog
 import com.omnillm.runtime.policy.PolicyManager
 import com.omnillm.runtime.policy.SettingValue
 import com.omnillm.runtime.policy.acl.AccessControlEnforcer
+import com.omnillm.runtime.policy.acl.PrincipalRateLimiter
 import com.omnillm.runtime.requestregistry.ClaimOutcome
 import com.omnillm.runtime.requestregistry.CommandLedger
 import com.omnillm.runtime.requestregistry.RequestRegistry
@@ -138,6 +140,15 @@ class ControlPlaneHttpHandler(
      * token-scope checks stay (defense in depth).
      */
     private val accessControl: AccessControlEnforcer = AccessControlEnforcer(),
+    /**
+     * C-11: principal request-rate admission (token bucket). The default
+     * resolves limits from the effective settings
+     * (security.principalRpsLimit; 0 = disabled fail-open). Production shares
+     * one limiter with the gateway (GatewayLifecycle) — the gateway enforces
+     * the concurrency dimension, this handler the rate dimension, so a
+     * request is never double-counted. Tests inject a hermetic limiter.
+     */
+    private val rateLimiter: PrincipalRateLimiter? = null,
     private val orchestrator: Orchestrator? = null,
     private val modelCatalog: () -> List<ModelInfoDto> = { emptyList() },
     private val metricSummary: () -> MetricSnapshotDto = {
@@ -178,6 +189,20 @@ class ControlPlaneHttpHandler(
 
     private val assets = ConcurrentHashMap<String, AssetRecord>()
     private val clients = ConcurrentHashMap<String, ClientInfoDto>()
+
+    /**
+     * C-11: rate admission limiter. Default reads the effective settings
+     * (security.principalRpsLimit / security.principalConcurrentRequests);
+     * the handler consumes only RATE tokens — the gateway (when wired) owns
+     * the concurrency leases against the same instance.
+     */
+    private val admission: PrincipalRateLimiter = rateLimiter ?: PrincipalRateLimiter(
+        rpsLimit = { securityLimits().principalRpsLimit },
+        concurrencyLimit = { securityLimits().principalConcurrentRequests },
+    )
+
+    private fun securityLimits(): ConfigurationCatalog.SecurityLimits =
+        ConfigurationCatalog.securityLimits(policyManager.settingsSnapshot())
 
     /**
      * API-16: background pump coroutines drive durable-request execution through
@@ -2680,7 +2705,22 @@ class ControlPlaneHttpHandler(
             )
         ) {
             is OmniResult.Err -> HttpHandlerResult.Err(r.error)
-            is OmniResult.Ok -> null
+            is OmniResult.Ok -> {
+                // C-11: authorized requests consume a principal RATE token
+                // (token bucket; denial -> RATE_LIMITED 429 retryable). The
+                // concurrency dimension lives at the gateway admission (same
+                // limiter instance) — see GatewayLifecycle.
+                if (!admission.tryAcquireRate(principal.principalId)) {
+                    HttpHandlerResult.Err(
+                        OmniError.RATE_LIMITED(
+                            message = "principal request rate limit exceeded",
+                            details = mapOf("principalId" to principal.principalId),
+                        ),
+                    )
+                } else {
+                    null
+                }
+            }
         }
     }
 

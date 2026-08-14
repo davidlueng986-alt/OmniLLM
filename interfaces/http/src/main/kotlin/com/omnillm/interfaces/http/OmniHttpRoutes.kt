@@ -8,6 +8,7 @@ import com.omnillm.interfaces.http.auth.HttpTransportKind
 import com.omnillm.interfaces.http.auth.TokenAuthenticator
 import com.omnillm.interfaces.http.gateway.GatewayConfig
 import com.omnillm.interfaces.http.sse.SseFraming
+import com.omnillm.runtime.policy.acl.PrincipalRateLimiter
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.PartData
@@ -28,11 +29,25 @@ import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.routing
+import io.ktor.util.AttributeKey
 import io.ktor.utils.io.readRemaining
 import kotlinx.io.readByteArray
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.serializer
 import java.io.ByteArrayOutputStream
+
+/**
+ * C-11: per-call admission lease stored on the call by [requirePrincipal]
+ * and released exactly once when the response completes (Ok bodies, errors,
+ * SSE streams, 204s). The lease is a no-op when the gateway was wired
+ * without an admission limiter.
+ */
+private val ADMISSION_LEASE =
+    AttributeKey<PrincipalRateLimiter.Lease>("omnillm-http-admission-lease")
+
+private fun ApplicationCall.releaseAdmission() {
+    attributes.getOrNull(ADMISSION_LEASE)?.release()
+}
 
 /**
  * Ktor routes matching `specs/openapi/omnillm.openapi.yaml`.
@@ -47,9 +62,10 @@ fun Application.installOmniHttpRoutes(
     authenticator: TokenAuthenticator,
     config: GatewayConfig = GatewayConfig(),
     transport: HttpTransportKind = HttpTransportKind.LOOPBACK,
+    admission: PrincipalRateLimiter? = null,
 ) {
     routing {
-        omniHttpRoutes(handler, authenticator, config, transport)
+        omniHttpRoutes(handler, authenticator, config, transport, admission)
     }
 }
 
@@ -68,28 +84,35 @@ fun Route.omniHttpRoutes(
     authenticator: TokenAuthenticator,
     config: GatewayConfig = GatewayConfig(),
     transport: HttpTransportKind = HttpTransportKind.LOOPBACK,
+    /**
+     * C-11: principal concurrency admission (leases released when each
+     * response completes, SSE streams included). Null = disabled (fail-open).
+     * The rate dimension is enforced at the handler's auth entry; this
+     * gateway owns the in-flight quota against the same limiter instance.
+     */
+    admission: PrincipalRateLimiter? = null,
 ) {
     // --- Health (minimal unauth) ---
     get(OpenApiPaths.HEALTH) {
         // operationId: getHealth — security: []
         when (val r = handler.getHealth()) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     // --- Models ---
     get(OpenApiPaths.V1_MODELS) {
-        val principal = call.requirePrincipal("listModels", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("listModels", authenticator, transport, admission) ?: return@get
         when (val r = handler.listModels(principal, call.request.queryParameters["page_token"])) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     // --- Chat ---
     post(OpenApiPaths.V1_CHAT_COMPLETIONS) {
-        val principal = call.requirePrincipal("createChatCompletion", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("createChatCompletion", authenticator, transport, admission) ?: return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
             HttpJson.codec.decodeFromString(OpenAIChatRequestDto.serializer(), bodyText)
@@ -101,8 +124,7 @@ fun Route.omniHttpRoutes(
         val idem = call.request.header("Idempotency-Key")
         if (req.stream) {
             when (val r = handler.createChatCompletionStream(principal, req, rid, idem)) {
-                is SseHandlerResult.PreStreamError -> OmniErrorHttp.respond(
-                    call,
+                is SseHandlerResult.PreStreamError -> call.respondError(
                     r.error,
                     TransportDeliveryGuarantee.HTTP_SSE,
                 )
@@ -110,19 +132,21 @@ fun Route.omniHttpRoutes(
                     val headers = r.headers.toMutableMap()
                     headers.putIfAbsent("X-OmniLLM-Request-Id", r.requestId)
                     SseFraming.writeStream(call, r.events, headers)
+                    // C-11: the SSE stream completed — free the concurrency slot.
+                    call.releaseAdmission()
                 }
             }
         } else {
             when (val r = handler.createChatCompletion(principal, req, rid, idem)) {
                 is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-                is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+                is HttpHandlerResult.Err -> call.respondError(r.error)
             }
         }
     }
 
     // --- Embeddings ---
     post(OpenApiPaths.V1_EMBEDDINGS) {
-        val principal = call.requirePrincipal("createEmbedding", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("createEmbedding", authenticator, transport, admission) ?: return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
             HttpJson.codec.decodeFromString(OpenAIEmbeddingRequestDto.serializer(), bodyText)
@@ -134,13 +158,13 @@ fun Route.omniHttpRoutes(
         val idem = call.request.header("Idempotency-Key")
         when (val r = handler.createEmbedding(principal, req, rid, idem)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     // --- Durable requests ---
     post(OpenApiPaths.OMNI_REQUESTS) {
-        val principal = call.requirePrincipal("createAsyncInferenceRequest", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("createAsyncInferenceRequest", authenticator, transport, admission) ?: return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
             HttpJson.codec.decodeFromString(AsyncInferenceRequestDto.serializer(), bodyText)
@@ -157,55 +181,58 @@ fun Route.omniHttpRoutes(
         }
         when (val r = handler.createAsyncInferenceRequest(principal, req)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status.coerceAtLeast(202), r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     get(OpenApiPaths.OMNI_REQUEST_BY_ID) {
-        val principal = call.requirePrincipal("getRequest", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("getRequest", authenticator, transport, admission) ?: return@get
         val id = call.parameters["requestId"] ?: return@get call.missingPath("requestId")
         when (val r = handler.getRequest(principal, id)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     post(OpenApiPaths.OMNI_REQUEST_CANCEL) {
-        val principal = call.requirePrincipal("cancelRequest", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("cancelRequest", authenticator, transport, admission) ?: return@post
         val id = call.parameters["requestId"] ?: return@post call.missingPath("requestId")
         val cmd = call.receiveCommandOrError() ?: return@post
         when (val r = handler.cancelRequest(principal, id, cmd)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     get(OpenApiPaths.OMNI_REQUEST_EVENTS) {
-        val principal = call.requirePrincipal("streamRequestEvents", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("streamRequestEvents", authenticator, transport, admission) ?: return@get
         val id = call.parameters["requestId"] ?: return@get call.missingPath("requestId")
         val after = call.request.queryParameters["after_seq"]?.toLongOrNull()
         when (val r = handler.streamRequestEvents(principal, id, after)) {
-            is SseHandlerResult.PreStreamError -> OmniErrorHttp.respond(
-                call,
+            is SseHandlerResult.PreStreamError -> call.respondError(
                 r.error,
                 TransportDeliveryGuarantee.HTTP_SSE,
             )
-            is SseHandlerResult.Stream -> SseFraming.writeStream(call, r.events, r.headers)
+            is SseHandlerResult.Stream -> {
+                SseFraming.writeStream(call, r.events, r.headers)
+                // C-11: the SSE stream completed — free the concurrency slot.
+                call.releaseAdmission()
+            }
         }
     }
 
     get(OpenApiPaths.OMNI_COMMAND_BY_ID) {
-        val principal = call.requirePrincipal("getCommand", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("getCommand", authenticator, transport, admission) ?: return@get
         val id = call.parameters["commandId"] ?: return@get call.missingPath("commandId")
         when (val r = handler.getCommand(principal, id)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     // --- Assets ---
     post(OpenApiPaths.OMNI_ASSETS) {
-        val principal = call.requirePrincipal("createAsset", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("createAsset", authenticator, transport, admission) ?: return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
             HttpJson.codec.decodeFromString(AssetCreateRequestDto.serializer(), bodyText)
@@ -215,12 +242,12 @@ fun Route.omniHttpRoutes(
         }
         when (val r = handler.createAsset(principal, req)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status.coerceAtLeast(201), r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     put(OpenApiPaths.OMNI_ASSET_CONTENT) {
-        val principal = call.requirePrincipal("uploadAsset", authenticator, transport) ?: return@put
+        val principal = call.requirePrincipal("uploadAsset", authenticator, transport, admission) ?: return@put
         val id = call.parameters["assetId"] ?: return@put call.missingPath("assetId")
         val length = call.request.header("Content-Length")?.toLongOrNull()
         if (length != null && length > config.maxAssetUploadBytes) {
@@ -339,47 +366,51 @@ fun Route.omniHttpRoutes(
             )
         ) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     post(OpenApiPaths.OMNI_ASSET_COMMIT) {
-        val principal = call.requirePrincipal("commitAsset", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("commitAsset", authenticator, transport, admission) ?: return@post
         val id = call.parameters["assetId"] ?: return@post call.missingPath("assetId")
         val cmd = call.receiveCommandOrError() ?: return@post
         when (val r = handler.commitAsset(principal, id, cmd)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     get(OpenApiPaths.OMNI_ASSET_BY_ID) {
-        val principal = call.requirePrincipal("getAsset", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("getAsset", authenticator, transport, admission) ?: return@get
         val id = call.parameters["assetId"] ?: return@get call.missingPath("assetId")
         when (val r = handler.getAsset(principal, id)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     delete(OpenApiPaths.OMNI_ASSET_BY_ID) {
-        val principal = call.requirePrincipal("deleteAsset", authenticator, transport) ?: return@delete
+        val principal = call.requirePrincipal("deleteAsset", authenticator, transport, admission) ?: return@delete
         val id = call.parameters["assetId"] ?: return@delete call.missingPath("assetId")
         // API-05: OpenAPI DELETE /assets/{assetId} requires a CommandRequest body
         // (idempotency claim) and answers 204 No Content on success.
         val cmd = call.receiveCommandOrError() ?: return@delete
         when (val r = handler.deleteAsset(principal, id, cmd)) {
-            is HttpHandlerResult.Ok -> call.respondText(
-                text = "",
-                status = HttpStatusCode.NoContent,
-            )
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Ok -> {
+                call.respondText(
+                    text = "",
+                    status = HttpStatusCode.NoContent,
+                )
+                // C-11: the response completed — free the principal's slot.
+                call.releaseAdmission()
+            }
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     // --- Jobs ---
     post(OpenApiPaths.OMNI_JOBS) {
-        val principal = call.requirePrincipal("createJob", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("createJob", authenticator, transport, admission) ?: return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
             HttpJson.codec.decodeFromString(JobSpecDto.serializer(), bodyText)
@@ -389,66 +420,66 @@ fun Route.omniHttpRoutes(
         }
         when (val r = handler.createJob(principal, req)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     get(OpenApiPaths.OMNI_JOBS) {
-        val principal = call.requirePrincipal("listOwnJobs", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("listOwnJobs", authenticator, transport, admission) ?: return@get
         when (val r = handler.listOwnJobs(principal, call.request.queryParameters["page_token"])) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     get(OpenApiPaths.OMNI_JOB_BY_ID) {
-        val principal = call.requirePrincipal("getJob", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("getJob", authenticator, transport, admission) ?: return@get
         val id = call.parameters["jobId"] ?: return@get call.missingPath("jobId")
         when (val r = handler.getJob(principal, id)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     post(OpenApiPaths.OMNI_JOB_CANCEL) {
-        val principal = call.requirePrincipal("cancelJob", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("cancelJob", authenticator, transport, admission) ?: return@post
         val id = call.parameters["jobId"] ?: return@post call.missingPath("jobId")
         val cmd = call.receiveCommandOrError() ?: return@post
         when (val r = handler.cancelJob(principal, id, cmd)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     // --- Metrics / settings / clients ---
     get(OpenApiPaths.OMNI_METRICS_SUMMARY) {
-        val principal = call.requirePrincipal("getMetricSummary", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("getMetricSummary", authenticator, transport, admission) ?: return@get
         when (val r = handler.getMetricSummary(principal)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     get(OpenApiPaths.OMNI_METRICS_DETAIL) {
-        val principal = call.requirePrincipal("getMetricDetail", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("getMetricDetail", authenticator, transport, admission) ?: return@get
         if (!call.requireLoopbackOnly("getMetricDetail", transport)) return@get
         when (val r = handler.getMetricDetail(principal)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     get(OpenApiPaths.OMNI_SETTINGS) {
-        val principal = call.requirePrincipal("getSettings", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("getSettings", authenticator, transport, admission) ?: return@get
         if (!call.requireLoopbackOnly("getSettings", transport)) return@get
         when (val r = handler.getSettings(principal)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     patch(OpenApiPaths.OMNI_SETTINGS) {
-        val principal = call.requirePrincipal("patchSettings", authenticator, transport) ?: return@patch
+        val principal = call.requirePrincipal("patchSettings", authenticator, transport, admission) ?: return@patch
         if (!call.requireLoopbackOnly("patchSettings", transport)) return@patch
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@patch
         val req = runCatching {
@@ -459,33 +490,33 @@ fun Route.omniHttpRoutes(
         }
         when (val r = handler.patchSettings(principal, req)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     get(OpenApiPaths.OMNI_CLIENTS) {
-        val principal = call.requirePrincipal("listClients", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("listClients", authenticator, transport, admission) ?: return@get
         if (!call.requireLoopbackOnly("listClients", transport)) return@get
         when (val r = handler.listClients(principal, call.request.queryParameters["page_token"])) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     post(OpenApiPaths.OMNI_CLIENT_REVOKE) {
-        val principal = call.requirePrincipal("revokeClient", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("revokeClient", authenticator, transport, admission) ?: return@post
         if (!call.requireLoopbackOnly("revokeClient", transport)) return@post
         val id = call.parameters["clientId"] ?: return@post call.missingPath("clientId")
         val cmd = call.receiveCommandOrError() ?: return@post
         when (val r = handler.revokeClient(principal, id, cmd)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     // --- LAN ---
     post(OpenApiPaths.OMNI_LAN_ENABLE) {
-        val principal = call.requirePrincipal("enableLan", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("enableLan", authenticator, transport, admission) ?: return@post
         if (!call.requireLoopbackOnly("enableLan", transport)) return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
@@ -496,12 +527,12 @@ fun Route.omniHttpRoutes(
         }
         when (val r = handler.enableLan(principal, req)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     post(OpenApiPaths.OMNI_LAN_DISABLE) {
-        val principal = call.requirePrincipal("disableLan", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("disableLan", authenticator, transport, admission) ?: return@post
         if (!call.requireLoopbackOnly("disableLan", transport)) return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
@@ -512,12 +543,12 @@ fun Route.omniHttpRoutes(
         }
         when (val r = handler.disableLan(principal, req)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     post(OpenApiPaths.OMNI_LAN_PAIRING_CHALLENGES) {
-        val principal = call.requirePrincipal("createLanPairingChallenge", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("createLanPairingChallenge", authenticator, transport, admission) ?: return@post
         if (!call.requireLoopbackOnly("createLanPairingChallenge", transport)) return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
@@ -528,7 +559,7 @@ fun Route.omniHttpRoutes(
         }
         when (val r = handler.createLanPairingChallenge(principal, req)) {
             is HttpHandlerResult.Ok -> call.respondRawJson(r.body.json, r.body.status)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
@@ -547,13 +578,13 @@ fun Route.omniHttpRoutes(
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         when (val r = handler.completeLanPairing(bodyText)) {
             is HttpHandlerResult.Ok -> call.respondRawJson(r.body.json, r.body.status)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     // --- Diagnostics ---
     post(OpenApiPaths.OMNI_DIAGNOSTICS_EXPORTS) {
-        val principal = call.requirePrincipal("createDiagnosticExport", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("createDiagnosticExport", authenticator, transport, admission) ?: return@post
         if (!call.requireLoopbackOnly("createDiagnosticExport", transport)) return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
@@ -564,13 +595,13 @@ fun Route.omniHttpRoutes(
         }
         when (val r = handler.createDiagnosticExport(principal, req)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     // --- Content reports ---
     post(OpenApiPaths.OMNI_CONTENT_REPORTS) {
-        val principal = call.requirePrincipal("createContentReportProposal", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("createContentReportProposal", authenticator, transport, admission) ?: return@post
         val bodyText = call.receiveBoundedText(config.maxJsonBodyBytes) ?: return@post
         val req = runCatching {
             HttpJson.codec.decodeFromString(ContentReportProposalRequestDto.serializer(), bodyText)
@@ -580,51 +611,51 @@ fun Route.omniHttpRoutes(
         }
         when (val r = handler.createContentReportProposal(principal, req)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     get(OpenApiPaths.OMNI_CONTENT_REPORT_BY_ID) {
-        val principal = call.requirePrincipal("getContentReport", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("getContentReport", authenticator, transport, admission) ?: return@get
         val id = call.parameters["reportId"] ?: return@get call.missingPath("reportId")
         when (val r = handler.getContentReport(principal, id)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     post(OpenApiPaths.OMNI_CONTENT_REPORT_CANCEL) {
-        val principal = call.requirePrincipal("cancelContentReport", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("cancelContentReport", authenticator, transport, admission) ?: return@post
         val id = call.parameters["reportId"] ?: return@post call.missingPath("reportId")
         val cmd = call.receiveCommandOrError() ?: return@post
         when (val r = handler.cancelContentReport(principal, id, cmd)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     post(OpenApiPaths.OMNI_CONTENT_REPORT_DISCARD) {
-        val principal = call.requirePrincipal("discardContentReport", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("discardContentReport", authenticator, transport, admission) ?: return@post
         val id = call.parameters["reportId"] ?: return@post call.missingPath("reportId")
         val cmd = call.receiveCommandOrError() ?: return@post
         when (val r = handler.discardContentReport(principal, id, cmd)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     get(OpenApiPaths.OMNI_CONTENT_REPORT_RECEIPT) {
-        val principal = call.requirePrincipal("getContentReportReceipt", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("getContentReportReceipt", authenticator, transport, admission) ?: return@get
         val id = call.parameters["reportId"] ?: return@get call.missingPath("reportId")
         when (val r = handler.getContentReportReceipt(principal, id)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     // --- Tokens (loopback) ---
     post(OpenApiPaths.OMNI_TOKENS) {
-        val principal = call.requirePrincipal("issueLoopbackAdminToken", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("issueLoopbackAdminToken", authenticator, transport, admission) ?: return@post
         if (transport != HttpTransportKind.LOOPBACK) {
             OmniErrorHttp.respond(
                 call,
@@ -641,27 +672,27 @@ fun Route.omniHttpRoutes(
         }
         when (val r = handler.issueLoopbackAdminToken(principal, req)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status.coerceAtLeast(201), r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     get(OpenApiPaths.OMNI_TOKENS) {
-        val principal = call.requirePrincipal("listTokens", authenticator, transport) ?: return@get
+        val principal = call.requirePrincipal("listTokens", authenticator, transport, admission) ?: return@get
         if (!call.requireLoopbackOnly("listTokens", transport)) return@get
         when (val r = handler.listTokens(principal, call.request.queryParameters["page_token"])) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 
     post(OpenApiPaths.OMNI_TOKEN_REVOKE) {
-        val principal = call.requirePrincipal("revokeToken", authenticator, transport) ?: return@post
+        val principal = call.requirePrincipal("revokeToken", authenticator, transport, admission) ?: return@post
         if (!call.requireLoopbackOnly("revokeToken", transport)) return@post
         val id = call.parameters["tokenId"] ?: return@post call.missingPath("tokenId")
         val cmd = call.receiveCommandOrError() ?: return@post
         when (val r = handler.revokeToken(principal, id, cmd)) {
             is HttpHandlerResult.Ok -> call.respondJson(r.body, r.status, r.headers)
-            is HttpHandlerResult.Err -> OmniErrorHttp.respond(call, r.error)
+            is HttpHandlerResult.Err -> call.respondError(r.error)
         }
     }
 }
@@ -674,6 +705,7 @@ private suspend fun ApplicationCall.requirePrincipal(
     operationId: String,
     authenticator: TokenAuthenticator,
     transport: HttpTransportKind,
+    admission: PrincipalRateLimiter?,
 ): HttpPrincipal? {
     val required = OpenApiScopes.requiredScope(operationId)
     if (required == null) return null // public routes should not call this
@@ -716,6 +748,23 @@ private suspend fun ApplicationCall.requirePrincipal(
                     ),
                 )
                 return null
+            }
+            // C-11: authorized requests take a principal concurrency slot.
+            // The lease is released when the response completes (see the
+            // respond helpers / SSE write points). Null limiter = fail-open.
+            if (admission != null) {
+                val lease = admission.tryAcquireConcurrency(principal.principalId)
+                if (lease == null) {
+                    OmniErrorHttp.respond(
+                        this,
+                        OmniError.RATE_LIMITED(
+                            message = "principal concurrency quota exceeded",
+                            details = mapOf("principalId" to principal.principalId),
+                        ),
+                    )
+                    return null
+                }
+                attributes.put(ADMISSION_LEASE, lease)
             }
             principal
         }
@@ -810,6 +859,8 @@ private suspend inline fun <reified T> ApplicationCall.respondJson(
         contentType = ContentType.Application.Json,
         status = HttpStatusCode.fromValue(status),
     )
+    // C-11: the response completed — free the principal's concurrency slot.
+    releaseAdmission()
 }
 
 private suspend fun ApplicationCall.respondRawJson(json: String, status: Int) {
@@ -818,6 +869,17 @@ private suspend fun ApplicationCall.respondRawJson(json: String, status: Int) {
         contentType = ContentType.Application.Json,
         status = HttpStatusCode.fromValue(status),
     )
+    // C-11: the response completed — free the principal's concurrency slot.
+    releaseAdmission()
+}
+
+/** C-11-aware error projection: releases the admission lease after the error response. */
+private suspend fun ApplicationCall.respondError(
+    error: OmniError,
+    transport: TransportDeliveryGuarantee = TransportDeliveryGuarantee.HTTP_JSON,
+) {
+    OmniErrorHttp.respond(this, error, transport)
+    releaseAdmission()
 }
 
 /**

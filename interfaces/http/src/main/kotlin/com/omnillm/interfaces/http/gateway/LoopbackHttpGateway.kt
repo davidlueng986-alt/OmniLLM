@@ -5,6 +5,7 @@ import com.omnillm.interfaces.http.OpenApiAuthority
 import com.omnillm.interfaces.http.auth.HttpTransportKind
 import com.omnillm.interfaces.http.auth.TokenAuthenticator
 import com.omnillm.interfaces.http.installOmniHttpRoutes
+import com.omnillm.runtime.policy.acl.PrincipalRateLimiter
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
@@ -33,6 +34,12 @@ class LoopbackHttpGateway(
     private val authenticator: TokenAuthenticator,
     private val config: GatewayConfig = GatewayConfig(),
     private val transport: HttpTransportKind = HttpTransportKind.LOOPBACK,
+    /**
+     * C-11: principal concurrency admission. Null = disabled (fail-open).
+     * The rate dimension lives at the handler auth entry; this gateway owns
+     * the in-flight quota (leases released on response completion).
+     */
+    private val admission: PrincipalRateLimiter? = null,
 ) {
     private val serverRef = AtomicReference<EmbeddedServer<*, *>?>(null)
 
@@ -53,6 +60,7 @@ class LoopbackHttpGateway(
                 authenticator = authenticator,
                 config = config,
                 transport = transport,
+                admission = admission,
             )
         }
         if (!serverRef.compareAndSet(null, server)) {
@@ -76,6 +84,7 @@ fun Application.configureGateway(
     authenticator: TokenAuthenticator,
     config: GatewayConfig = GatewayConfig(),
     transport: HttpTransportKind = HttpTransportKind.LOOPBACK,
+    admission: PrincipalRateLimiter? = null,
 ) {
     install(ContentNegotiation) {
         json(HttpJson.codec)
@@ -103,5 +112,6 @@ fun Application.configureGateway(
         authenticator = authenticator,
         config = config,
         transport = transport,
+        admission = admission,
     )
 }
