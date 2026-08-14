@@ -381,6 +381,7 @@ object SettingsMerger {
 /** Preserve typed OmniError while extending details (catalog codes only). */
 private fun OmniError.copyWithDetails(details: Map<String, String>): OmniError = when (this) {
     is OmniError.INVALID_REQUEST -> copy(details = details)
+    is OmniError.MODEL_FORMAT_INVALID -> copy(details = details)
     is OmniError.UNAUTHORIZED -> copy(details = details)
     is OmniError.FORBIDDEN -> copy(details = details)
     is OmniError.NOT_FOUND -> copy(details = details)
