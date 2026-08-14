@@ -178,7 +178,7 @@ class AcquisitionPipelineTest {
             result is OmniResult.Err,
         )
         val err = (result as OmniResult.Err).error
-        assertEquals(OmniErrorCode.INVALID_REQUEST, err.code)
+        assertEquals(OmniErrorCode.MODEL_FORMAT_INVALID, err.code)
         val snap = modelManager.getInstallation(InstallationId(installationId))
         assertTrue(snap == null || snap.state != "READY")
         assertEquals("REJECTED", snap?.state)
@@ -244,7 +244,7 @@ class AcquisitionPipelineTest {
             expectedFormat = "gguf",
         )
         assertTrue(result is OmniResult.Err)
-        assertEquals(OmniErrorCode.INVALID_REQUEST, (result as OmniResult.Err).error.code)
+        assertEquals(OmniErrorCode.MODEL_FORMAT_INVALID, (result as OmniResult.Err).error.code)
         assertEquals("bad magic", result.error.details?.get("reason"))
         assertEquals("REJECTED", modelManager.getInstallation(InstallationId(installationId))?.state)
     }
@@ -273,7 +273,7 @@ class AcquisitionPipelineTest {
             expectedFormat = "gguf",
         )
         assertTrue(result is OmniResult.Err)
-        assertEquals(OmniErrorCode.INVALID_REQUEST, (result as OmniResult.Err).error.code)
+        assertEquals(OmniErrorCode.MODEL_FORMAT_INVALID, (result as OmniResult.Err).error.code)
         assertEquals("truncated header", result.error.details?.get("reason"))
         assertEquals("REJECTED", modelManager.getInstallation(InstallationId(installationId))?.state)
     }
@@ -308,7 +308,7 @@ class AcquisitionPipelineTest {
             expectedFormat = "gguf",
         )
         assertTrue(result is OmniResult.Err)
-        assertEquals(OmniErrorCode.INVALID_REQUEST, (result as OmniResult.Err).error.code)
+        assertEquals(OmniErrorCode.MODEL_FORMAT_INVALID, (result as OmniResult.Err).error.code)
         assertEquals("unsupported version", result.error.details?.get("reason"))
         assertEquals("REJECTED", modelManager.getInstallation(InstallationId(installationId))?.state)
     }

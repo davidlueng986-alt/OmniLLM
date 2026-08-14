@@ -408,7 +408,7 @@ class AcquisitionPipeline(
     /**
      * C-03 dry-load: open the declared weights stream once and parse the GGUF
      * header without materializing/executing. Returns the parsed header on
-     * success; INVALID_REQUEST (mapped) on any parse failure.
+     * success; MODEL_FORMAT_INVALID (mapped) on any parse failure.
      */
     private fun dryLoadGgufHeader(
         source: ArtifactByteSource,
@@ -422,7 +422,7 @@ class AcquisitionPipeline(
             return when (val outcome = GgufHeaderValidator.validate(input)) {
                 is GgufHeaderValidator.Outcome.Valid -> OmniResult.ok(outcome.header)
                 is GgufHeaderValidator.Outcome.Invalid -> OmniResult.err(
-                    OmniError.INVALID_REQUEST(
+                    OmniError.MODEL_FORMAT_INVALID(
                         message = "import rejected: file is not a valid GGUF model",
                         details = mapOf(
                             "reason" to outcome.reason,
