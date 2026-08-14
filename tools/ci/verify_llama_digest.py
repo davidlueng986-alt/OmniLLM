@@ -190,7 +190,12 @@ def main(argv: List[str]) -> int:
 
     print("verify_llama_digest: stripped-packaged digest check")
     print("  lock:", LOCK_REL.as_posix(), f"(variant: {lock['artifact'].get('variant', '?')})")
-    print("  source APK:", apk.relative_to(repo_root).as_posix() if apk else "(none — stripped intermediates)")
+    try:
+        apk_display = apk.relative_to(repo_root).as_posix() if apk else "(none — stripped intermediates)"
+    except ValueError:
+        # APK may live outside the repo (e.g. temp verification clones) — show absolute path.
+        apk_display = str(apk) if apk else "(none — stripped intermediates)"
+    print("  source APK:", apk_display)
     print("\n".join(lines))
 
     if failures:
