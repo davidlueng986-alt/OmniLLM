@@ -50,30 +50,39 @@ class PlaygroundStreamEventsLocalUiGateTest {
             ),
         )
         val requestId = "11111111-1111-1111-1111-111111111111"
-        // Seed a handle so the LOCAL_UI projection has something to stream.
-        fake.putAsset(
-            com.omnillm.features.playground.api.AssetHandleView(
-                assetId = "asset-1",
-                purpose = "IMAGE_INPUT",
-                mimeHint = "image/png",
-                actualMime = null,
-                sizeBytes = 1L,
-                digestSha256 = null,
-                ttlExpiresAtEpochMs = System.currentTimeMillis() + 60_000L,
-                state = "READY",
-                preprocessingLabel = null,
-                singleUse = false,
-                ownerPrincipalId = com.omnillm.interfaces.admin.LocalUiPrincipal.ID.value,
+        // Seed a real chat handle so the LOCAL_UI projection has assistant text
+        // to stream (the previous test asserted `Ok || Err` — a tautology; the
+        // projection must deterministically serve an Ok batch with the delta).
+        val started = service.startChat(
+            principal = com.omnillm.interfaces.admin.LocalUiPrincipal.ID,
+            spec = com.omnillm.features.playground.api.ChatRequestSpec(
+                identity = com.omnillm.features.playground.api.InferenceIdentity(
+                    requestId = requestId,
+                    idempotencyKey = "local-ui-stream-1",
+                    canonicalInputDigest = "a".repeat(64),
+                ),
+                modelRevisionId = "cd".repeat(32),
+                messages = listOf(
+                    com.omnillm.features.playground.api.ChatMessage(
+                        role = "user",
+                        content = "hi",
+                    ),
+                ),
             ),
         )
+        assertTrue("startChat must serve LOCAL_UI: $started", started is OmniResult.Ok)
         val result = service.streamEvents(
             principal = com.omnillm.interfaces.admin.LocalUiPrincipal.ID,
             requestId = requestId,
             afterSeq = 0L,
         )
+        assertTrue("LOCAL_UI stream projection must succeed: $result", result is OmniResult.Ok)
+        val batch = (result as OmniResult.Ok).value
         assertTrue(
-            "LOCAL_UI stream projection must not regress: $result",
-            result is OmniResult.Ok || result is OmniResult.Err,
+            "stream projection must include the assistant text delta",
+            batch.events.any {
+                it.kind == "delta" && it.textDelta == "hello from fake"
+            },
         )
     }
 }

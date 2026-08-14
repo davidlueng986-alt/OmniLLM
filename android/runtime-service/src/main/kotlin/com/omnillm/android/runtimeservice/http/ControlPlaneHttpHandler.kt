@@ -375,14 +375,14 @@ class ControlPlaneHttpHandler(
                         } else {
                             val text = handle.assistantText
                             if (text.isNullOrBlank()) {
-                                // COR-09: never return a fake placeholder success. Token deltas
-                                // are not surfaced by the control-plane stream API (digests only),
-                                // so honest fail-closed beats invented "stop" text.
+                                // COR-09: never return a fake placeholder success.
+                                // Honest error only when the engine genuinely failed
+                                // or produced no visible tokens (C-02 now surfaces
+                                // real token deltas as assistant text).
                                 HttpHandlerResult.Err(
                                     OmniError.CAPABILITY_UNSUPPORTED(
-                                        message = "sync chat executed without aggregated token text; " +
-                                            "engine token deltas are not exposed on the control-plane API — " +
-                                            "use the SSE chat stream or durable /omni/v1/requests events",
+                                        message = "sync chat completed without aggregated token text " +
+                                            "(engine produced no visible tokens)",
                                         details = mapOf(
                                             "requestId" to requestId,
                                             "state" to handle.state,
@@ -597,6 +597,9 @@ class ControlPlaneHttpHandler(
             var seqId = 1L
             var done = false
             var attempts = 0
+            // C-02: the port projects the accumulated token text on every poll;
+            // emit only the NEW suffix so the client never receives duplicates.
+            var seenText = ""
             while (!done && attempts < MAX_STREAM_POLLS) {
                 attempts++
                 val batch: OmniResult<com.omnillm.features.playground.ports.InferenceHandle>? = try {
@@ -657,46 +660,91 @@ class ControlPlaneHttpHandler(
                     }
                     is OmniResult.Ok -> {
                         val handle = batch.value
-                        handle.assistantText?.takeIf { it.isNotEmpty() }?.let { text ->
-                            emit(
-                                SseEvent(
-                                    data = openAiChunkJson(
-                                        requestId,
-                                        created,
-                                        model,
-                                        contentDelta = text,
+                        // C-02: surface engine token deltas as OpenAI delta.content.
+                        val text = handle.assistantText.orEmpty()
+                        if (text.isNotEmpty()) {
+                            val delta = if (text.startsWith(seenText)) {
+                                text.substring(seenText.length)
+                            } else {
+                                text
+                            }
+                            if (delta.isNotEmpty()) {
+                                emit(
+                                    SseEvent(
+                                        data = openAiChunkJson(
+                                            requestId,
+                                            created,
+                                            model,
+                                            contentDelta = delta,
+                                        ),
+                                        event = null,
+                                        id = (seqId++).toString(),
+                                        isTerminal = false,
                                     ),
-                                    event = null,
-                                    id = (seqId++).toString(),
-                                    isTerminal = false,
-                                ),
-                            )
+                                )
+                            }
+                            seenText = text
                         }
                         val terminal = handle.state in STREAM_TERMINAL_STATES || handle.error != null
                         if (terminal) {
-                            // Final chunk with finish_reason + usage summary, then [DONE].
-                            emit(
-                                SseEvent(
-                                    data = openAiChunkJson(
-                                        requestId,
-                                        created,
-                                        model,
-                                        finishReason = "stop",
-                                        terminal = true,
+                            // D23: a genuinely failed request ends with an honest
+                            // error terminal — never a fabricated finish_reason
+                            // "stop" (success/cancel keep the stop chunk).
+                            val failed = handle.state in STREAM_FAILED_STATES ||
+                                (handle.error != null &&
+                                    handle.state !in setOf(
+                                        "COMPLETED", "SUCCEEDED", "TERMINAL_SUCCESS",
+                                        "CANCELLED", "ABORTED_UNCERTAIN",
+                                    ))
+                            if (failed) {
+                                val errorJson = HttpJson.codec.encodeToString(
+                                    JsonElement.serializer(),
+                                    JsonObject(
+                                        mapOf(
+                                            "error" to JsonObject(
+                                                mapOf(
+                                                    "message" to JsonPrimitive(
+                                                        handle.error?.message
+                                                            ?: "engine failed in state ${handle.state}",
+                                                    ),
+                                                ),
+                                            ),
+                                        ),
                                     ),
-                                    event = null,
-                                    id = (seqId++).toString(),
-                                    isTerminal = false,
-                                ),
-                            )
-                            emit(
-                                SseEvent(
-                                    data = "[DONE]",
-                                    event = SseFraming.EVENT_TERMINAL,
-                                    id = (seqId++).toString(),
-                                    isTerminal = true,
-                                ),
-                            )
+                                )
+                                emit(
+                                    SseEvent(
+                                        data = errorJson,
+                                        event = SseFraming.EVENT_TERMINAL,
+                                        id = (seqId++).toString(),
+                                        isTerminal = true,
+                                    ),
+                                )
+                            } else {
+                                // Final chunk with finish_reason + usage summary, then [DONE].
+                                emit(
+                                    SseEvent(
+                                        data = openAiChunkJson(
+                                            requestId,
+                                            created,
+                                            model,
+                                            finishReason = "stop",
+                                            terminal = true,
+                                        ),
+                                        event = null,
+                                        id = (seqId++).toString(),
+                                        isTerminal = false,
+                                    ),
+                                )
+                                emit(
+                                    SseEvent(
+                                        data = "[DONE]",
+                                        event = SseFraming.EVENT_TERMINAL,
+                                        id = (seqId++).toString(),
+                                        isTerminal = true,
+                                    ),
+                                )
+                            }
                             done = true
                         } else {
                             kotlinx.coroutines.delay(STREAM_POLL_MS)
@@ -2660,6 +2708,12 @@ class ControlPlaneHttpHandler(
             "TERMINAL_SUCCESS",
             "TERMINAL_FAILED",
             "ABORTED_UNCERTAIN",
+        )
+
+        /** D23: failure terminal states — SSE must end with an error event, never a fake "stop". */
+        private val STREAM_FAILED_STATES: Set<String> = setOf(
+            "FAILED",
+            "TERMINAL_FAILED",
         )
 
         /** Durable-request terminal states for the events endpoint (API-16). */

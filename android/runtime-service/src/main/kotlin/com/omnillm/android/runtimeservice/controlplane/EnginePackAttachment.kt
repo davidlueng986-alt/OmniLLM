@@ -176,6 +176,12 @@ class EnginePackAttachment private constructor(
             deviceFingerprint: DeviceExecutionFingerprint =
                 DeviceExecutionFingerprint.parse("device-fp-engine-test"),
             engineBuildId: EngineBuildId = LlamaCppModule.defaultEngineBuildId(),
+            /**
+             * Test-only: custom [NativeBackend] for the attached llama-cpp engine
+             * (e.g. a fake emitting visible token-delta text for C-02). Null keeps
+             * the catalog [StubNativeBackend]. Never used by production attach.
+             */
+            llamaBackend: com.omnillm.engines.llamacpp.native.NativeBackend? = null,
         ): EnginePackAttachment {
             val registry = EngineRegistry()
             val registrations = linkedMapOf<String, EngineRegistration>()
@@ -204,7 +210,15 @@ class EnginePackAttachment private constructor(
 
             val engine = if (includeStubEngine) {
                 // Stub is test-only; EngineSelectionPolicy still forbids SUPPORTED.
-                LlamaCppModule.createEngine(lock = llamaLock, engineBuildId = engineBuildId)
+                if (llamaBackend != null) {
+                    LlamaCppModule.createEngine(
+                        lock = llamaLock,
+                        backend = llamaBackend,
+                        engineBuildId = engineBuildId,
+                    )
+                } else {
+                    LlamaCppModule.createEngine(lock = llamaLock, engineBuildId = engineBuildId)
+                }
             } else {
                 null
             }

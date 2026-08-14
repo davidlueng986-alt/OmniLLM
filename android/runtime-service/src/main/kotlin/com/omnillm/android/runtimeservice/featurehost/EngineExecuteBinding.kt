@@ -61,6 +61,14 @@ class EngineExecuteBinding(
 
     val attachment: EnginePackAttachment? get() = attachmentRef.get()
 
+    /**
+     * C-02: the llama-cpp inference adapter bound by [applyAttachment] (null when
+     * unbound or a test fake is bound). Exposes aggregated engine token-delta
+     * text to the control-plane ports (visible assistant text).
+     */
+    var boundLlamaAdapter: LlamaCppInferenceEngineAdapter? = null
+        private set
+
     val capabilityLookup: CapabilityLookup = CapabilityLookup { cap, candidate ->
         resolveCapability(cap, candidate)
     }
@@ -73,13 +81,13 @@ class EngineExecuteBinding(
     fun applyAttachment(pack: EnginePackAttachment): ApplyResult {
         attachmentRef.set(pack)
         if (pack.llamaCppEngine != null) {
-            inferenceEngine.bind(
-                LlamaCppInferenceEngineAdapter(
-                    engine = pack.llamaCppEngine!!,
-                    modelSourceResolver = modelSourceResolver,
-                    fallbackToFixtureOnUnresolved = fallbackToFixtureOnUnresolved,
-                ),
+            val adapter = LlamaCppInferenceEngineAdapter(
+                engine = pack.llamaCppEngine!!,
+                modelSourceResolver = modelSourceResolver,
+                fallbackToFixtureOnUnresolved = fallbackToFixtureOnUnresolved,
             )
+            boundLlamaAdapter = adapter
+            inferenceEngine.bind(adapter)
             boundOnce.set(true)
             logI(
                 "inference port bound to llama-cpp native=${pack.nativeLibraryPresent} " +
@@ -93,6 +101,7 @@ class EngineExecuteBinding(
             )
         }
         inferenceEngine.unbind()
+        boundLlamaAdapter = null
         logW(
             "llama-cpp native missing — inference remains fail-closed " +
                 "(${pack.notes["llama.failClosed"] ?: "no adapter"})",

@@ -70,6 +70,15 @@ class LlamaCppInferenceEngineAdapter(
     private val streamBuffers = ConcurrentHashMap<String, StreamBuffer>()
 
     /**
+     * C-02: aggregated plaintext of DELTA events per requestId. The engine event
+     * model carries bounded opaque attributes on [EngineEvent]; token-delta text
+     * travels in `attributes["text"]` (digest-only payloads aggregate to null).
+     * Bounded by completed requests — same in-memory per-request pattern as the
+     * cancel-phase ladder (control-plane requests are short-lived).
+     */
+    private val deltaTextByRequest = ConcurrentHashMap<String, String>()
+
+    /**
      * preparedOperationId ??shared-load lease. Registered at commit and removed
      * in [start] (try/finally), so this map is bounded by in-flight operations
      * instead of growing one entry per chat (COR-16).
@@ -237,6 +246,15 @@ class LlamaCppInferenceEngineAdapter(
                         kind = kind,
                         payloadDigest = engEvt.payloadDigest,
                     )
+                    if (kind == EngineEventKinds.DELTA) {
+                        // C-02: accumulate visible delta text (arrival order ==
+                        // normalizer seq order, so appends are ordered).
+                        engEvt.attributes["text"]?.takeIf { it.isNotEmpty() }?.let { text ->
+                            deltaTextByRequest.compute(engEvt.requestId.value) { _, existing ->
+                                (existing.orEmpty() + text)
+                            }
+                        }
+                    }
                     if (engEvt.isTerminal) {
                         val disposition = engEvt.attributes["disposition"]
                             ?: engEvt.attributes["stopReason"]
@@ -528,6 +546,13 @@ class LlamaCppInferenceEngineAdapter(
     internal fun activeOperationLeaseCount(): Int = operationLeases.size
     internal fun sharedLeaseCount(): Int = loadByInstallation.size
     internal fun sharedLeaseUsers(): Int = loadByInstallation.values.sumOf { it.users.get() }
+
+    /**
+     * C-02: aggregated plaintext of DELTA events for [requestId], or null when
+     * the engine produced no visible token text (digest-only payloads).
+     */
+    internal fun deltaText(requestId: String): String? =
+        deltaTextByRequest[requestId]?.takeIf { it.isNotEmpty() }
 
     private fun reservationFromPlan(
         loadPlan: com.omnillm.engines.api.LoadPlan,
