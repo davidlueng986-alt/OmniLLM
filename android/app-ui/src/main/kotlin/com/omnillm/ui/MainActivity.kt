@@ -10,6 +10,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import com.omnillm.ui.navigation.DeepLinkRouter
 import com.omnillm.ui.navigation.OmniDestination
 import com.omnillm.ui.navigation.OmniNavHost
 import com.omnillm.ui.session.UiSession
@@ -27,6 +28,12 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var session: UiSession
 
+    /**
+     * D24: shared navigation state. In-app navigation and warm-start deep
+     * links (onNewIntent) converge on this router; Compose observes it.
+     */
+    private val router = DeepLinkRouter()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -34,6 +41,7 @@ class MainActivity : ComponentActivity() {
             ?: UiSession(applicationContext).also { it.start() }
 
         val initial = resolveDestination(intent) ?: defaultDestination()
+        router.navigate(initial)
 
         setContent {
             val uiSession = remember { session }
@@ -44,6 +52,7 @@ class MainActivity : ComponentActivity() {
             Surface(modifier = Modifier.fillMaxSize()) {
                 OmniNavHost(
                     session = uiSession,
+                    router = router,
                     initialDestination = initial,
                 )
             }
@@ -53,8 +62,10 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // Navigation recompose path: recreate content with new deep link when needed.
-        // For shell v1, deep links on cold start are handled in onCreate.
+        // D24: warm-start deep links RE-NAVIGATE through the shared router with
+        // the same opaque-ID validation as cold start (fail-closed on unknown
+        // paths — invalid deep links leave the current destination untouched).
+        resolveDestination(intent)?.let(router::navigate)
     }
 
     override fun onStart() {
@@ -91,6 +102,8 @@ class MainActivity : ComponentActivity() {
         // Accept omnillm://app/... or https host-style with path only.
         val path = data.path?.trimStart('/')
             ?: data.schemeSpecificPart?.substringAfter("app/")?.substringBefore('?')
-        return OmniDestination.fromDeepLinkPath(path)
+        return path?.takeIf { it.isNotBlank() }?.let { OmniDestination.fromDeepLinkPath(it) }
+            // D24: full-URI fallback keeps warm/cold resolution on one parser.
+            ?: OmniDestination.fromDeepLinkUri(data.toString())
     }
 }
