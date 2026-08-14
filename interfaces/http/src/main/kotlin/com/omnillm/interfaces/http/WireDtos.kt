@@ -443,10 +443,16 @@ data class ClientPageDto(
     @SerialName("snapshot_version") val snapshotVersion: Long = 0,
 )
 
+/**
+ * OpenAPI `DiagnosticExportRequest` (:2600-2614) — categories is an optional
+ * array of strings (D23g: it used to be silently dropped by the codec, so the
+ * export job never received the requested categories).
+ */
 @Serializable
 data class DiagnosticExportRequestDto(
     val command: CommandRequestDto,
     @SerialName("include_detail") val includeDetail: Boolean = false,
+    val categories: List<String>? = null,
 )
 
 @Serializable

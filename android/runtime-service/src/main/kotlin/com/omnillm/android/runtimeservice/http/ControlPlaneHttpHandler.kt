@@ -2203,7 +2203,11 @@ class ControlPlaneHttpHandler(
             idempotencyKey = IdempotencyKey.parse(request.command.idempotencyKey),
             canonicalSpecDigest = request.command.canonicalInputDigest,
         )
-        val params = JobParameters.DiagnosticExport(includeDetail = request.includeDetail)
+        // D23g: spec optional `categories` passes through to the export job.
+        val params = JobParameters.DiagnosticExport(
+            includeDetail = request.includeDetail,
+            categories = request.categories.orEmpty(),
+        )
         return when (val created = jobManager.create(identity, params)) {
             is OmniResult.Ok -> {
                 commandLedger.recordResult(
@@ -2728,6 +2732,10 @@ class ControlPlaneHttpHandler(
             JobKind.DIAGNOSTIC_EXPORT ->
                 JobParameters.DiagnosticExport(
                     includeDetail = params.bool("include_detail") ?: false,
+                    // D23g: categories wire field (spec optional) → job parameters.
+                    categories = (params["categories"] as? JsonArray)
+                        ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                        ?: emptyList(),
                 )
             JobKind.CONTENT_REPORT ->
                 JobParameters.ContentReport(reportId = params.string("report_id") ?: return null)
