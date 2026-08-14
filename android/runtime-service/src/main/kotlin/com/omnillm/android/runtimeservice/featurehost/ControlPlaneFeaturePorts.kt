@@ -39,6 +39,7 @@ import com.omnillm.features.tools.ports.StructuredInferenceHandle
 import com.omnillm.features.tools.ports.ToolCallingHandle
 import com.omnillm.features.tools.ports.ToolsInferencePort
 import com.omnillm.features.tools.ports.ToolsQueryHandle
+import com.omnillm.interfaces.admin.LocalUiPrincipal
 import com.omnillm.runtime.modelmanager.ModelManager
 import com.omnillm.runtime.orchestrator.CandidatePlanner
 import com.omnillm.runtime.orchestrator.CostClassLabels
@@ -49,6 +50,8 @@ import com.omnillm.runtime.orchestrator.QueryView
 import com.omnillm.runtime.orchestrator.RoutingCandidate
 import com.omnillm.runtime.orchestrator.RoutingPreference
 import com.omnillm.runtime.orchestrator.SubmitResult
+import com.omnillm.runtime.policy.PolicyManager
+import com.omnillm.runtime.policy.ProductModePolicy
 
 /**
  * Feature ports that route through plane [Orchestrator] + engine binding
@@ -80,16 +83,25 @@ object ControlPlaneFeaturePorts {
     fun playgroundCapabilities(
         binding: EngineExecuteBinding,
         installations: List<com.omnillm.runtime.modelmanager.domain.InstallationSnapshot>,
+        /**
+         * FTR-03 mode projection (fail-closed default: both modes OFF). Research
+         * mode widens the honest diagnostic surface — conditions on UNKNOWN and
+         * CONDITIONAL cells — never the state (never SUPPORTED without evidence).
+         */
+        productModes: () -> ProductModePolicy.ModeProjection =
+            { ProductModePolicy.projectedModes(null) },
     ): PlaygroundCapabilityPort =
         object : PlaygroundCapabilityPort {
-            override fun state(capability: CapabilityId, modelRevisionId: String): CapabilityState {
-                val cand = binding.probeCandidate(modelRevisionId, installations)
-                    ?: return CapabilityState.UNKNOWN
-                return binding.resolveCapability(capability, cand)
-            }
+            override fun state(capability: CapabilityId, modelRevisionId: String): CapabilityState =
+                baseCapabilityState(binding, capability, modelRevisionId, installations)
 
             override fun conditions(capability: CapabilityId, modelRevisionId: String): List<String> =
-                binding.conditions(capability, modelRevisionId)
+                productModeConditions(
+                    binding = binding,
+                    state = baseCapabilityState(binding, capability, modelRevisionId, installations),
+                    base = binding.conditions(capability, modelRevisionId),
+                    modes = productModes(),
+                )
         }
 
     fun serverInference(
@@ -114,11 +126,17 @@ object ControlPlaneFeaturePorts {
         binding: EngineExecuteBinding,
         modelManager: ModelManager,
         clockMs: () -> Long,
+        /**
+         * FTR-03 mode projection (fail-closed default: both modes OFF).
+         */
+        productModes: () -> ProductModePolicy.ModeProjection =
+            { ProductModePolicy.projectedModes(null) },
     ): CapabilityQueryPort =
         object : CapabilityQueryPort {
             override suspend fun listModels(principal: PrincipalId): OmniResult<List<ModelCapabilityView>> {
                 val now = clockMs()
                 val installations = modelManager.listInstallations()
+                val modes = productModes()
                 if (installations.isEmpty()) {
                     // Honest empty + exploratory note when engine bound.
                     val notes = buildList {
@@ -130,16 +148,27 @@ object ControlPlaneFeaturePorts {
                         } else {
                             add("engine not attached; capabilities UNKNOWN")
                         }
+                        if (modes.researchModeEnabled) {
+                            add("product.researchModeEnabled=true → research diagnostics surface")
+                        }
                     }
                     return OmniResult.ok(emptyList())
                 }
                 return OmniResult.ok(
                     installations.map { inst ->
                         val rev = inst.modelRevisionId.hex
-                        val textState = playgroundCapabilities(binding, installations)
-                            .state(CapabilityId.TEXT_GENERATION, rev)
-                        val conditions = playgroundCapabilities(binding, installations)
-                            .conditions(CapabilityId.TEXT_GENERATION, rev)
+                        val textState = baseCapabilityState(
+                            binding,
+                            CapabilityId.TEXT_GENERATION,
+                            rev,
+                            installations,
+                        )
+                        val conditions = productModeConditions(
+                            binding = binding,
+                            state = textState,
+                            base = binding.conditions(CapabilityId.TEXT_GENERATION, rev),
+                            modes = modes,
+                        )
                         ModelCapabilityView(
                             modelId = inst.installationId.value,
                             modelRevisionId = rev,
@@ -168,6 +197,10 @@ object ControlPlaneFeaturePorts {
                                     binding.isEngineBound() ->
                                         "engine attached; exploratory flag off → UNKNOWN"
                                     else -> "engine not attached; fail closed"
+                                } + if (modes.researchModeEnabled) {
+                                    "; research mode: diagnostics surface widened"
+                                } else {
+                                    ""
                                 },
                             ),
                         )
@@ -213,6 +246,87 @@ object ControlPlaneFeaturePorts {
         )
 
     // ---- helpers ----
+
+    /**
+     * Base capability state for a revision (ARC-06 probe: real installation
+     * required, else UNKNOWN — never a fabricated candidate).
+     */
+    internal fun baseCapabilityState(
+        binding: EngineExecuteBinding,
+        capability: CapabilityId,
+        modelRevisionId: String,
+        installations: List<com.omnillm.runtime.modelmanager.domain.InstallationSnapshot>,
+    ): CapabilityState {
+        val cand = binding.probeCandidate(modelRevisionId, installations)
+            ?: return CapabilityState.UNKNOWN
+        return binding.resolveCapability(capability, cand)
+    }
+
+    /**
+     * FTR-03 research-mode condition hook (honest projection): state is NEVER
+     * widened (SUPPORTED requires evidence); research mode only widens the
+     * *diagnostic surface* —
+     * - CONDITIONAL cells carry `research_mode` + raw-diagnostics /
+     *   backend-selection markers,
+     * - UNKNOWN cells (no disclosure in normal mode) disclose reason
+     *   diagnostics when the engine is bound.
+     * Fail closed: modes OFF ⇒ base conditions verbatim.
+     */
+    internal fun productModeConditions(
+        binding: EngineExecuteBinding,
+        state: CapabilityState,
+        base: List<String>,
+        modes: ProductModePolicy.ModeProjection,
+    ): List<String> {
+        if (!modes.researchModeEnabled) return base
+        return buildList {
+            if (base.isNotEmpty()) addAll(base)
+            add("research_mode")
+            if (modes.rawDiagnosticsAllowed) add("research_mode_raw_diagnostics")
+            if (modes.backendSelectionOptionsAllowed) add("research_mode_backend_selection")
+            if (base.isEmpty() && binding.isEngineBound()) {
+                // UNKNOWN cell: research mode discloses why (extra diagnostics),
+                // never operability.
+                add("engine_cell_unqualified")
+                add("no_device_evidence_pack")
+            }
+        }
+    }
+
+    /**
+     * Production entry for the risky-performance path (FTR-03). Fail closed:
+     * risky mode OFF, missing/unknown/consumed/version-stale ack, or
+     * non-LOCAL_ADMIN principal ⇒ FORBIDDEN (see [ProductModePolicy]).
+     *
+     * The in-memory ledger is process-local: after a runtime restart every ack
+     * is gone and must be re-acknowledged (safety-favorable; a durable adapter
+     * is reported for a later wave).
+     */
+    interface ProductModeRiskPort {
+        /**
+         * Mint a one-use [ProductModePolicy.RiskAck] bound to the current
+         * settings resourceVersion. LOCAL_ADMIN (LOCAL_UI) only; refused while
+         * risky mode is OFF; refused when [ackId] already exists.
+         */
+        fun acknowledgeRiskyPerformance(principal: PrincipalId, ackId: String): OmniResult<Unit>
+
+        /**
+         * Run [riskyCall] only when risky performance mode is enabled AND a
+         * valid unconsumed [ackId] bound to [principal] is presented. The ack
+         * is consumed on success (one ack = one use).
+         */
+        suspend fun <T> runRiskyPerformance(
+            principal: PrincipalId,
+            ackId: String?,
+            riskyCall: suspend () -> OmniResult<T>,
+        ): OmniResult<T>
+    }
+
+    fun productModeRisk(
+        policy: () -> PolicyManager,
+        store: ProductModePolicy.RiskAckStore = ProductModePolicy.InMemoryRiskAckStore(),
+        clockMs: () -> Long = { System.currentTimeMillis() },
+    ): ProductModeRiskPort = ProductModeRiskPortImpl(policy, store, clockMs)
 
     /**
      * Probe candidate for capability-state computation (ARC-06).
@@ -874,5 +988,81 @@ private class OrchestratorToolsInferencePort(
                 error = view.errorCode?.let { OmniError.INTERNAL(message = it) },
             ),
         )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Product-mode risk gate (FTR-03 production entry)
+// ---------------------------------------------------------------------------
+
+private class ProductModeRiskPortImpl(
+    private val policy: () -> PolicyManager,
+    private val store: ProductModePolicy.RiskAckStore,
+    private val clockMs: () -> Long,
+) : ControlPlaneFeaturePorts.ProductModeRiskPort {
+
+    override fun acknowledgeRiskyPerformance(principal: PrincipalId, ackId: String): OmniResult<Unit> {
+        if (principal.value != LocalUiPrincipal.ID.value) {
+            return OmniResult.err(
+                OmniError.FORBIDDEN(
+                    message = "risk ack requires LOCAL_ADMIN (LOCAL_UI) principal",
+                ),
+            )
+        }
+        if (ackId.isBlank()) {
+            return OmniResult.err(OmniError.INVALID_REQUEST(message = "ackId must be non-blank"))
+        }
+        val snapshot = policy().settingsSnapshot()
+        if (!ProductModePolicy.riskyPerformanceModeEnabled(snapshot)) {
+            return OmniResult.err(
+                OmniError.FORBIDDEN(
+                    message = "risky performance mode disabled; cannot ack",
+                    details = mapOf("setting" to "product.riskyPerformanceModeEnabled"),
+                ),
+            )
+        }
+        if (store.find(ackId) != null) {
+            return OmniResult.err(
+                OmniError.FORBIDDEN(
+                    message = "risk ack id already used (one ack = one use)",
+                    details = mapOf("ackId" to ackId),
+                ),
+            )
+        }
+        store.save(
+            ProductModePolicy.RiskAck(
+                ackId = ackId,
+                principalId = principal.value,
+                riskId = ProductModePolicy.RISKY_PERFORMANCE_RISK_ID,
+                policyVersion = snapshot.resourceVersion,
+                acknowledgedAtEpochMs = clockMs(),
+            ),
+        )
+        return OmniResult.ok(Unit)
+    }
+
+    override suspend fun <T> runRiskyPerformance(
+        principal: PrincipalId,
+        ackId: String?,
+        riskyCall: suspend () -> OmniResult<T>,
+    ): OmniResult<T> {
+        val snapshot = policy().settingsSnapshot()
+        val stored = ackId?.let { store.find(it) }
+        if (stored != null && stored.principalId != principal.value) {
+            return OmniResult.err(
+                OmniError.FORBIDDEN(message = "risk ack not bound to principal"),
+            )
+        }
+        return when (
+            val gated = ProductModePolicy.requireRiskyPerformanceAccess(
+                snapshot = snapshot,
+                store = store,
+                ack = stored,
+                nowEpochMs = clockMs(),
+            )
+        ) {
+            is OmniResult.Err -> OmniResult.err(gated.error)
+            is OmniResult.Ok -> riskyCall()
+        }
     }
 }

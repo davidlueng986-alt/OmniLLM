@@ -7,6 +7,7 @@ import com.omnillm.android.runtimeservice.BuildConfig
 import com.omnillm.android.runtimeservice.binder.AssetHandleBroker
 import com.omnillm.android.runtimeservice.binder.ClientRegistrationStore
 import com.omnillm.android.runtimeservice.binder.StreamSessionRegistry
+import com.omnillm.android.runtimeservice.featurehost.ControlPlaneFeaturePorts
 import com.omnillm.android.runtimeservice.featurehost.FeaturePackHost
 import com.omnillm.android.runtimeservice.featurehost.WaveAFeaturePacks
 import com.omnillm.android.runtimeservice.featurehost.WaveAWiring
@@ -52,6 +53,7 @@ import com.omnillm.runtime.modelmanager.ModelManagerModule
 import com.omnillm.runtime.observability.ObservabilityFacade
 import com.omnillm.runtime.orchestrator.Orchestrator
 import com.omnillm.runtime.policy.PolicyManager
+import com.omnillm.runtime.policy.ProductModePolicy
 import com.omnillm.runtime.requestregistry.CommandLedger
 import com.omnillm.runtime.requestregistry.CommitLedger
 import com.omnillm.runtime.requestregistry.RequestRegistry
@@ -114,6 +116,13 @@ class RuntimeControlPlane private constructor(
     val registrations: ClientRegistrationStore,
     val streamSessions: StreamSessionRegistry,
     val assetBroker: AssetHandleBroker,
+    /**
+     * FTR-03: production risky-performance gate (ProductModePolicy). The ack
+     * ledger is in-memory and process-local — a runtime restart requires
+     * re-acknowledgment (safety-favorable); a durable adapter is reported for
+     * a later wave. Defaults to a shared process-local ledger per plane.
+     */
+    val productModeRisk: ControlPlaneFeaturePorts.ProductModeRiskPort,
     /**
      * Variant-scoped build posture (BLD-02): debug ⇒ dev mode ON, release ⇒ OFF.
      * Wired at [attach] from BuildConfig.OMNILLM_DEV_SHIP_MODE; never mutable.
@@ -621,6 +630,15 @@ class RuntimeControlPlane private constructor(
                     quarantineDir = assetQuarantine,
                     durable = controlDb.assetRecords,
                 )
+                // FTR-03: process-local risky-performance gate. The in-memory ack
+                // ledger is shared plane-wide (one ledger per runtime process);
+                // restart ⇒ all acks gone ⇒ re-ack required (safety-favorable,
+                // documented; durable adapter reported for a later wave).
+                val productModeRisk = ControlPlaneFeaturePorts.productModeRisk(
+                    policy = { policy },
+                    store = ProductModePolicy.InMemoryRiskAckStore(),
+                    clockMs = { System.currentTimeMillis() },
+                )
 
                 val plane = RuntimeControlPlane(
                     appContext = appContext,
@@ -643,6 +661,7 @@ class RuntimeControlPlane private constructor(
                     registrations = registrations,
                     streamSessions = streamSessions,
                     assetBroker = assetBroker,
+                    productModeRisk = productModeRisk,
                     buildMode = buildMode,
                 )
                 planeRef.set(plane)
