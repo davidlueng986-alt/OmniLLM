@@ -167,7 +167,12 @@ class OfficialLitertLmSdkBridge : LitertLmSdkBridge {
     private val conversations = ConcurrentHashMap<String, Conversation>()
     /** operationToken → conversation token for best-effort cancelProcess(). */
     private val operationToConversation = ConcurrentHashMap<String, String>()
-    private val cancelRequested = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Bounded cooperative-cancel registry (D19): cap + FIFO eviction +
+     * consume-on-completion — never unbounded (mirrors the native 1024 cap).
+     */
+    internal val cancelRequestedRegistry: BoundedCancelRegistry = BoundedCancelRegistry()
     private val engineSeq = AtomicInteger(0)
     private val conversationSeq = AtomicInteger(0)
 
@@ -272,7 +277,8 @@ class OfficialLitertLmSdkBridge : LitertLmSdkBridge {
                     message = "unknown conversation token",
                 ),
             )
-        if (cancelFlag() || cancelRequested.contains(request.operationToken)) {
+        if (cancelFlag() || cancelRequestedRegistry.contains(request.operationToken)) {
+            cancelRequestedRegistry.consume(request.operationToken)
             return SdkResult.err(
                 SdkError(code = SdkErrorCode.CANCELLED, message = "cancelled before generate"),
             )
@@ -302,7 +308,7 @@ class OfficialLitertLmSdkBridge : LitertLmSdkBridge {
             override fun onMessage(message: Message) {
                 lastActivity.set(System.nanoTime())
                 if (cancelled.get()) return
-                if (cancelFlag() || cancelRequested.contains(request.operationToken)) {
+                if (cancelFlag() || cancelRequestedRegistry.contains(request.operationToken)) {
                     cancelled.set(true)
                     runCatching { conv.cancelProcess() }
                     return
@@ -332,7 +338,7 @@ class OfficialLitertLmSdkBridge : LitertLmSdkBridge {
                         completionTokens = usageDelta(promptTokensBefore, conv.getTokenCount()),
                         stopReason = if (cancelled.get() ||
                             cancelFlag() ||
-                            cancelRequested.contains(request.operationToken)
+                            cancelRequestedRegistry.contains(request.operationToken)
                         ) {
                             "CANCELLED"
                         } else {
@@ -364,7 +370,7 @@ class OfficialLitertLmSdkBridge : LitertLmSdkBridge {
         // Blocking wait (bridge contract is synchronous). Cooperative cancel is polled so
         // requestCancel / cancelFlag reach cancelProcess() promptly.
         while (!done.get()) {
-            if (cancelled.get() || cancelFlag() || cancelRequested.contains(request.operationToken)) {
+            if (cancelled.get() || cancelFlag() || cancelRequestedRegistry.contains(request.operationToken)) {
                 cancelled.set(true)
                 runCatching { conv.cancelProcess() }
             }
@@ -383,6 +389,9 @@ class OfficialLitertLmSdkBridge : LitertLmSdkBridge {
             Thread.sleep(POLL_INTERVAL_MS)
         }
         operationToConversation.remove(request.operationToken)
+        // D19: a completed operation consumes its cancel token — the registry
+        // never grows without bound.
+        cancelRequestedRegistry.consume(request.operationToken)
 
         failure.get()?.let { err ->
             if (err.code == SdkErrorCode.CANCELLED) {
@@ -449,7 +458,7 @@ class OfficialLitertLmSdkBridge : LitertLmSdkBridge {
     }
 
     override fun requestCancel(operationToken: String): SdkResult<Unit> {
-        cancelRequested.add(operationToken)
+        cancelRequestedRegistry.add(operationToken)
         // Best-effort native cancel: find the in-flight conversation and ask the SDK to stop.
         // Stopping future output ≠ native execution stopped (ENGINE-LITERT §6 / b/450903294).
         val conversationToken = operationToConversation[operationToken]

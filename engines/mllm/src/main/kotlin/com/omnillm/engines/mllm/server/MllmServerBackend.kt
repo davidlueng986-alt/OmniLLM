@@ -1,7 +1,5 @@
 package com.omnillm.engines.mllm.server
 
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -32,15 +30,30 @@ import java.util.concurrent.atomic.AtomicReference
  * - Server does not authenticate ⇒ credential is adapter-enforced
  *   ([authenticate] accepts only the runtime credential the adapter injected;
  *   [generate]/[loadModel] refuse without it).
+ * - The upstream mobile StartServer launches its HTTP listener in a goroutine
+ *   and drops the bind error (returns a nominal "Success" even when another
+ *   process pre-bound 127.0.0.1:8080) ⇒ [loadModel] runs a post-start
+ *   IDENTITY PROBE (D3): a per-session nonce is reflected through the
+ *   upstream model-not-found 404 template; any mismatch or refusal fails
+ *   closed (SERVER_IMPERSONATED / SERVER_CRASH). The port is fixed upstream
+ *   (no ephemeral-port option — verified against the AAR binding).
  *
  * Fail closed: no credential, no resolved model path, unknown session token,
- * missing prompt body, unreachable server — all return errors; never success.
+ * missing prompt body, unreachable server, unverifiable server identity — all
+ * return errors; never success.
  */
 class MllmServerBackend(
     private val bridge: MllmServerBridge,
     private val transport: MllmHttpTransport,
     private val serverHost: String = MllmOpenAiProtocol.HOST,
     private val serverPort: Int = MllmOpenAiProtocol.PORT,
+    /**
+     * Post-start identity probe requirement (D3). Default REQUIRED. When the
+     * probe cannot run, loadModel fails closed with SERVER_IMPERSONATED —
+     * there is no load path without identity verification (escape hatch that
+     * only makes the failure explicit; never disables the check silently).
+     */
+    private val identityProbeEnabled: Boolean = true,
 ) : ServerBackend {
 
     override fun libraryLabel(): String = "mllm-server-gomllm"
@@ -58,7 +71,12 @@ class MllmServerBackend(
     private val modelName = AtomicReference<String?>(null)
 
     private val sessions = ConcurrentHashMap<String, ServerSessionToken>()
-    private val cancelTokens = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Bounded cooperative-cancel registry (D19): cap + FIFO eviction +
+     * consume-on-completion — never unbounded (mirrors the native 1024 cap).
+     */
+    internal val cancelRegistry: BoundedCancelRegistry = BoundedCancelRegistry()
 
     private val modelSeq = AtomicInteger(0)
 
@@ -152,17 +170,22 @@ class MllmServerBackend(
                 ),
             )
         }
-        val reachable = tcpReachable()
+        val outcome = identityProbe()
+        val available = outcome == IdentityProbeOutcome.VERIFIED
         return ServerResult.ok(
             ServerProbeOutcome(
-                available = reachable,
+                available = available,
                 backend = request.backend,
                 attributes = mapOf(
                     "library" to libraryLabel(),
                     "operationToken" to request.operationToken,
                     "native" to "true",
                     "started" to "true",
-                    "reachable" to reachable.toString(),
+                    // Identity-verified reachability — a bare TCP connect is
+                    // never proof of OUR server (D3).
+                    "reachable" to available.toString(),
+                    "identityVerified" to available.toString(),
+                    "probe" to "nonce-reflection",
                     "protocol" to PrivateChannelProtocol.PROTOCOL_ID,
                     "method" to PrivateChannelProtocol.Methods.PROBE,
                 ),
@@ -226,15 +249,61 @@ class MllmServerBackend(
                 ),
             )
         }
-        if (!tcpReachable()) {
+        if (isStartFailureStatus(status)) {
             lifecycle.set(ServerLifecycleState.FAILED)
             return ServerResult.err(
                 ServerError(
                     code = ServerErrorCode.SERVER_CRASH,
-                    message = "in-app server not reachable on $serverHost:$serverPort " +
-                        "after start (upstream status: $status)",
+                    message = "Gomllm.startServer reported failure: $status — " +
+                        "load fails closed (status is never swallowed)",
+                    attributes = mapOf("capability" to "mllm.LOAD"),
                 ),
             )
+        }
+        if (!identityProbeEnabled) {
+            // Escape hatch: environments where probing is impossible fail
+            // closed — there is NO load path without identity verification.
+            lifecycle.set(ServerLifecycleState.FAILED)
+            return ServerResult.err(
+                ServerError(
+                    code = ServerErrorCode.SERVER_IMPERSONATED,
+                    message = "identity probe disabled; refusing unverified load " +
+                        "(fail-closed escape hatch, D3)",
+                    attributes = mapOf("capability" to "mllm.LOAD"),
+                ),
+            )
+        }
+        when (val outcome = identityProbe()) {
+            IdentityProbeOutcome.VERIFIED -> Unit
+            IdentityProbeOutcome.REFUSED -> {
+                // Nothing (or nothing reachable) answered — the upstream server
+                // failed to come up (the mobile StartServer drops the goroutine
+                // bind error, so the status string alone is not authoritative).
+                lifecycle.set(ServerLifecycleState.FAILED)
+                return ServerResult.err(
+                    ServerError(
+                        code = ServerErrorCode.SERVER_CRASH,
+                        message = "in-app server refused the identity probe on " +
+                            "$serverHost:$serverPort after start " +
+                            "(upstream status: $status)",
+                    ),
+                )
+            }
+            IdentityProbeOutcome.IMPERSONATED -> {
+                // The port answered but did not prove it is the upstream mllm
+                // server — consistent with a pre-bound port / port squat.
+                lifecycle.set(ServerLifecycleState.FAILED)
+                return ServerResult.err(
+                    ServerError(
+                        code = ServerErrorCode.SERVER_IMPERSONATED,
+                        message = "loopback port $serverHost:$serverPort answered but " +
+                            "failed the post-start identity probe — another process " +
+                            "may have pre-bound the port; refusing load " +
+                            "(upstream status: $status)",
+                        attributes = mapOf("capability" to "mllm.LOAD"),
+                    ),
+                )
+            }
         }
         val token = ServerModelToken("mllm-model-${modelSeq.incrementAndGet()}")
         modelSlot.set(token)
@@ -303,7 +372,8 @@ class MllmServerBackend(
                         "canonicalInputDigest to content before start",
                 ),
             )
-        if (cancelFlag() || cancelTokens.contains(request.operationToken)) {
+        if (cancelFlag() || cancelRegistry.contains(request.operationToken)) {
+            cancelRegistry.consume(request.operationToken)
             onEvent(
                 ServerStreamEvent.Stop(
                     stopReason = MllmOpenAiProtocol.STOP_REASON_CANCELLED,
@@ -339,46 +409,52 @@ class MllmServerBackend(
 
         var deltaCount = 0
         var sawStop = false
-        val result = transport.postChatCompletions(
-            url = MllmOpenAiProtocol.chatCompletionsUrl(serverHost, serverPort),
-            bodyJson = body,
-            credentialHeader = cfg.runtimeCredential,
-            cancelFlag = {
-                cancelFlag() || cancelTokens.contains(request.operationToken)
-            },
-            onData = { data ->
-                when (val event = MllmOpenAiProtocol.parseSseData(data)) {
-                    is MllmOpenAiProtocol.SseEvent.Delta -> {
-                        deltaCount++
-                        onEvent(
-                            ServerStreamEvent.Delta(
-                                textFragment = event.text,
-                                attributes = mapOf(
-                                    "index" to deltaCount.toString(),
-                                    "usageAvailable" to "false",
+        val result = try {
+            transport.postChatCompletions(
+                url = MllmOpenAiProtocol.chatCompletionsUrl(serverHost, serverPort),
+                bodyJson = body,
+                credentialHeader = cfg.runtimeCredential,
+                cancelFlag = {
+                    cancelFlag() || cancelRegistry.contains(request.operationToken)
+                },
+                onData = { data ->
+                    when (val event = MllmOpenAiProtocol.parseSseData(data)) {
+                        is MllmOpenAiProtocol.SseEvent.Delta -> {
+                            deltaCount++
+                            onEvent(
+                                ServerStreamEvent.Delta(
+                                    textFragment = event.text,
+                                    attributes = mapOf(
+                                        "index" to deltaCount.toString(),
+                                        "usageAvailable" to "false",
+                                    ),
                                 ),
-                            ),
-                        )
-                        true
+                            )
+                            true
+                        }
+                        is MllmOpenAiProtocol.SseEvent.Stop -> {
+                            sawStop = true
+                            onEvent(
+                                ServerStreamEvent.Stop(
+                                    stopReason = event.reason,
+                                    attributes = mapOf("deltaCount" to deltaCount.toString()),
+                                ),
+                            )
+                            false
+                        }
+                        is MllmOpenAiProtocol.SseEvent.Warning -> {
+                            onEvent(ServerStreamEvent.Warning(attributes = mapOf("message" to event.message)))
+                            true
+                        }
+                        MllmOpenAiProtocol.SseEvent.Ignore -> true
                     }
-                    is MllmOpenAiProtocol.SseEvent.Stop -> {
-                        sawStop = true
-                        onEvent(
-                            ServerStreamEvent.Stop(
-                                stopReason = event.reason,
-                                attributes = mapOf("deltaCount" to deltaCount.toString()),
-                            ),
-                        )
-                        false
-                    }
-                    is MllmOpenAiProtocol.SseEvent.Warning -> {
-                        onEvent(ServerStreamEvent.Warning(attributes = mapOf("message" to event.message)))
-                        true
-                    }
-                    MllmOpenAiProtocol.SseEvent.Ignore -> true
-                }
-            },
-        )
+                },
+            )
+        } finally {
+            // D19: a completed operation consumes its cancel token — the
+            // registry never grows without bound.
+            cancelRegistry.consume(request.operationToken)
+        }
 
         return when (result) {
             is MllmHttpTransport.Result.Completed -> {
@@ -479,7 +555,7 @@ class MllmServerBackend(
     )
 
     override fun requestCancel(operationToken: String): ServerResult<Unit> {
-        cancelTokens.add(operationToken)
+        cancelRegistry.add(operationToken)
         return ServerResult.ok(Unit)
     }
 
@@ -505,13 +581,65 @@ class MllmServerBackend(
 
     private fun defaultTmpDir(): String = System.getProperty("java.io.tmpdir").orEmpty()
 
-    private fun tcpReachable(): Boolean = try {
-        Socket().use { socket ->
-            socket.connect(InetSocketAddress(serverHost, serverPort), CONNECT_TIMEOUT_MS)
-            true
+    /**
+     * D3 identity probe outcome. A bare TCP connect proves nothing — an
+     * attacker app can pre-bind 127.0.0.1:8080 before our in-process Go
+     * server starts (the upstream mobile StartServer launches the listener in
+     * a goroutine and DROPS the bind error, returning "Success").
+     */
+    private enum class IdentityProbeOutcome { VERIFIED, REFUSED, IMPERSONATED }
+
+    /**
+     * Post-start identity probe: send a per-session unique nonce to the
+     * loopback server as an unknown model name and require the exact upstream
+     * 404 error template reflecting our nonce (mllm-cli/pkg/server/
+     * handlers.go, verified 2026-08-15). Only the real upstream server
+     * produces that shape; a passive squat (port bound, no service), a
+     * generic OpenAI-compatible impostor, or our own server that failed to
+     * bind all fail closed.
+     */
+    private fun identityProbe(): IdentityProbeOutcome {
+        val cfg = channelConfig.get() ?: return IdentityProbeOutcome.REFUSED
+        val nonce = "omnillm-${UUID.randomUUID()}"
+        val probeModel = MllmOpenAiProtocol.identityProbeModel(nonce)
+        val body = MllmOpenAiProtocol.buildIdentityProbeBody(probeModel, nonce)
+        return try {
+            val result = transport.postJson(
+                url = MllmOpenAiProtocol.chatCompletionsUrl(serverHost, serverPort),
+                bodyJson = body,
+                credentialHeader = cfg.runtimeCredential,
+            )
+            when (result) {
+                is MllmHttpTransport.Result.Failed ->
+                    if (MllmOpenAiProtocol.verifyIdentityProbeResponse(
+                            status = result.status,
+                            body = result.message.orEmpty(),
+                            probeModelName = probeModel,
+                        )
+                    ) {
+                        IdentityProbeOutcome.VERIFIED
+                    } else if (result.status == 0) {
+                        IdentityProbeOutcome.REFUSED
+                    } else {
+                        IdentityProbeOutcome.IMPERSONATED
+                    }
+                else -> IdentityProbeOutcome.IMPERSONATED
+            }
+        } catch (_: Throwable) {
+            IdentityProbeOutcome.REFUSED
         }
-    } catch (_: Exception) {
-        false
+    }
+
+    /**
+     * Advisory check of the upstream status string. The upstream mobile
+     * StartServer drops its goroutine bind error and returns "Success", so a
+     * nominal status is NOT proof of a live server — the identity probe is
+     * authoritative. This catches only clearly-failing statuses.
+     */
+    private fun isStartFailureStatus(status: String): Boolean {
+        val lower = status.lowercase()
+        return listOf("error", "fail", "panic", "already in use", "address in use")
+            .any { lower.contains(it) }
     }
 
     companion object {

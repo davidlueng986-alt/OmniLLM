@@ -79,6 +79,23 @@ See `PrivateChannelProtocol` / `ServerBackend`:
 
 `MllmServerBackend` is the production default. `StubServerBackend` is kept for host unit tests only — never a silent production fallback.
 
+## Server identity & auth (D3 / D4 hardening)
+
+**Threat (port squat):** the upstream port is fixed at `127.0.0.1:8080` (the AAR binding `gomllm.Gomllm.startServer(String, String, String, boolean)` has no port argument — ephemeral-port is **not** feasible upstream). An attacker app can pre-bind `127.0.0.1:8080` in its own process; our in-process Go server then fails to bind **silently** — the upstream mobile `StartServer` launches its HTTP listener in a goroutine and drops the bind error (returns a nominal "Success"). A bare TCP connect cannot distinguish the impostor from our server.
+
+**Mitigation (D3, fail-closed):** after `startServer`, `loadModel` runs a **post-start identity probe**:
+
+1. Advisory status check: a clearly-failing `startServer` status (`error` / `fail` / `panic` / bind-in-use) → `SERVER_CRASH` (never swallowed).
+2. Probe: `POST /v1/chat/completions` with a per-session unique nonce as an **unknown model name** (`omnillm-identity-probe-<uuid>`). The upstream handler (mllm-cli/pkg/server/handlers.go, verified 2026-08-15) rejects unknown models before any inference with HTTP 404 + `Model '<name>' is not available on this server.` — reflecting our nonce.
+3. Verification requires the **exact** upstream template + nonce reflection. Anything else fails closed:
+   - refused / nothing listening → `SERVER_CRASH`
+   - port answered with a different shape (200, generic OpenAI error, wrong template) → `SERVER_IMPERSONATED` (pre-bound port / squat)
+4. `probe()` uses the same identity probe — never bare TCP.
+
+**Escape hatch:** `MllmServerBackend(identityProbeEnabled = false)` exists for environments where probing is impossible, but it **fails closed** (`SERVER_IMPERSONATED`, "identity probe disabled; refusing unverified load") — there is deliberately **no** load path without identity verification.
+
+**Residual (D4 — documented honestly, no fake auth claims):** the upstream Go server does **not authenticate** — the `X-Omni-Mllm-Credential` header is adapter-enforced only and the server ignores it. The identity probe is the primary mitigation: a passive squatter (bound port, no service) and a generic OpenAI-compatible impostor are both rejected. The remaining residual is an attacker who **actively** serves the exact upstream protocol AND reflects our probe template — including an attacker app that ships the same upstream AAR. This residual cannot be closed upstream (no auth, no port argument, no process token); it is capped by the control plane: `EngineSelectionPolicy.mayUseRealNativeBackend("mllm", releaseMode)` is false until qualification evidence — mllm is metadata-only in release.
+
 ## Artifact provisioning
 
 - `mllm_server.aar` is **tracked** (`libs/`, sha256 in lock) — upstream commits it in the mllm-chat repo.
@@ -120,13 +137,14 @@ MllmModule.seedUnqualifiedPlaceholders(
 ## Known limitations (ENGINE-MLLM §9, upstream-verified 2026-08-09)
 
 1. Single chat-model slot per process; no stop API, no unload API, no embedding API upstream (honest errors, not stubs).
-2. Server does not authenticate — runtime credential is adapter-enforced only; loopback port 8080 fixed upstream.
+2. Server does not authenticate — runtime credential is adapter-enforced only; loopback port 8080 fixed upstream (no ephemeral port). Identity is verified by the post-start nonce probe (D3); an attacker actively mimicking the full upstream protocol remains a documented residual (D4).
 3. Cancellation is connection-close; native decode halt unproven — measure before claiming COOPERATIVE.
 4. Tokenizer / KV / prefix / embedding / multimodal need API + cell evidence before publication.
 5. Go/server overhead and shutdown latency must be measured; do not copy JNI envelope assumptions.
 6. Server crash poisons its sessions; Runtime ledger owns client query answers.
 7. QNN NPU libs not packaged (4 KB alignment only); OCR path single-turn/image-mandatory — unsupported-by-default.
 8. Prompt content resolution (`canonicalInputDigest` → `promptUtf8`) is control-plane Stage-5 work; the backend fails closed with `INVALID_ARGUMENT` until wired.
+9. Identity-probe nonce is a per-load per-session UUID; the probe proves "an upstream-protocol-compliant server is answering", not process identity (no process token upstream).
 
 ## Hard rules
 
@@ -138,6 +156,8 @@ MllmModule.seedUnqualifiedPlaceholders(
 6. Do not invent types/enums/states absent from `specs/`.
 7. UI never loads this engine (INV-001). Adapter never writes OmniLLM DB (ADR-010).
 8. Missing AAR / jniLibs / resolved path never reports load success.
+9. **No load without identity verification**: `loadModel` requires the post-start nonce probe (D3); a pre-bound port, a non-echoing responder, or a disabled probe all fail closed (`SERVER_IMPERSONATED` / `SERVER_CRASH`). Bare TCP reachability is never treated as server identity.
+10. Cancel bookkeeping is bounded (`BoundedCancelRegistry`, 1024 cap + FIFO eviction + consume-on-completion, D19).
 
 ## Status
 

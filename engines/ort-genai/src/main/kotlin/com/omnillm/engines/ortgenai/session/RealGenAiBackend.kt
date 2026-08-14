@@ -48,7 +48,12 @@ class RealGenAiBackend(
 
     private val models = ConcurrentHashMap<String, LoadedModel>()
     private val sessions = ConcurrentHashMap<String, ActiveSession>()
-    private val cancelTokens = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Bounded cooperative-cancel registry (D19): cap + FIFO eviction +
+     * consume-on-completion — never unbounded (mirrors the native 1024 cap).
+     */
+    internal val cancelRegistry: BoundedCancelRegistry = BoundedCancelRegistry()
     private val stagedPrompts = ConcurrentHashMap<String, String>()
     private val modelSeq = AtomicInteger(0)
     private val sessionSeq = AtomicInteger(0)
@@ -254,7 +259,7 @@ class RealGenAiBackend(
             generator.appendTokens(tokens)
 
             while (!generator.isDone() && emitted < request.maxTokens) {
-                if (cancelFlag() || cancelTokens.contains(request.operationToken)) {
+                if (cancelFlag() || cancelRegistry.contains(request.operationToken)) {
                     stopReason = CANCELLED
                     break
                 }
@@ -285,6 +290,9 @@ class RealGenAiBackend(
             return GenAiResult.err(GenAiError(code = e.code, message = e.message))
         } finally {
             runCatching { generator?.close() }
+            // D19: a completed operation consumes its cancel token — the
+            // registry never grows without bound.
+            cancelRegistry.consume(request.operationToken)
         }
 
         val completionTokens = runCatching {
@@ -362,7 +370,7 @@ class RealGenAiBackend(
         // Cooperative poll: the generate loop checks the registry between tokens.
         // The Java bindings expose no native cancel; ENGINE-ORTGENAI §6 requires
         // a killable worker for bounded preemption.
-        cancelTokens.add(operationToken)
+        cancelRegistry.add(operationToken)
         return GenAiResult.ok(Unit)
     }
 

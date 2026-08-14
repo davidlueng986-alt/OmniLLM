@@ -50,6 +50,46 @@ object MllmOpenAiProtocol {
     fun chatCompletionsUrl(host: String = HOST, port: Int = PORT): String =
         "http://$host:$port$CHAT_COMPLETIONS_PATH"
 
+    // --- D3 identity probe (post-start server identity verification) ---
+
+    /** Model-name prefix reserved for identity probes (never a real model). */
+    const val PROBE_MODEL_PREFIX: String = "omnillm-identity-probe-"
+
+    /** Per-session unique probe model name (nonce carried in the name itself). */
+    fun identityProbeModel(nonce: String): String = "$PROBE_MODEL_PREFIX$nonce"
+
+    fun isIdentityProbeModel(modelName: String): Boolean =
+        modelName.startsWith(PROBE_MODEL_PREFIX)
+
+    /**
+     * Probe body: an unknown model name + the per-session nonce. The upstream
+     * handler (mllm-cli/pkg/server/handlers.go, verified 2026-08-15) rejects
+     * unknown models BEFORE any model inference with HTTP 404 + the plain-text
+     * body `Model '<model>' is not available on this server.` — reflecting our
+     * unique nonce back. Unknown JSON fields are tolerated (map[string]any).
+     */
+    fun buildIdentityProbeBody(probeModelName: String, nonce: String): String =
+        buildJsonObject {
+            put("model", probeModelName)
+            put("stream", false)
+            put("id", nonce)
+            put(
+                "messages",
+                buildJsonArray {
+                    add(buildJsonObject { put("role", "user"); put("content", nonce) })
+                },
+            )
+        }.toString()
+
+    /**
+     * Verify the identity probe response. Passes only for the exact upstream
+     * error template with our probe model name reflected (status 404).
+     * Anything else (200, other 4xx/5xx shapes, non-echo) fails closed.
+     */
+    fun verifyIdentityProbeResponse(status: Int, body: String, probeModelName: String): Boolean =
+        status == 404 &&
+            body.contains("Model '$probeModelName' is not available on this server")
+
     /**
      * Build the OpenAI-compatible request body. [modelName] must be the name
      * the server registered for the loaded model (model directory name —

@@ -253,6 +253,12 @@ enum class ServerErrorCode {
     DEADLINE_EXCEEDED,
     RESOURCE_EXHAUSTED,
     SERVER_CRASH,
+    /**
+     * The loopback port answered but did not prove it is the upstream mllm
+     * server (identity probe mismatch). Typically a pre-bound port / port
+     * squat — never load-as-success (D3).
+     */
+    SERVER_IMPERSONATED,
     INTERNAL,
 }
 

@@ -49,11 +49,11 @@ operations:
   - id: PROBE
     design: server_reachability_probe
     runtimeDefault: UNKNOWN
-    notes: "Real: loopback TCP reachability + started-state after Gomllm.startServer"
+    notes: "Real: identity-verified loopback probe after Gomllm.startServer — post-start nonce reflection against the upstream 404 model-not-found template (D3); bare TCP is never treated as server identity"
   - id: LOAD
     design: server_start_is_model_load
     runtimeDefault: UNKNOWN
-    notes: "Real: Gomllm.startServer(modelPath,...) — single-model slot per process; resolvedModelPath required (INV-010 broker)"
+    notes: "Real: Gomllm.startServer(modelPath,...) — single-model slot per process; resolvedModelPath required (INV-010 broker); startServer status checked (never swallowed) + mandatory post-start identity probe: pre-bound port / non-echoing responder ⇒ SERVER_IMPERSONATED / SERVER_CRASH (D3)"
   - id: PLAN_INFERENCE
     design: conservative_envelope_if_no_separate_plan
     runtimeDefault: UNKNOWN
@@ -255,7 +255,9 @@ cells:
 unsupportedByDefault:
   - "Exactly-once semantics when server protocol lacks idempotent commit/query (no server-side commit ledger)"
   - "Localhost TCP without private channel + strong runtime credential (Host/CORS alone insufficient)"
-  - "Server-side authentication: upstream Go server has none — credential is adapter-enforced at the boundary"
+  - "Server-side authentication: upstream Go server has none — credential is adapter-enforced at the boundary; the post-start nonce identity probe (D3) is the primary port-squat mitigation"
+  - "Load without identity verification: no load path exists without the identity probe (D3); identityProbeEnabled=false fails closed with SERVER_IMPERSONATED"
+  - "Ephemeral loopback port: upstream AAR binding has no port argument (Gomllm.startServer(String,String,String,boolean)) — 127.0.0.1:8080 is fixed"
   - "Unload / shutdown of the Go server: upstream exposes no stop/unload API; process death is the only reclaim"
   - "Embedding: upstream Go server exposes no embedding API"
   - "Multimodal / OCR: DeepSeek-OCR path exists upstream but is single-turn + image-mandatory; unsupported-by-default here"
@@ -267,6 +269,7 @@ unsupportedByDefault:
   - "Orphan server / port collision recovery without measured cleanup path"
   - "Silent ignore of unsupported sampling / template / multimodal parameters"
   - "Prompt content resolution from canonicalInputDigest (control plane Stage-5 work; backend fails closed until then)"
+  - "Unbounded cancel bookkeeping (D19): cancel registry capped at 1024 with FIFO eviction + consume-on-completion"
 
 resourceEnvelopeDimensions:
   - cpuFileBytes
