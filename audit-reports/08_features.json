@@ -1,0 +1,647 @@
+[
+  {
+    "id": "FEAT-AUTOSETUP",
+    "l1": "PASS",
+    "l2": "PASS",
+    "l3": "PARTIAL",
+    "status": "PARTIAL",
+    "docPath": "docs/70-features/auto-setup.md",
+    "modulePath": "features/auto-setup",
+    "gradlePath": ":features:auto-setup",
+    "featureIdConstant": "FEAT-AUTOSETUP",
+    "capabilitiesCovered": [
+      "DEVICE_DISCOVERY",
+      "RECOMMENDATION",
+      "AUTOMATED_CONFIGURATION",
+      "MODEL_ACQUISITION",
+      "JOB_LIFECYCLE"
+    ],
+    "capabilitiesMissingOrPartial": [
+      "SAFE_INSTALLATION(UI path partial)",
+      "COMPATIBILITY_EVALUATION(no device evidence)",
+      "RESOURCE_ACCOUNTING(partial)",
+      "USABILITY_VALIDATION(partial)",
+      "ACCESSIBILITY_VALIDATION(partial)"
+    ],
+    "uiSurface": [
+      "OmniDestination.Onboarding",
+      "OnboardingScreen",
+      "AutoSetupViewModel via AdminLiveFeatureFactory"
+    ],
+    "httpAidSurface": [
+      "IOmniAdmin.startJob DOWNLOAD/IMPORT",
+      "no dedicated HTTP autosetup ops"
+    ],
+    "tests": [
+      "features/auto-setup/.../AutoSetupServiceTest (9)",
+      "RecommendationRankerTest (7)",
+      "AutomatedConfigurationBuilderTest (4)",
+      "AutoSetupStateProjectionTest (6)"
+    ],
+    "evidence": [
+      "features/auto-setup/src/main/kotlin/com/omnillm/features/autosetup/AutoSetupModule.kt FEATURE_ID=FEAT-AUTOSETUP MODULE_PATH=:features:auto-setup",
+      "android/runtime-service/.../WaveAWiring.kt WAVE_A_FEATURE_IDS includes AutoSetupModule; AutoSetupModule.createApi with JobManager/ModelManager/Orchestrator ports",
+      "android/app-ui/.../AdminLiveFeatureFactory.kt createAutoSetupViewModel uses FailClosedAutoSetupModelPort + FailClosedAutoSetupOrchestratorPort",
+      "android/app-ui/.../OmniNavHost.kt OnboardingScreen",
+      "settings.gradle.kts :features:auto-setup"
+    ],
+    "gaps": [
+      "UI path fail-closes model and orchestrator ports — cannot complete planLoad/first-inference from LOCAL_UI alone",
+      "AndroidUiDeviceProbe omits RAM/storage/battery (nulls)",
+      "Full zero-model to first-success journey not software-complete without plane-hosted ports"
+    ]
+  },
+  {
+    "id": "FEAT-MODELHUB",
+    "l1": "PASS",
+    "l2": "PASS",
+    "l3": "PARTIAL",
+    "status": "PARTIAL",
+    "docPath": "docs/70-features/modelhub-acquisition.md",
+    "modulePath": "features/modelhub",
+    "gradlePath": ":features:modelhub",
+    "featureIdConstant": "FEAT-MODELHUB",
+    "capabilitiesCovered": [
+      "MODEL_ACQUISITION",
+      "MODEL_IDENTITY",
+      "SAFE_INSTALLATION",
+      "JOB_LIFECYCLE",
+      "JOB_RECOVERY",
+      "LOCAL_UI_INTERFACE"
+    ],
+    "capabilitiesMissingOrPartial": [
+      "MODEL_LIFECYCLE(Admin load/unload/pin/delete unsupported)",
+      "COMPATIBILITY_EVALUATION(often NOT_CHECKED)",
+      "RESOURCE_ACCOUNTING(partial)"
+    ],
+    "uiSurface": [
+      "OmniDestination.ModelHub primary rail",
+      "ModelHubScreen",
+      "ModelHubLocalImporter (SAF PFD)"
+    ],
+    "httpAidSurface": [
+      "IOmniAdmin.startJob DOWNLOAD/IMPORT",
+      "IOmniAdmin.importLocalFile",
+      "IOmniAdmin.getSnapshot models",
+      "HTTP /v1/models"
+    ],
+    "tests": [
+      "ModelHubServiceTest (19)",
+      "AcquisitionPipelineTest (7)",
+      "OkHttpArtifactByteSourceTest (12)"
+    ],
+    "evidence": [
+      "features/modelhub/.../ModelhubModule.kt FEATURE_ID=FEAT-MODELHUB",
+      "WaveAWiring modelHub = ModelhubModule.createApi(jobManager, modelManager, OfflineFixtureCatalog)",
+      "AdminProjectedModelHubApi startDownload/startImport/cancelAcquisition; startDelete/setPinned/startLoad/startUnload/acceptLicense CAPABILITY_UNSUPPORTED",
+      "IOmniAdmin.aidl importLocalFile + startJob",
+      "OmniNavHost ModelHubScreen"
+    ],
+    "gaps": [
+      "Admin projection lacks delete/pin/load/unload/license mutations",
+      "Worker pipeline begin/progress/complete methods control-plane only on Admin API",
+      "Device authenticity/compatibility evidence not elevated"
+    ]
+  },
+  {
+    "id": "FEAT-PLAYGROUND",
+    "l1": "PASS",
+    "l2": "PASS",
+    "l3": "PARTIAL",
+    "status": "PARTIAL",
+    "docPath": "docs/70-features/local-playground.md",
+    "modulePath": "features/playground",
+    "gradlePath": ":features:playground",
+    "featureIdConstant": "FEAT-PLAYGROUND",
+    "capabilitiesCovered": [
+      "TEXT_GENERATION",
+      "REQUEST_LIFECYCLE",
+      "CANCELLATION",
+      "AIDL_INTERFACE",
+      "LOCAL_UI_INTERFACE",
+      "STREAMING(plane/runtime)",
+      "SESSION_LIFECYCLE(partial)"
+    ],
+    "capabilitiesMissingOrPartial": [
+      "EMBEDDING(Admin CAPABILITY_UNKNOWN)",
+      "VISION_INPUT(tab only; capability fail-closed)",
+      "AUDIO_INPUT(tab only; capability fail-closed)",
+      "DEADLINE(partial)",
+      "USABILITY_VALIDATION(partial)",
+      "ACCESSIBILITY_VALIDATION(partial)"
+    ],
+    "uiSurface": [
+      "OmniDestination.Playground primary rail",
+      "PlaygroundScreen tabs CHAT/EMBEDDINGS/VISION_AUDIO/STRUCTURED_TOOLS"
+    ],
+    "httpAidSurface": [
+      "IOmniAdmin.executePlaygroundChat|queryPlaygroundRequest|cancelPlaygroundRequest",
+      "IOmniRuntime.chat|embed|cancelRequest|queryRequest",
+      "HTTP /v1/chat/completions /v1/embeddings /omni/v1/requests"
+    ],
+    "tests": [
+      "PlaygroundCancelTest (10)",
+      "PlaygroundCapabilityNegotiationTest (14)",
+      "PlaygroundStreamEventsLocalUiGateTest (2)"
+    ],
+    "evidence": [
+      "features/playground/.../PlaygroundModule.kt FEATURE_ID=FEAT-PLAYGROUND REQUIRED_CAPABILITIES includes TEXT_GENERATION EMBEDDING VISION AUDIO",
+      "WaveAWiring playgroundInference via ControlPlaneFeaturePorts; structured=ToolsApiPlaygroundStructuredAdapter",
+      "AdminFeatureProjections.playgroundPorts structured=FailClosedPlaygroundStructuredPort; startEmbedding CAPABILITY_UNKNOWN",
+      "IOmniAdmin.aidl executePlaygroundChat comments exploratory CONDITIONAL",
+      "OmniNavHost PlaygroundScreen"
+    ],
+    "gaps": [
+      "Admin UI embeddings and structured tools fail-closed",
+      "Full token streaming UX not on Admin chat path",
+      "Engine cells remain UNQUALIFIED/CONDITIONAL — not SUPPORTED"
+    ]
+  },
+  {
+    "id": "FEAT-SERVER",
+    "l1": "PASS",
+    "l2": "PASS",
+    "l3": "PARTIAL",
+    "status": "PARTIAL",
+    "docPath": "docs/70-features/developer-server.md",
+    "modulePath": "features/server",
+    "gradlePath": ":features:server",
+    "featureIdConstant": "FEAT-SERVER",
+    "capabilitiesCovered": [
+      "HTTP_INTERFACE",
+      "AIDL_INTERFACE",
+      "REQUEST_LIFECYCLE",
+      "ASSET_LIFECYCLE",
+      "TEXT_GENERATION(partial smoke)",
+      "IDEMPOTENCY(partial)",
+      "CAPABILITY_NEGOTIATION"
+    ],
+    "capabilitiesMissingOrPartial": [
+      "EMBEDDING(via HTTP; Admin smoke limited)",
+      "STREAMING(via runtime binder/HTTP)",
+      "RECONNECT(partial)",
+      "token/client admin empty on Admin UI projection"
+    ],
+    "uiSurface": [
+      "OmniDestination.ServerClients primary rail",
+      "ServerClientsScreen LOCAL tab",
+      "DeveloperServerViewModel"
+    ],
+    "httpAidSurface": [
+      "LoopbackHttpGateway + ControlPlaneHttpHandler",
+      "OpenApiPaths /v1/* /omni/v1/* tokens assets jobs metrics settings",
+      "IOmniAdmin.executeServerSmoke",
+      "IOmniRuntime full inference/asset surface"
+    ],
+    "tests": [
+      "DeveloperServerServiceTest (13)",
+      "CapabilityNegotiationAndCancelTest (10)",
+      "ServerStateProjectionTest (7)",
+      "interfaces/http OpenApiRouteSmokeTest GatewayAuthAndRoutesTest"
+    ],
+    "evidence": [
+      "features/server/.../ServerFeatureModule.kt FEATURE_ID=FEAT-SERVER DEFAULT_LOOPBACK_PORT=11434",
+      "WaveAWiring ServerFeatureModule.createApi with LoopbackServerPort ensureGatewayStarted + TokenAdminPort",
+      "AdminFeatureProjections EmptyTokenAdminPort EmptyClientAdminPort; AdminLoopbackPort ensureStarted CAPABILITY_UNSUPPORTED",
+      "interfaces/http/.../OpenApiPaths.kt OPERATION_IDS inventory",
+      "GatewayLifecycle wires plane APIs into ControlPlaneHttpHandler"
+    ],
+    "gaps": [
+      "Admin projection does not surface live loopback bind status (projects enabled=false + degraded reason)",
+      "Token/client management empty on LOCAL_UI projection",
+      "Smoke path exploratory honesty only"
+    ]
+  },
+  {
+    "id": "FEAT-LAN",
+    "l1": "PASS",
+    "l2": "PASS",
+    "l3": "PARTIAL",
+    "status": "PARTIAL",
+    "docPath": "docs/70-features/lan-access.md",
+    "modulePath": "features/lan",
+    "gradlePath": ":features:lan",
+    "featureIdConstant": "FEAT-LAN",
+    "capabilitiesCovered": [
+      "LAN_INTERFACE",
+      "HTTP_INTERFACE",
+      "REQUEST_LIFECYCLE(partial)",
+      "IDEMPOTENCY(partial)",
+      "ASSET_LIFECYCLE(via HTTP when LAN up)"
+    ],
+    "capabilitiesMissingOrPartial": [
+      "RECONNECT(partial)",
+      "CAPABILITY_NEGOTIATION(partial)",
+      "LOCAL_UI enable/pairing fail-closed"
+    ],
+    "uiSurface": [
+      "OmniDestination.Lan / ServerClients LAN tab",
+      "LanAccessViewModel attached but mutations fail-closed"
+    ],
+    "httpAidSurface": [
+      "HTTP /omni/v1/lan/enable|disable",
+      "HTTP /omni/v1/lan/pairing-challenges",
+      "HTTP /omni/pairing/v1/exchanges",
+      "Admin snapshot lanState only"
+    ],
+    "tests": [
+      "LanServiceTest (8)",
+      "LanAuthNegativeTest (13)",
+      "LanPairingNegativeTest (11)",
+      "LanPolicyTest (15)",
+      "LanRoutingPolicyTest (8)",
+      "runtime ControlPlaneLanHostTest WireApi10HandlerTest"
+    ],
+    "evidence": [
+      "features/lan/.../LanFeatureModule.kt FEATURE_ID=FEAT-LAN DEFAULT_ENABLED policy via SETTING_LAN_ENABLED",
+      "FeaturePackHost.bootstrap requires !LanServiceLifecyclePolicy.DEFAULT_ENABLED; lanIsDefaultOff check",
+      "ControlPlaneLanHost + LanFeatureModule.createApi",
+      "AdminFeatureProjections AdminLanServicePort enable/disable CAPABILITY_UNSUPPORTED; FailClosedLanPairingPort; EmptyLanClientPort",
+      "ControlPlaneHttpHandler enableLan/disableLan"
+    ],
+    "gaps": [
+      "LOCAL_UI cannot enable LAN or complete pairing via Admin projection",
+      "No LAN enable AIDL method on IOmniAdmin",
+      "Device TLS bind / network advertising not audited as PASS"
+    ]
+  },
+  {
+    "id": "FEAT-DASHBOARD",
+    "l1": "PASS",
+    "l2": "PASS",
+    "l3": "PARTIAL",
+    "status": "PARTIAL",
+    "docPath": "docs/70-features/dashboard-monitoring.md",
+    "modulePath": "features/dashboard",
+    "gradlePath": ":features:dashboard",
+    "featureIdConstant": "FEAT-DASHBOARD",
+    "capabilitiesCovered": [
+      "SERVICE_HEALTH",
+      "JOB_PROGRESS",
+      "EVIDENCE_LABELING(plane)",
+      "RESOURCE_ACCOUNTING(plane governor adapter)",
+      "LOCAL_UI_INTERFACE"
+    ],
+    "capabilitiesMissingOrPartial": [
+      "ENGINE_HEALTH(Admin subjects empty)",
+      "MODEL_HEALTH(Admin subjects empty)",
+      "REQUEST_TRACE(Admin CAPABILITY_UNSUPPORTED)",
+      "PERFORMANCE_MEASUREMENT(Admin strip nulls; plane late-bound benchmark)"
+    ],
+    "uiSurface": [
+      "OmniDestination.Dashboard primary rail",
+      "DashboardScreen"
+    ],
+    "httpAidSurface": [
+      "HTTP /omni/v1/metrics/summary",
+      "HTTP /omni/v1/metrics/detail",
+      "IOmniAdmin.getSnapshot"
+    ],
+    "tests": [
+      "DashboardServiceTest (5)",
+      "DashboardProjectionTest (9)",
+      "DashboardCapabilityCancelTest (8)"
+    ],
+    "evidence": [
+      "features/dashboard/.../DashboardFeatureModule.kt FEATURE_ID=FEAT-DASHBOARD",
+      "WaveAWiring DashboardFeatureModule.createApi(observability, GovernorResourceAdapter, AllSupportedCapabilityPort, DeferredDashboardMeasurementPort)",
+      "AdminProjectedDashboardApi getTrace/cancelRequest/queryRequest CAPABILITY_UNSUPPORTED; negotiate UNKNOWN cells",
+      "OmniNavHost DashboardScreen"
+    ],
+    "gaps": [
+      "Admin projection maps jobs as request rows; no real request traces",
+      "Performance strip operational-only with null metrics on Admin path",
+      "Capability negotiate on Admin always allSupported=false"
+    ]
+  },
+  {
+    "id": "FEAT-BENCHMARK",
+    "l1": "PASS",
+    "l2": "PASS",
+    "l3": "PARTIAL",
+    "status": "PARTIAL",
+    "docPath": "docs/70-features/benchmark-research.md",
+    "modulePath": "features/benchmark",
+    "gradlePath": ":features:benchmark",
+    "featureIdConstant": "FEAT-BENCHMARK",
+    "capabilitiesCovered": [
+      "PERFORMANCE_MEASUREMENT(plan+job start)",
+      "EVIDENCE_LABELING",
+      "JOB_LIFECYCLE",
+      "JOB_RECOVERY",
+      "CAPABILITY_NEGOTIATION(policy tests)"
+    ],
+    "capabilitiesMissingOrPartial": [
+      "RESOURCE_ACCOUNTING(partial)",
+      "exportReport Admin unsupported",
+      "completeRun control-plane only",
+      "listRuns empty on Admin"
+    ],
+    "uiSurface": [
+      "OmniDestination.Benchmark drawer",
+      "BenchmarkScreen",
+      "BenchmarkViewModel attached"
+    ],
+    "httpAidSurface": [
+      "IOmniAdmin.startJob kind=BENCHMARK",
+      "OmniBenchmarkJobParameters AIDL",
+      "jobs HTTP list/get/cancel"
+    ],
+    "tests": [
+      "BenchmarkServiceTest (9)",
+      "BenchmarkPolicyNegativeTest (21)",
+      "ProfileComparisonAndSketchTest (6)",
+      "FixtureMetricsAndProfileFactoryTest (2)"
+    ],
+    "evidence": [
+      "features/benchmark/.../BenchmarkFeatureModule.kt FEATURE_ID=FEAT-BENCHMARK",
+      "FeaturePackHost.bootstrap BenchmarkFeatureModule.createApi(jobManager, observability)",
+      "AdminProjectedBenchmarkApi planBenchmark pure + startBenchmark via Admin.startJob; exportReport CAPABILITY_UNSUPPORTED",
+      "OmniNavHost BenchmarkScreen"
+    ],
+    "gaps": [
+      "Measurement report export and run completion not on Admin projection",
+      "Device thermal/validity evidence not claimed",
+      "Runs list empty on LOCAL_UI projection"
+    ]
+  },
+  {
+    "id": "FEAT-DIAGNOSTICS",
+    "l1": "PASS",
+    "l2": "PASS",
+    "l3": "PARTIAL",
+    "status": "PARTIAL",
+    "docPath": "docs/70-features/diagnostics-export.md",
+    "modulePath": "features/diagnostics",
+    "gradlePath": ":features:diagnostics",
+    "featureIdConstant": "FEAT-DIAGNOSTICS",
+    "capabilitiesCovered": [
+      "DIAGNOSTIC_REASONING",
+      "SERVICE_HEALTH",
+      "EVIDENCE_LABELING",
+      "JOB_LIFECYCLE",
+      "JOB_RECOVERY"
+    ],
+    "capabilitiesMissingOrPartial": [
+      "REQUEST_TRACE(partial)",
+      "LOCAL_UI_INTERFACE(VM never attached)"
+    ],
+    "uiSurface": [
+      "OmniDestination.Diagnostics drawer",
+      "DiagnosticsScreen (viewModel null => EMPTY)"
+    ],
+    "httpAidSurface": [
+      "HTTP /omni/v1/diagnostics/exports",
+      "Job kind DIAGNOSTIC_EXPORT AdminAidlMapper",
+      "no dedicated diagnostics AIDL methods"
+    ],
+    "tests": [
+      "DiagnosticsServiceTest (7)",
+      "DiagnosticBundleBuilderTest (5)",
+      "CapabilityNegotiationAndCancelTest (6)",
+      "DiagnosticStateProjectionTest (7)"
+    ],
+    "evidence": [
+      "features/diagnostics/.../DiagnosticsModule.kt FEATURE_ID=FEAT-DIAGNOSTICS",
+      "FeaturePackHost.bootstrap diagnosticsApi = DiagnosticsModule.createApi",
+      "ControlPlaneHttpHandler diagnosticsApi + createDiagnosticExport",
+      "UiSession declares diagnosticsVm but adminListener never attaches it",
+      "OmniNavHost DiagnosticsScreen(session.diagnosticsVm)"
+    ],
+    "gaps": [
+      "No AdminLiveFeatureFactory.createDiagnosticsViewModel wiring",
+      "Default EmptyDiagnosticSourcePort unless filled on plane",
+      "UI journey incomplete"
+    ]
+  },
+  {
+    "id": "FEAT-ROUTING",
+    "l1": "PASS",
+    "l2": "PASS",
+    "l3": "PARTIAL",
+    "status": "PARTIAL",
+    "docPath": "docs/70-features/multi-model-routing.md",
+    "modulePath": "features/routing",
+    "gradlePath": ":features:routing",
+    "featureIdConstant": "FEAT-ROUTING",
+    "capabilitiesCovered": [
+      "MULTI_MODEL_ROUTING",
+      "FALLBACK_POLICY",
+      "CAPABILITY_NEGOTIATION",
+      "REQUEST_LIFECYCLE",
+      "RESOURCE_ACCOUNTING(partial)"
+    ],
+    "capabilitiesMissingOrPartial": [
+      "LOCAL_UI preference surface (VM never attached)"
+    ],
+    "uiSurface": [
+      "OmniDestination.Routing drawer",
+      "RoutingScreen (viewModel null => EMPTY/disconnected)"
+    ],
+    "httpAidSurface": [
+      "no dedicated routing HTTP resource",
+      "used inside plane inference plan via Orchestrator"
+    ],
+    "tests": [
+      "RoutingServiceTest (11)",
+      "FallbackPolicyRulesTest (12)",
+      "RoutingNegativeCasesTest (10)",
+      "AliasResolutionTest (4)",
+      "SessionContinuityPolicyTest (6)",
+      "RoutingProjectionTest (3)",
+      "runtime EngineExecuteBindingTest featurePackHost_withWaveA_bindsRoutingToOrchestrator"
+    ],
+    "evidence": [
+      "features/routing/.../RoutingFeatureModule.kt FEATURE_ID=FEAT-ROUTING",
+      "FeaturePackHost.bootstrap routingApi via ControlPlaneFeaturePorts.routingOrchestrator when waveA present else FailClosedRoutingOrchestrator",
+      "UiSession routingVm never attached in adminListener",
+      "OmniNavHost RoutingScreen"
+    ],
+    "gaps": [
+      "UI expert controls not live-bound",
+      "Preference persistence for LOCAL_UI not evidenced",
+      "No HTTP routing admin endpoints"
+    ]
+  },
+  {
+    "id": "FEAT-TOOLS",
+    "l1": "PASS",
+    "l2": "PASS",
+    "l3": "PARTIAL",
+    "status": "PARTIAL",
+    "docPath": "docs/70-features/structured-tools.md",
+    "modulePath": "features/tools",
+    "gradlePath": ":features:tools",
+    "featureIdConstant": "FEAT-TOOLS",
+    "capabilitiesCovered": [
+      "STRUCTURED_OUTPUT",
+      "TOOL_CALLING",
+      "TEXT_GENERATION",
+      "REQUEST_LIFECYCLE",
+      "STREAMING(partial)",
+      "CANCELLATION",
+      "DEADLINE"
+    ],
+    "capabilitiesMissingOrPartial": [
+      "LOCAL_UI structured path fail-closed on Admin projection",
+      "no dedicated tools destination"
+    ],
+    "uiSurface": [
+      "PlaygroundTab.STRUCTURED_TOOLS only",
+      "no Tools OmniDestination"
+    ],
+    "httpAidSurface": [
+      "ToolsApi on FeaturePackHost / RuntimeControlPlane.toolsApi",
+      "ToolsApiPlaygroundStructuredAdapter late-bound into Wave-A playground",
+      "ControlPlaneHttpHandler tools marker",
+      "Admin structured port FailClosed"
+    ],
+    "tests": [
+      "ToolNonExecutionAndIdempotencyTest (7)",
+      "SchemaBombTest (7)",
+      "StructuredModePolicyTest (9)",
+      "StructuredOutputValidatorTest (5)",
+      "RoutingAndAuthNegativeTest (9)",
+      "SessionUncertaintyAndPrivacyTest (7)"
+    ],
+    "evidence": [
+      "features/tools/.../ToolsFeatureModule.kt FEATURE_ID=FEAT-TOOLS; never executes host tools — proposal ledger only",
+      "FeaturePackHost createDurableApi when toolProposalLedger non-null",
+      "ToolsApiPlaygroundStructuredAdapter binds holder.toolsApi for STRUCTURED_TOOLS tab",
+      "AdminFeatureProjections structured=FailClosedPlaygroundStructuredPort"
+    ],
+    "gaps": [
+      "LOCAL_UI cannot exercise structured tools via Admin binder projection",
+      "No dedicated tools screen",
+      "Structured mode remains capability-unknown without engine evidence"
+    ]
+  },
+  {
+    "id": "FEAT-ADMIN",
+    "l1": "PASS",
+    "l2": "PASS",
+    "l3": "PARTIAL",
+    "status": "PARTIAL",
+    "docPath": "docs/70-features/administration-jobs.md",
+    "modulePath": "features/admin",
+    "gradlePath": ":features:admin",
+    "featureIdConstant": "FEAT-ADMIN",
+    "capabilitiesCovered": [
+      "ADMIN_INTERFACE",
+      "AIDL_INTERFACE",
+      "JOB_LIFECYCLE",
+      "JOB_RECOVERY",
+      "LOCAL_UI_INTERFACE",
+      "RESOURCE_ACCOUNTING(partial)"
+    ],
+    "capabilitiesMissingOrPartial": [
+      "MODEL_LIFECYCLE(EmptyAdminModelPort on binder path)",
+      "ENGINE_LIFECYCLE(no direct UI)"
+    ],
+    "uiSurface": [
+      "OmniDestination.Home primary",
+      "Settings drawer",
+      "AdminHomeViewModel AdminJobsViewModel AdminSettingsViewModel"
+    ],
+    "httpAidSurface": [
+      "IOmniAdmin full surface (jobs settings snapshot content-report playground smoke import)",
+      "HTTP /omni/v1/settings /omni/v1/jobs"
+    ],
+    "tests": [
+      "AdminFeatureHappyPathTest (6)",
+      "AdminFeatureCancelRecoverTest (8)",
+      "JobUiProjectionTest (6)"
+    ],
+    "evidence": [
+      "features/admin/.../AdminFeatureModule.kt FEATURE_ID=FEAT-ADMIN",
+      "WaveAWiring AdminFeatureModule.createApi(adminApi, models from modelManager)",
+      "BinderAdminFeatureFactory createHome/Jobs/Settings ViewModels; EmptyAdminModelPort default on binder ports",
+      "IOmniAdmin.aidl",
+      "UiSession attaches admin VMs on bind"
+    ],
+    "gaps": [
+      "Binder path EmptyAdminModelPort omits model strip on some projections",
+      "resourcePressureLabel null in Wave-A runtimeStatus",
+      "Engine lifecycle not a first-class Admin UI action"
+    ]
+  },
+  {
+    "id": "FEAT-AI-CONTENT-REPORT",
+    "aliasIds": ["FEAT-AI-REPORTING"],
+    "l1": "PASS",
+    "l2": "PASS",
+    "l3": "PARTIAL",
+    "status": "PARTIAL",
+    "docPath": "docs/70-features/ai-content-reporting.md",
+    "modulePath": "features/ai-content-report",
+    "gradlePath": ":features:ai-content-report",
+    "featureIdConstant": "FEAT-AI-CONTENT-REPORT",
+    "specFeatureId": "FEAT-AI-REPORTING",
+    "capabilitiesCovered": [
+      "CONTENT_REPORTING",
+      "REQUEST_LIFECYCLE",
+      "JOB_LIFECYCLE",
+      "JOB_RECOVERY"
+    ],
+    "capabilitiesMissingOrPartial": [
+      "LOCAL_UI_INTERFACE(VM never attached)",
+      "USABILITY_VALIDATION(partial)",
+      "ACCESSIBILITY_VALIDATION(partial)"
+    ],
+    "uiSurface": [
+      "OmniDestination.ContentReport drawer",
+      "ContentReportScreen (viewModel null => EMPTY)",
+      "Playground onOpenContentReport navigation"
+    ],
+    "httpAidSurface": [
+      "IOmniAdmin.reviewContentReport|submitContentReport|getContentReportReceipt",
+      "IOmniRuntime.createContentReportProposal|getContentReport|cancel|discard|receipt",
+      "HTTP /omni/v1/content-reports*"
+    ],
+    "tests": [
+      "ContentReportFullFlowTest (13)",
+      "ContentReportPolicyTest (13)",
+      "ContentReportRaceAndServiceTest (12)",
+      "ContentReportNegativeConsentTest (6)",
+      "ContentReportDurableStoreTest (5)",
+      "ContentReportAtomicProposalTest (2)"
+    ],
+    "evidence": [
+      "features/ai-content-report/.../ContentReportModule.kt FEATURE_ID=FEAT-AI-CONTENT-REPORT",
+      "docs package specs/feature-capability-map.yaml uses FEAT-AI-REPORTING (ID conflict)",
+      "FeaturePackHost contentReport durable API + contentReportIsNotTelemetry bootstrap checks",
+      "OmniRuntimeFacade createContentReportProposal/get/cancel/discard",
+      "OmniAdminFacade review/submit content report",
+      "UiSession contentReportVm never attached in adminListener"
+    ],
+    "gaps": [
+      "ID alias FEAT-AI-REPORTING vs FEAT-AI-CONTENT-REPORT unresolved across docs package YAML vs code",
+      "UI ViewModel not attached — drawer journey EMPTY",
+      "External endpoint NoOp until configured"
+    ]
+  },
+  {
+    "id": "FEATURE-SYSTEM",
+    "l1": "N_A",
+    "l2": "N_A",
+    "l3": "N_A",
+    "status": "N_A",
+    "docPath": "docs/70-features/feature-design-system.md",
+    "modulePath": null,
+    "gradlePath": null,
+    "featureIdConstant": null,
+    "capabilitiesCovered": [],
+    "capabilitiesMissingOrPartial": [],
+    "uiSurface": [],
+    "httpAidSurface": [],
+    "tests": [],
+    "evidence": [
+      "docs/70-features/feature-design-system.md id FEATURE-SYSTEM",
+      "docs/70-features/README.md lists FEATURE-SYSTEM as design system not FEAT pack",
+      "All feature modules KDoc: does not redefine Request/Session/Trust (FEATURE-SYSTEM)"
+    ],
+    "gaps": [
+      "Not a product feature pack — no L1/L2/L3 journey scoring"
+    ]
+  }
+]

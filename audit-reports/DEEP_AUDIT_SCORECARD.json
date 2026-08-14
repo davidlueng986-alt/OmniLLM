@@ -1,0 +1,542 @@
+{
+  "meta": {
+    "audit_date": "2026-08-12",
+    "docs_authority": "C:\\Users\\daive\\Downloads\\OmniLLM_產品文件完整包_新版本_繁體中文\\OmniLLM_Product_Documents",
+    "monorepo": "C:\\Users\\daive\\Downloads\\OmniLLM_Build\\omnillm-android",
+    "method": "synthesize audit-reports/00_MAP..13_verify_* + skim PRODUCT_READINESS/FEATURE_AUDIT/APPIUM_E2E",
+    "status_vocabulary": ["PASS", "PARTIAL", "MISSING", "N_A", "BLOCKED_HUMAN"],
+    "layers": {
+      "L1": "module/tree exists",
+      "L2": "wired to control plane",
+      "L3": "product journey software-complete (not device-qualified)"
+    },
+    "rules": {
+      "fail_closed": true,
+      "no_invented_device_play_oem": true,
+      "no_qualified_supported_without_evidence": true,
+      "specs_over_prose": true
+    }
+  },
+  "overall": {
+    "score_0_100_software_only": 55,
+    "band": "40-59 scaffold_plus_L2_product_incomplete",
+    "verdict": "PARTIAL",
+    "headline_zh": "架構與控制平面強；產品旅程與引擎可執行路徑未完備；不得宣稱開發完成。",
+    "headline_en": "Strong architecture and L2 control-plane hosting; L3 journeys incomplete; no engine SUPPORTED; not software-complete vs 新版本.",
+    "finished_develop_vs_docs": false,
+    "counts": {
+      "gradle_modules": 44,
+      "feat_packs": 12,
+      "feat_l1_pass": 12,
+      "feat_l2_pass": 12,
+      "feat_l3_pass": 0,
+      "feat_overall_pass": 0,
+      "feat_overall_partial": 12,
+      "engines": 5,
+      "engines_qualified_or_supported": 0,
+      "engines_unqualified": 5,
+      "inv_pass": 18,
+      "inv_partial": 2,
+      "inv_missing": 0,
+      "adr_pass": 11,
+      "adr_partial": 1,
+      "adversarial_claims_true": 7,
+      "adversarial_claims_false": 2,
+      "false_supported_qualified_critical": 0
+    },
+    "dimension_scores": [
+      {"id": "architecture_inv", "weight": 15, "score": 88},
+      {"id": "core_platform", "weight": 12, "score": 58},
+      {"id": "data_durability", "weight": 10, "score": 55},
+      {"id": "security_recovery", "weight": 10, "score": 62},
+      {"id": "features_l1_l2", "weight": 10, "score": 95},
+      {"id": "features_l3", "weight": 12, "score": 22},
+      {"id": "engine_honesty", "weight": 5, "score": 100},
+      {"id": "engine_executable", "weight": 8, "score": 25},
+      {"id": "android_platform", "weight": 8, "score": 58},
+      {"id": "ux_a11y_i18n", "weight": 5, "score": 30},
+      {"id": "test_ci", "weight": 5, "score": 72},
+      {"id": "contract_authority_sync", "weight": 5, "score": 40}
+    ],
+    "delta_vs_prior_monorepo_docs": [
+      {
+        "source": "PRODUCT_READINESS.md",
+        "prior_claim": "Software ready: YES",
+        "deep_audit": "Overclaim vs 新版本 L3 bar; score 55; unit/assemble gates alone insufficient"
+      },
+      {
+        "source": "FEATURE_AUDIT.md",
+        "prior_claim": "Most FEAT PASS; peer engines implementation PASS",
+        "deep_audit": "All FEAT overall PARTIAL (0 L3 PASS); peer CP executable MISSING for LiteRT/MLC/ORT; mllm not bound"
+      },
+      {
+        "source": "APPIUM_E2E_REPORT.md",
+        "prior_claim": "SMOKE_PARTIAL; no generate",
+        "deep_audit": "Consistent; 13_verify_5 real=false on Playground generate text"
+      }
+    ]
+  },
+  "features": [
+    {
+      "id": "FEAT-AUTOSETUP",
+      "l1": "PASS",
+      "l2": "PASS",
+      "l3": "PARTIAL",
+      "status": "PARTIAL",
+      "modulePath": "features/auto-setup",
+      "gaps": [
+        "UI FailClosed model/orchestrator ports",
+        "first-inference journey incomplete"
+      ]
+    },
+    {
+      "id": "FEAT-MODELHUB",
+      "l1": "PASS",
+      "l2": "PASS",
+      "l3": "PARTIAL",
+      "status": "PARTIAL",
+      "modulePath": "features/modelhub",
+      "gaps": [
+        "Admin load/pin/delete CAPABILITY_UNSUPPORTED",
+        "SAF GGUF not software-complete (13_verify_4 real=false)"
+      ]
+    },
+    {
+      "id": "FEAT-PLAYGROUND",
+      "l1": "PASS",
+      "l2": "PASS",
+      "l3": "PARTIAL",
+      "status": "PARTIAL",
+      "modulePath": "features/playground",
+      "gaps": [
+        "No evidenced assistantText on production path (13_verify_5 real=false)",
+        "Admin embed/structured fail-closed"
+      ]
+    },
+    {
+      "id": "FEAT-SERVER",
+      "l1": "PASS",
+      "l2": "PASS",
+      "l3": "PARTIAL",
+      "status": "PARTIAL",
+      "modulePath": "features/server",
+      "gaps": [
+        "Admin loopback/token/client projections empty or unsupported"
+      ]
+    },
+    {
+      "id": "FEAT-LAN",
+      "l1": "PASS",
+      "l2": "PASS",
+      "l3": "PARTIAL",
+      "status": "PARTIAL",
+      "modulePath": "features/lan",
+      "gaps": [
+        "UI enable/pairing fail-closed",
+        "device LAN journey not claimed"
+      ]
+    },
+    {
+      "id": "FEAT-DASHBOARD",
+      "l1": "PASS",
+      "l2": "PASS",
+      "l3": "PARTIAL",
+      "status": "PARTIAL",
+      "modulePath": "features/dashboard",
+      "gaps": [
+        "AllSupportedCapabilityPort invents SUPPORTED",
+        "Admin snapshot shallow"
+      ]
+    },
+    {
+      "id": "FEAT-BENCHMARK",
+      "l1": "PASS",
+      "l2": "PASS",
+      "l3": "PARTIAL",
+      "status": "PARTIAL",
+      "modulePath": "features/benchmark",
+      "gaps": [
+        "listRuns empty on Admin",
+        "export CAPABILITY_UNSUPPORTED on Admin"
+      ]
+    },
+    {
+      "id": "FEAT-DIAGNOSTICS",
+      "l1": "PASS",
+      "l2": "PASS",
+      "l3": "PARTIAL",
+      "status": "PARTIAL",
+      "modulePath": "features/diagnostics",
+      "gaps": [
+        "diagnosticsVm never attached in UiSession"
+      ]
+    },
+    {
+      "id": "FEAT-ROUTING",
+      "l1": "PASS",
+      "l2": "PASS",
+      "l3": "PARTIAL",
+      "status": "PARTIAL",
+      "modulePath": "features/routing",
+      "gaps": [
+        "routingVm never attached"
+      ]
+    },
+    {
+      "id": "FEAT-TOOLS",
+      "l1": "PASS",
+      "l2": "PASS",
+      "l3": "PARTIAL",
+      "status": "PARTIAL",
+      "modulePath": "features/tools",
+      "gaps": [
+        "no dedicated Tools destination",
+        "Admin structured fail-closed"
+      ]
+    },
+    {
+      "id": "FEAT-ADMIN",
+      "l1": "PASS",
+      "l2": "PASS",
+      "l3": "PARTIAL",
+      "status": "PARTIAL",
+      "modulePath": "features/admin",
+      "gaps": [
+        "EmptyAdminModelPort on binder path"
+      ]
+    },
+    {
+      "id": "FEAT-AI-CONTENT-REPORT",
+      "alias": "FEAT-AI-REPORTING",
+      "l1": "PASS",
+      "l2": "PASS",
+      "l3": "PARTIAL",
+      "status": "PARTIAL",
+      "modulePath": "features/ai-content-report",
+      "gaps": [
+        "contentReportVm never attached",
+        "UI action stubs",
+        "ID alias docs specs vs monorepo code"
+      ]
+    }
+  ],
+  "engines": [
+    {
+      "engineId": "llama.cpp",
+      "docId": "ENGINE-LLAMACPP",
+      "modulePath": ":engines:llama-cpp",
+      "design": "PASS",
+      "lockState": "LOCKED",
+      "native": "PASS",
+      "executable_control_plane": "PARTIAL",
+      "levels": {"L1": "PASS", "L2": "PASS", "L3": "PARTIAL"},
+      "status": "UNQUALIFIED",
+      "registryExposure": "UNKNOWN",
+      "falseSupportedOrQualified": false,
+      "overall": "PARTIAL"
+    },
+    {
+      "engineId": "LiteRT-LM",
+      "docId": "ENGINE-LITERT",
+      "modulePath": ":engines:litert-lm",
+      "design": "PASS",
+      "lockState": "LOCKED",
+      "native": "PARTIAL",
+      "executable_control_plane": "MISSING",
+      "levels": {"L1": "PASS", "L2": "PARTIAL", "L3": "MISSING"},
+      "status": "UNQUALIFIED",
+      "registryExposure": "UNKNOWN",
+      "falseSupportedOrQualified": false,
+      "overall": "PARTIAL"
+    },
+    {
+      "engineId": "MLC-LLM",
+      "docId": "ENGINE-MLC",
+      "modulePath": ":engines:mlc-llm",
+      "design": "PASS",
+      "lockState": "NOT_LOCKED",
+      "native": "MISSING",
+      "executable_control_plane": "MISSING",
+      "levels": {"L1": "PASS", "L2": "PARTIAL", "L3": "MISSING"},
+      "status": "UNQUALIFIED",
+      "registryExposure": "UNKNOWN",
+      "falseSupportedOrQualified": false,
+      "overall": "PARTIAL"
+    },
+    {
+      "engineId": "mllm",
+      "docId": "ENGINE-MLLM",
+      "modulePath": ":engines:mllm",
+      "design": "PASS",
+      "lockState": "LOCKED",
+      "native": "PASS",
+      "executable_control_plane": "PARTIAL",
+      "levels": {"L1": "PASS", "L2": "PARTIAL", "L3": "MISSING"},
+      "status": "UNQUALIFIED",
+      "registryExposure": "UNKNOWN",
+      "falseSupportedOrQualified": false,
+      "overall": "PARTIAL",
+      "note": "Native packaged in module; control-plane attach does not live-bind execute"
+    },
+    {
+      "engineId": "ONNX-Runtime-GenAI",
+      "docId": "ENGINE-ORTGENAI",
+      "modulePath": ":engines:ort-genai",
+      "design": "PASS",
+      "lockState": "LOCKED",
+      "native": "PARTIAL",
+      "executable_control_plane": "MISSING",
+      "levels": {"L1": "PASS", "L2": "PARTIAL", "L3": "MISSING"},
+      "status": "UNQUALIFIED",
+      "registryExposure": "UNKNOWN",
+      "falseSupportedOrQualified": false,
+      "overall": "PARTIAL"
+    }
+  ],
+  "invariants": [
+    {"id": "INV-001", "status": "PASS", "note": "UI no native/DB; 13_verify_0 real=true"},
+    {"id": "INV-002", "status": "PASS", "note": "Plan+reservation before high-cost"},
+    {"id": "INV-003", "status": "PASS", "note": "Plan purity"},
+    {"id": "INV-004", "status": "PASS", "note": "CommitId durable types; Orchestrator wire residual"},
+    {"id": "INV-005", "status": "PASS", "note": "Reservation vs AllocationHandle"},
+    {"id": "INV-006", "status": "PASS", "note": "SSE vs AIDL delivery"},
+    {"id": "INV-007", "status": "PASS", "note": "Poisoned never re-pool"},
+    {"id": "INV-008", "status": "PASS", "note": "Dry-load not trust elevate"},
+    {"id": "INV-009", "status": "PARTIAL", "note": "Companion packaging OK; multi-UID device evidence absent"},
+    {"id": "INV-010", "status": "PASS", "note": "Privileged re-verify hooks"},
+    {"id": "INV-011", "status": "PASS", "note": "Observed UID principal"},
+    {"id": "INV-012", "status": "PASS", "note": "Client ids + claim-or-return"},
+    {"id": "INV-013", "status": "PASS", "note": "Transport parity; 13_verify_7"},
+    {"id": "INV-014", "status": "PASS", "note": "Identity layering"},
+    {"id": "INV-015", "status": "PASS", "note": "Digest canonicalization"},
+    {"id": "INV-016", "status": "PASS", "note": "Measurement model fields"},
+    {"id": "INV-017", "status": "PASS", "note": "Revocation epoch fence"},
+    {"id": "INV-018", "status": "PASS", "note": "Unknown capability fail-closed"},
+    {"id": "INV-019", "status": "PASS", "note": "Fallback policy + actualRouting"},
+    {"id": "INV-020", "status": "PARTIAL", "note": "FEAT-AI ID / specs authority drift"}
+  ],
+  "adversarial_verifies": [
+    {"claim_id": 0, "claim": "INV-001 UI no native/DB", "real": true, "software_status": "PASS"},
+    {"claim_id": 1, "claim": "Claim/commit SQLite not InMemory", "real": true, "software_status": "PASS"},
+    {"claim_id": 2, "claim": "All 12 FEAT on RuntimeControlPlane", "real": true, "software_status": "PASS"},
+    {"claim_id": 3, "claim": "No engine SUPPORTED without evidence", "real": true, "software_status": "PASS"},
+    {"claim_id": 4, "claim": "ModelHub SAF GGUF software-complete", "real": false, "software_status": "PARTIAL"},
+    {"claim_id": 5, "claim": "Playground generates with exploratory+model", "real": false, "software_status": "PARTIAL"},
+    {"claim_id": 6, "claim": "Companion different package/UID", "real": true, "software_status": "PASS"},
+    {"claim_id": 7, "claim": "HTTP/AIDL share canonical semantics", "real": true, "software_status": "PASS"},
+    {"claim_id": 8, "claim": "Single writer ADR-010 secrets/tokens/model-store", "real": true, "software_status": "PASS"},
+    {"claim_id": 9, "claim": "targetSdk 36 + 16KB hooks", "real": true, "software_status": "PASS"}
+  ],
+  "critical_findings": [
+    {
+      "id": "C-01",
+      "severity": "CRITICAL",
+      "status": "MISSING",
+      "title": "Orchestrator missing durable CommitLedger injection",
+      "evidence": ["03_core_platform.md CP-01", "OrchestratorModule.create", "WaveAWiring"]
+    },
+    {
+      "id": "C-02",
+      "severity": "CRITICAL",
+      "status": "PARTIAL",
+      "title": "Playground generate text not evidenced (digest-only stream)",
+      "evidence": ["13_verify_5.md real=false"]
+    },
+    {
+      "id": "C-03",
+      "severity": "CRITICAL",
+      "status": "PARTIAL",
+      "title": "ModelHub SAF GGUF journey not software-complete",
+      "evidence": ["13_verify_4.md real=false"]
+    },
+    {
+      "id": "C-04",
+      "severity": "HIGH",
+      "status": "PARTIAL",
+      "title": "Dashboard AllSupportedCapabilityPort invents SUPPORTED",
+      "evidence": ["01_product.md P-02", "WaveAWiring"]
+    },
+    {
+      "id": "C-05",
+      "severity": "HIGH",
+      "status": "PARTIAL",
+      "title": "Admin UI projections heavily fail-closed",
+      "evidence": ["08_features.md"]
+    },
+    {
+      "id": "C-06",
+      "severity": "HIGH",
+      "status": "MISSING",
+      "title": "diagnosticsVm/contentReportVm/routingVm never attached",
+      "evidence": ["07_ux.md", "08_features.md", "UiSession.kt"]
+    },
+    {
+      "id": "C-07",
+      "severity": "HIGH",
+      "status": "PARTIAL",
+      "title": "Only llama-cpp live execute on control plane",
+      "evidence": ["09_engines.md ENG-WIRE-01"]
+    },
+    {
+      "id": "C-08",
+      "severity": "HIGH",
+      "status": "MISSING",
+      "title": "ClientRegistration/Assets non-durable; request fence not in finishRecovery",
+      "evidence": ["04_data.md F-DATA-01..03"]
+    },
+    {
+      "id": "C-09",
+      "severity": "HIGH",
+      "status": "MISSING",
+      "title": "ResourceGovernor ledger in-memory only",
+      "evidence": ["03_core_platform.md CP-02"]
+    },
+    {
+      "id": "C-10",
+      "severity": "HIGH",
+      "status": "PARTIAL",
+      "title": "Docs package vs monorepo specs drift (19 files) + FEAT-AI alias",
+      "evidence": ["11_contracts.md", "00_MAP.md"]
+    },
+    {
+      "id": "C-11",
+      "severity": "MEDIUM",
+      "status": "MISSING",
+      "title": "Principal rate limit / concurrent quota missing",
+      "evidence": ["05_security.md SEC-F-03"]
+    },
+    {
+      "id": "C-12",
+      "severity": "MEDIUM",
+      "status": "PARTIAL",
+      "title": "Research/Risky modes L1 policy only",
+      "evidence": ["01_product.md P-01"]
+    },
+    {
+      "id": "C-13",
+      "severity": "MEDIUM",
+      "status": "PARTIAL",
+      "title": "INV-009 multi-UID device adversarial not executed",
+      "evidence": ["02_architecture.md"]
+    },
+    {
+      "id": "C-14",
+      "severity": "MEDIUM",
+      "status": "PARTIAL",
+      "title": "Production supply-chain hooks often NoopSupplyChainHooks",
+      "evidence": ["05_security.md"]
+    },
+    {
+      "id": "C-15",
+      "severity": "MEDIUM",
+      "status": "PARTIAL",
+      "title": "Quality scenarios mostly NOT_EXECUTED",
+      "evidence": ["01_product.md", "12_test_ci.md", "specs/quality-scenarios.yaml"]
+    }
+  ],
+  "recommended_next": [
+    {
+      "priority": 1,
+      "action": "Inject plane CommitLedger into OrchestratorModule/WaveAWiring",
+      "closes": ["C-01"]
+    },
+    {
+      "priority": 2,
+      "action": "Surface real assistant tokens (or explicit digests-only product decision) on Playground path",
+      "closes": ["C-02"]
+    },
+    {
+      "priority": 3,
+      "action": "Complete SAF→READY GGUF honesty (parser identity, LOCAL_IMPORT trust, large-file FGS)",
+      "closes": ["C-03"]
+    },
+    {
+      "priority": 4,
+      "action": "Attach diagnostics/contentReport/routing VMs; un-fail-close critical Admin mutations",
+      "closes": ["C-05", "C-06"]
+    },
+    {
+      "priority": 5,
+      "action": "Replace AllSupportedCapabilityPort with honest registry/observability map",
+      "closes": ["C-04"]
+    },
+    {
+      "priority": 6,
+      "action": "Durable ClientRegistration + call reconcileUnfinishedRequests in finishRecovery",
+      "closes": ["C-08"]
+    },
+    {
+      "priority": 7,
+      "action": "Peer engines: package AARs + live attach OR correct attachment docs",
+      "closes": ["C-07"]
+    },
+    {
+      "priority": 8,
+      "action": "Republish docs package specs from monorepo SSOT (or freeze monorepo to package)",
+      "closes": ["C-10"]
+    },
+    {
+      "priority": 9,
+      "action": "Implement principal rate limits; wire ProductModePolicy to UI/placement",
+      "closes": ["C-11", "C-12"]
+    },
+    {
+      "priority": 10,
+      "action": "Provision GGUF in connected-tests CI; re-run full unit suite + Appium first-success",
+      "closes": ["C-15", "test_ci residual"]
+    }
+  ],
+  "human_only_residuals": [
+    "Engine Stage-5 qualification PASS cells / OEM matrix",
+    "Play Console upload (signing, Data Safety, FGS forms)",
+    "Multi-UID companion adversarial device package (Q-008)",
+    "16 KB page-size device cold-start matrix (Q-015 product evidence)",
+    "Hardware LAN pairing / thermal MEASURED campaigns",
+    "R8 minify release human smoke"
+  ],
+  "domain_verdicts": {
+    "00_map": "PASS_inventory",
+    "01_product": "PARTIAL",
+    "02_architecture": "PARTIAL_strong",
+    "03_core_platform": "PARTIAL",
+    "04_data": "PARTIAL",
+    "05_security": "PARTIAL",
+    "06_android": "PARTIAL",
+    "07_ux": "PARTIAL",
+    "08_features": "PARTIAL",
+    "09_engines": "PARTIAL",
+    "10_traceability": "PARTIAL",
+    "11_contracts": "PARTIAL",
+    "12_test_ci": "PARTIAL"
+  },
+  "sources_read": [
+    "audit-reports/00_MAP.md",
+    "audit-reports/01_product.md",
+    "audit-reports/02_architecture.md",
+    "audit-reports/03_core_platform.md",
+    "audit-reports/04_data.md",
+    "audit-reports/05_security.md",
+    "audit-reports/06_android.md",
+    "audit-reports/07_ux.md",
+    "audit-reports/08_features.md",
+    "audit-reports/08_features.json",
+    "audit-reports/09_engines.md",
+    "audit-reports/09_engines.json",
+    "audit-reports/10_traceability.md",
+    "audit-reports/11_contracts.md",
+    "audit-reports/12_test_ci.md",
+    "audit-reports/13_verify_0.md",
+    "audit-reports/13_verify_1.md",
+    "audit-reports/13_verify_2.md",
+    "audit-reports/13_verify_3.md",
+    "audit-reports/13_verify_4.md",
+    "audit-reports/13_verify_5.md",
+    "audit-reports/13_verify_6.md",
+    "audit-reports/13_verify_7.md",
+    "audit-reports/13_verify_8.md",
+    "audit-reports/13_verify_9.md",
+    "PRODUCT_READINESS.md",
+    "FEATURE_AUDIT.md",
+    "APPIUM_E2E_REPORT.md"
+  ]
+}

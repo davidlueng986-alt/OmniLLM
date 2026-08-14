@@ -1,0 +1,204 @@
+[
+  {
+    "engineId": "llama.cpp",
+    "docId": "ENGINE-LLAMACPP",
+    "modulePath": ":engines:llama-cpp",
+    "design": "PASS",
+    "designStatus": "BASELINE",
+    "lock": "PASS",
+    "lockState": "LOCKED",
+    "lockDetail": "UPSTREAM.lock lockState=LOCKED tag=b9999 commit=47c786924ad1ab7e91da2cdc72fcdb563780c2bd engineBuildId=llama-cpp-b9999-android digests filled; monorepo specs LOCKED; docs package still NOT_LOCKED; capability-matrix.yaml incorrectly still NOT_LOCKED (drift)",
+    "native": "PASS",
+    "nativeDetail": "Vendored android/native/src/main/cpp/third_party/llama.cpp; built libomnillm_llama.so arm64-v8a+x86_64 (~82MB arm64); JniNativeBackend; EXPERIMENTAL_FIXTURE + upstream backends",
+    "executable": "PARTIAL",
+    "executableDetail": "L2: attachAfterReady creates live LlamaCppEngine via createEngineWithNativeOrNull; EngineExecuteBinding binds LlamaCppInferenceEngineAdapter only for this engine. Real GGUF + fixture paths. RealLlamaUpstreamInstrumentedTest exists (engineering smoke, not QUALIFIED cell). Product SUPPORTED absent.",
+    "status": "UNQUALIFIED",
+    "registryExposure": "UNKNOWN",
+    "runtimeCapabilityDefault": "UNKNOWN",
+    "integrationStatus": "INTEGRATED_WITH_NATIVE",
+    "levels": {
+      "L1_module": "PASS",
+      "L2_controlPlane": "PASS",
+      "L3_productJourney": "PARTIAL"
+    },
+    "honestUnqualified": "PASS",
+    "falseSupportedOrQualified": false,
+    "evidence": [
+      "docs/80-engines/llama-cpp.md BASELINE + UNQUALIFIED interpretation",
+      "engines/llama-cpp/UPSTREAM.lock lockState: LOCKED",
+      "engines/llama-cpp/capability-matrix.yaml qualificationStatus: UNQUALIFIED cells NOT_EXECUTED",
+      "engines/llama-cpp/src/main/kotlin/.../LlamaCppModule.kt QUALIFICATION_STATUS=UNQUALIFIED seedUnqualifiedPlaceholders",
+      "android/native/src/main/cpp/CMakeLists.txt links third_party/llama.cpp; fixture always present",
+      "android/native/build/.../arm64-v8a/libomnillm_llama.so present size~82100688",
+      "android/runtime-service/.../EnginePackAttachment.kt createEngineWithNativeOrNull",
+      "android/runtime-service/.../EngineExecuteBinding.kt LlamaCppInferenceEngineAdapter",
+      "engines/api/.../EngineRegistry.kt only QUALIFIED_WITH_ENVELOPE+PASS => SUPPORTED",
+      "android/runtime-service/src/androidTest/.../RealLlamaUpstreamInstrumentedTest.kt engineering smoke; KDoc says cells stay UNQUALIFIED"
+    ],
+    "gaps": [
+      "ENG-DRIFT-01: capability-matrix upstreamLockStatus still NOT_LOCKED",
+      "ENG-DRIFT-02: NATIVE.md still claims empty digests / NOT_LOCKED",
+      "No QUALIFIED_WITH_ENVELOPE+PASS registry cells for any device envelope",
+      "Formal Stage-5 qualification package / OEM matrix BLOCKED_HUMAN"
+    ]
+  },
+  {
+    "engineId": "LiteRT-LM",
+    "docId": "ENGINE-LITERT",
+    "modulePath": ":engines:litert-lm",
+    "design": "PASS",
+    "designStatus": "BASELINE",
+    "lock": "PASS",
+    "lockState": "LOCKED",
+    "lockDetail": "UPSTREAM.lock LOCKED v0.15.0 commit=2117fc4314670e00047bc8469783f02a68c33f0c aarDigest=b398c474... engineBuildId=litert-lm-v0.15.0-android",
+    "native": "PARTIAL",
+    "nativeDetail": "compileOnly litertlm-jvm:0.15.0 for host API surface; litertlm-android AAR not implementation-packaged on :android:runtime-service; RealSdkBackend fail-closed when SDK absent",
+    "executable": "MISSING",
+    "executableDetail": "Registry metadata+UNQUALIFIED cells only on attach; no LitertLmModule.createProductionEngine in EnginePackAttachment; not bound in EngineExecuteBinding",
+    "status": "UNQUALIFIED",
+    "registryExposure": "UNKNOWN",
+    "runtimeCapabilityDefault": "UNKNOWN",
+    "integrationStatus": "INTEGRATED_PENDING_QUALIFICATION",
+    "levels": {
+      "L1_module": "PASS",
+      "L2_controlPlane": "PARTIAL",
+      "L3_productJourney": "MISSING"
+    },
+    "honestUnqualified": "PASS",
+    "falseSupportedOrQualified": false,
+    "evidence": [
+      "docs/80-engines/litert-lm.md BASELINE",
+      "engines/litert-lm/UPSTREAM.lock lockState: LOCKED",
+      "engines/litert-lm/capability-matrix.yaml UNQUALIFIED + LOCKED",
+      "engines/litert-lm/build.gradle.kts compileOnly litertlm-jvm:0.15.0",
+      "engines/litert-lm/.../LitertLmModule.kt createProductionEngine exists but unused by control plane",
+      "android/runtime-service/.../EnginePackAttachment.kt registerPeerEngines LitertLmModule.registerWith + seed only",
+      "specs/engine-qualification-status.yaml LiteRT-LM UNQUALIFIED integrationStatus INTEGRATED_PENDING_QUALIFICATION"
+    ],
+    "gaps": [
+      "ENG-PKG-01: package litertlm-android:0.15.0 into runtime/companion",
+      "ENG-WIRE-01: live attach + execute binding for peer engines",
+      "Device evidence cells Stage 5"
+    ]
+  },
+  {
+    "engineId": "MLC-LLM",
+    "docId": "ENGINE-MLC",
+    "modulePath": ":engines:mlc-llm",
+    "design": "PASS",
+    "designStatus": "BASELINE",
+    "lock": "PARTIAL",
+    "lockState": "NOT_LOCKED",
+    "lockDetail": "Upstream commit pin 2f78caa4... + sourceDigest present; compiler/generated/artifact/toolchain digests empty; engineBuildId empty; lockState NOT_LOCKED (honest fail-closed for load)",
+    "native": "MISSING",
+    "nativeDetail": "No Maven/GitHub AAR; no in-tree mlc4j/libtvm4j_runtime_packed.so; MlcRuntimeBridge reflective fail-closed when absent",
+    "executable": "MISSING",
+    "executableDetail": "createEngineWithRuntimeOrNull not called from EnginePackAttachment; registry seed only",
+    "status": "UNQUALIFIED",
+    "registryExposure": "UNKNOWN",
+    "runtimeCapabilityDefault": "UNKNOWN",
+    "integrationStatus": "INTEGRATED",
+    "levels": {
+      "L1_module": "PASS",
+      "L2_controlPlane": "PARTIAL",
+      "L3_productJourney": "MISSING"
+    },
+    "honestUnqualified": "PASS",
+    "falseSupportedOrQualified": false,
+    "evidence": [
+      "docs/80-engines/mlc-llm.md BASELINE",
+      "engines/mlc-llm/UPSTREAM.lock lockState: NOT_LOCKED",
+      "engines/mlc-llm/capability-matrix.yaml upstreamLockStatus NOT_LOCKED qualificationStatus UNQUALIFIED integrationStatus INTEGRATED",
+      "engines/mlc-llm/build.gradle.kts notes no dependency to declare",
+      "engines/mlc-llm/.../MlcLlmModule.kt production factory exists",
+      "EnginePackAttachment registerPeerEngines MlcLlmModule.registerWith + QualificationCells.seedUnqualified"
+    ],
+    "gaps": [
+      "ENG-MLC-01: human pin mlc_llm package digests → LOCKED",
+      "Ship generated mlc4j into app/runtime module",
+      "Device OpenCL matrix + 16KB evidence on packaged .so",
+      "ENG-WIRE-01 attach/execute path"
+    ]
+  },
+  {
+    "engineId": "mllm",
+    "docId": "ENGINE-MLLM",
+    "modulePath": ":engines:mllm",
+    "design": "PASS",
+    "designStatus": "BASELINE",
+    "lock": "PASS",
+    "lockState": "LOCKED",
+    "lockDetail": "UPSTREAM.lock LOCKED tag=2.0.0 commit=c67485a3... engineBuildId=mllm-2.0.0-gomllm-aar-arm64 digests filled; QNN excluded",
+    "native": "PASS",
+    "nativeDetail": "engines/mllm/libs/mllm_server.aar ~5MB; build mllm-jni arm64 libgojni + libMllmRT(~146MB)/CPUBackend/SdkC/omp fetched+sha256 verified; Android library module packages jniLibs",
+    "executable": "PARTIAL",
+    "executableDetail": "MllmServerBackend real default in module; control plane attach registers metadata only (comment no AAR load); not bound by EngineExecuteBinding",
+    "status": "UNQUALIFIED",
+    "registryExposure": "UNKNOWN",
+    "runtimeCapabilityDefault": "UNKNOWN",
+    "integrationStatus": "INTEGRATED_PENDING_QUALIFICATION",
+    "levels": {
+      "L1_module": "PASS",
+      "L2_controlPlane": "PARTIAL",
+      "L3_productJourney": "MISSING"
+    },
+    "honestUnqualified": "PASS",
+    "falseSupportedOrQualified": false,
+    "evidence": [
+      "docs/80-engines/mllm.md BASELINE",
+      "engines/mllm/UPSTREAM.lock lockState: LOCKED",
+      "engines/mllm/capability-matrix.yaml UNQUALIFIED LOCKED",
+      "engines/mllm/build.gradle.kts fetchMllmJniLibs + extractMllmServerAar",
+      "engines/mllm/libs/mllm_server.aar present",
+      "engines/mllm/build/mllm-jni/jniLibs/arm64-v8a/*.so present",
+      "engines/mllm/.../MllmModule.kt createRealServer/MllmServerBackend",
+      "EnginePackAttachment mllm register + seed only"
+    ],
+    "gaps": [
+      "ENG-WIRE-01: live control-plane attach + multi-engine execute binding",
+      "Device private-channel/auth/orphan evidence Stage 5",
+      "Prompt content resolution from canonicalInputDigest",
+      "No unload/embed upstream APIs (honest UNSUPPORTED)"
+    ]
+  },
+  {
+    "engineId": "ONNX-Runtime-GenAI",
+    "docId": "ENGINE-ORTGENAI",
+    "modulePath": ":engines:ort-genai",
+    "design": "PASS",
+    "designStatus": "BASELINE",
+    "lock": "PASS",
+    "lockState": "LOCKED",
+    "lockDetail": "UPSTREAM.lock LOCKED v0.14.0 commit=b7a6ec30... AAR digest c2e9b967... ORT 1.25.1 engineBuildId=ort-genai-0.14.0-aar-c2e9b967",
+    "native": "PARTIAL",
+    "nativeDetail": "libs/onnxruntime-genai-android-0.14.0.jar classes.jar only (~26KB compileOnly); full onnxruntime-genai-android AAR + onnxruntime-android not on runtime-service (Stage 5 packaging pending in lock notes)",
+    "executable": "MISSING",
+    "executableDetail": "RealGenAiBackend integrated in module; attach uses registerDesignCompleteUnqualified only; no EngineExecuteBinding path",
+    "status": "UNQUALIFIED",
+    "registryExposure": "UNKNOWN",
+    "runtimeCapabilityDefault": "UNKNOWN",
+    "integrationStatus": "INTEGRATED",
+    "levels": {
+      "L1_module": "PASS",
+      "L2_controlPlane": "PARTIAL",
+      "L3_productJourney": "MISSING"
+    },
+    "honestUnqualified": "PASS",
+    "falseSupportedOrQualified": false,
+    "evidence": [
+      "docs/80-engines/onnx-runtime-genai.md BASELINE",
+      "engines/ort-genai/UPSTREAM.lock lockState: LOCKED",
+      "engines/ort-genai/capability-matrix.yaml UNQUALIFIED INTEGRATED",
+      "engines/ort-genai/build.gradle.kts compileOnly jar",
+      "engines/ort-genai/.../session/RealGenAiBackend.kt",
+      "engines/ort-genai/.../OrtGenaiModule.kt registerDesignCompleteUnqualified",
+      "EnginePackAttachment peer ORT register only"
+    ],
+    "gaps": [
+      "ENG-PKG-01: package GenAI AAR + base ORT AAR into runtime process",
+      "ENG-WIRE-01 attach/execute binding",
+      "Device inference Stage 5; configSchemaDigest still empty in lock",
+      "Host JVM cannot load Android .so (honest)"
+    ]
+  }
+]
