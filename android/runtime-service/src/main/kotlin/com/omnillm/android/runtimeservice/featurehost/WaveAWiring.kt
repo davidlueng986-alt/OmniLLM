@@ -321,6 +321,12 @@ object WaveAWiring {
                 capabilities = ControlPlaneFeaturePorts.playgroundCapabilities(
                     binding,
                     runBlocking { deps.modelManager.listInstallations() },
+                    // FTR-03: honest mode projection from the effective settings
+                    // snapshot (fail-closed default when settings absent).
+                    productModes = {
+                        com.omnillm.runtime.policy.ProductModePolicy
+                            .projectedModes(deps.settings?.invoke())
+                    },
                 ),
                 models = object : PlaygroundModelCatalogPort {
                     override fun listModels(): List<PlaygroundModelRow> = runBlocking {
@@ -432,6 +438,12 @@ object WaveAWiring {
                     binding = binding,
                     modelManager = deps.modelManager,
                     clockMs = deps.clockMs,
+                    // FTR-03: honest mode projection from the effective settings
+                    // snapshot (fail-closed default when settings absent).
+                    productModes = {
+                        com.omnillm.runtime.policy.ProductModePolicy
+                            .projectedModes(deps.settings?.invoke())
+                    },
                 ),
                 inference = ControlPlaneFeaturePorts.serverInference(
                     orchestrator = orchestrator,
