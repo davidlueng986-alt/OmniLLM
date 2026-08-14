@@ -504,7 +504,11 @@ CREATE TABLE job_events (
   FOREIGN KEY (job_id, attempt_no) REFERENCES job_attempts(job_id, attempt_no) ON DELETE CASCADE
 );
 
--- STATUS: PLANNED (not yet implemented)
+-- STATUS: IMPLEMENTED — SQLDelight .sq: Assets.sq (C-08c hybrid: metadata rows
+-- durable; content bytes stay in the runtime-owned quarantine dir, storage_key
+-- references the file, TTL enforced at access). Extension columns vs earlier
+-- PLANNED shape: resource_version, pin_count. Docs package mirror synced by the
+-- docs-mirror agent (2026-08-15).
 CREATE TABLE assets (
   asset_id TEXT PRIMARY KEY,
   principal_id TEXT NOT NULL,
@@ -518,6 +522,8 @@ CREATE TABLE assets (
   detected_content_type TEXT,
   storage_key TEXT,
   expires_at TEXT NOT NULL,
+  resource_version INTEGER NOT NULL DEFAULT 1,
+  pin_count INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -597,7 +603,11 @@ CREATE TABLE measurement_runs (
   FOREIGN KEY (revision_id) REFERENCES model_revisions(revision_id) ON DELETE RESTRICT
 );
 
--- STATUS: PLANNED (not yet implemented)
+-- STATUS: IMPLEMENTED — SQLDelight .sq: ClientRegistrations.sq (C-08b)
+-- Extension columns vs earlier PLANNED shape: package_candidates, display_name,
+-- and the client_registration_epoch singleton (global revocation epoch so the
+-- INV-017 fence survives restart). Docs package mirror synced by the
+-- docs-mirror agent (2026-08-15).
 CREATE TABLE client_registrations (
   registration_id TEXT PRIMARY KEY,
   principal_id TEXT NOT NULL,
@@ -607,8 +617,15 @@ CREATE TABLE client_registrations (
   state TEXT NOT NULL CHECK(state IN ('PENDING','ACTIVE','SUSPENDED','REVOCATION_REQUESTED','DRAINING','REVOKED','EXPIRED')),
   scope_json TEXT NOT NULL,
   revocation_epoch INTEGER NOT NULL DEFAULT 0 CHECK(revocation_epoch>=0),
+  package_candidates TEXT,
+  display_name TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+CREATE TABLE client_registration_epoch (
+  singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+  epoch INTEGER NOT NULL CHECK(epoch>=0)
 );
 
 -- STATUS: IMPLEMENTED — SQLDelight .sq: AccessTokens.sq

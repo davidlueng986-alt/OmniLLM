@@ -507,8 +507,8 @@ CREATE TABLE job_events (
 -- STATUS: IMPLEMENTED — SQLDelight .sq: Assets.sq (C-08c hybrid: metadata rows
 -- durable; content bytes stay in the runtime-owned quarantine dir, storage_key
 -- references the file, TTL enforced at access). Extension columns vs earlier
--- PLANNED shape: resource_version, pin_count. specs/database/omnillm-schema.sql
--- must be mirrored by the docs-mirror agent.
+-- PLANNED shape: resource_version, pin_count. Docs package mirror synced by the
+-- docs-mirror agent (2026-08-15).
 CREATE TABLE assets (
   asset_id TEXT PRIMARY KEY,
   principal_id TEXT NOT NULL,
@@ -606,8 +606,8 @@ CREATE TABLE measurement_runs (
 -- STATUS: IMPLEMENTED — SQLDelight .sq: ClientRegistrations.sq (C-08b)
 -- Extension columns vs earlier PLANNED shape: package_candidates, display_name,
 -- and the client_registration_epoch singleton (global revocation epoch so the
--- INV-017 fence survives restart). specs/database/omnillm-schema.sql must be
--- mirrored by the docs-mirror agent.
+-- INV-017 fence survives restart). Docs package mirror synced by the
+-- docs-mirror agent (2026-08-15).
 CREATE TABLE client_registrations (
   registration_id TEXT PRIMARY KEY,
   principal_id TEXT NOT NULL,

@@ -22,6 +22,7 @@ enum class OmniErrorCode(
     val requiredClientAction: String,
 ) {
     INVALID_REQUEST("INVALID_REQUEST", 400, ErrorCategory.SEMANTIC, false, "correct-request"),
+    MODEL_FORMAT_INVALID("MODEL_FORMAT_INVALID", 400, ErrorCategory.SEMANTIC, false, "correct-request"),
     UNAUTHORIZED("UNAUTHORIZED", 401, ErrorCategory.SEMANTIC, false, "reauthenticate"),
     FORBIDDEN("FORBIDDEN", 403, ErrorCategory.SEMANTIC, false, "request-scope-or-complete-local-approval"),
     NOT_FOUND("NOT_FOUND", 404, ErrorCategory.SEMANTIC, false, "refresh-resource"),
