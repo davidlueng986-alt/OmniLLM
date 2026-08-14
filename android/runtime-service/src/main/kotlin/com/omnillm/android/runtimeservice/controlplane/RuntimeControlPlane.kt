@@ -502,7 +502,11 @@ class RuntimeControlPlane private constructor(
                     clock = clock,
                 )
                 val assetQuarantine = File(appContext.cacheDir, "omnillm-asset-quarantine")
-                val registrations = ClientRegistrationStore()
+                // C-08b: registrations + the global revocation epoch are durable
+                // (SQLDelight under ControlPlaneDatabase; single writer ADR-010).
+                val registrations = ClientRegistrationStore(
+                    durable = controlDb.clientRegistrations,
+                )
                 val streamSessions = StreamSessionRegistry()
                 val planeRef = AtomicReference<RuntimeControlPlane?>(null)
 

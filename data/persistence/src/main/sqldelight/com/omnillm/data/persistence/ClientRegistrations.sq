@@ -1,0 +1,78 @@
+-- ClientRegistration durable store (C-08b).
+-- Authority base: specs/database/omnillm-schema.sql#client_registrations
+-- (STATUS: PLANNED -> IMPLEMENTED in this pass; docs-mirror agent to flip STATUS
+--  and port the two extension columns below into specs/database/omnillm-schema.sql).
+--
+-- Extensions vs the authority table:
+--  * package_candidates TEXT  -- observed UID's package candidates at registration
+--  * display_name TEXT        -- caller-supplied display name
+--  * client_registration_epoch singleton -- process-global revocation epoch so
+--    the INV-017 epoch fence survives restart (deriving it from max(row epoch)
+--    would silently drop the last increment after a restart).
+--
+-- Column values in package_candidates / display_name are constrained by the
+-- binder layer (no '\n' allowed; encoding = '\n'-joined lines).
+
+CREATE TABLE client_registrations (
+  registration_id TEXT NOT NULL PRIMARY KEY,
+  principal_id TEXT NOT NULL,
+  observed_uid INTEGER,
+  android_user_id INTEGER,
+  transport TEXT NOT NULL CHECK(transport IN ('LOCAL_UI','AIDL','HTTP_LOOPBACK','HTTP_LAN')),
+  state TEXT NOT NULL CHECK(state IN ('PENDING','ACTIVE','SUSPENDED','REVOCATION_REQUESTED','DRAINING','REVOKED','EXPIRED')),
+  scope_json TEXT NOT NULL,
+  revocation_epoch INTEGER NOT NULL DEFAULT 0 CHECK(revocation_epoch>=0),
+  package_candidates TEXT,
+  display_name TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE client_registration_epoch (
+  singleton_id INTEGER NOT NULL PRIMARY KEY CHECK(singleton_id = 1),
+  epoch INTEGER NOT NULL CHECK(epoch>=0)
+);
+
+selectByRegistrationId:
+SELECT registration_id, principal_id, observed_uid, android_user_id, transport,
+       state, scope_json, revocation_epoch, package_candidates, display_name,
+       created_at, updated_at
+FROM client_registrations
+WHERE registration_id = ?;
+
+listAll:
+SELECT registration_id, principal_id, observed_uid, android_user_id, transport,
+       state, scope_json, revocation_epoch, package_candidates, display_name,
+       created_at, updated_at
+FROM client_registrations
+ORDER BY created_at ASC;
+
+upsertRegistration:
+INSERT INTO client_registrations(
+  registration_id, principal_id, observed_uid, android_user_id, transport,
+  state, scope_json, revocation_epoch, package_candidates, display_name,
+  created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(registration_id) DO UPDATE SET
+  principal_id = excluded.principal_id,
+  observed_uid = excluded.observed_uid,
+  android_user_id = excluded.android_user_id,
+  transport = excluded.transport,
+  state = excluded.state,
+  scope_json = excluded.scope_json,
+  revocation_epoch = excluded.revocation_epoch,
+  package_candidates = excluded.package_candidates,
+  display_name = excluded.display_name,
+  updated_at = excluded.updated_at;
+
+updateState:
+UPDATE client_registrations
+SET state = ?, updated_at = ?
+WHERE registration_id = ?;
+
+selectEpoch:
+SELECT epoch FROM client_registration_epoch WHERE singleton_id = 1;
+
+upsertEpoch:
+INSERT INTO client_registration_epoch(singleton_id, epoch) VALUES (1, ?)
+ON CONFLICT(singleton_id) DO UPDATE SET epoch = excluded.epoch;
