@@ -500,8 +500,13 @@ class OmniAdminFacade(
                         resourceVersion = 0L,
                         affectedResourceId = reqId,
                         resultSchemaId = "PlaygroundCancelResult",
-                        resultCanonicalJson =
-                            """{"requestId":"$reqId","phase":"${result.value.phase.name}","requestState":"${result.value.requestState ?: ""}","isTerminal":${result.value.isTerminal}}""",
+                        // D18: codec-built JSON — complete escaping.
+                        resultCanonicalJson = AdminResultJson.playgroundCancel(
+                            requestId = reqId,
+                            phase = result.value.phase,
+                            requestState = result.value.requestState,
+                            isTerminal = result.value.isTerminal,
+                        ),
                     ),
                 )
                 is OmniResult.Err -> failed(domainCommand.commandId, result.error)
@@ -551,16 +556,18 @@ class OmniAdminFacade(
             when (val result = plane.developerServerApi.runSmokeInference(principal, claim)) {
                 is OmniResult.Ok -> {
                     val smoke = result.value
-                    val errCode = smoke.error?.code?.code
-                    val errMsg = smoke.error?.message?.replace("\"", "'")
                     AdminAidlMapper.toAidlCommandResult(
                         AdminCommandResult.succeeded(
                             commandId = domainCommand.commandId,
                             resourceVersion = 0L,
                             affectedResourceId = smoke.requestId ?: reqId,
                             resultSchemaId = "ServerSmokeResult",
-                            resultCanonicalJson =
-                                """{"step":"${smoke.step}","success":${smoke.success},"requestId":"${smoke.requestId ?: reqId}","requestState":"${smoke.requestState ?: ""}","errorCode":${errCode?.let { "\"$it\"" } ?: "null"},"errorMessage":${errMsg?.let { "\"$it\"" } ?: "null"},"engineBuildId":${smoke.actualEngineBuildId?.let { "\"$it\"" } ?: "null"},"backend":${smoke.actualBackend?.let { "\"$it\"" } ?: "null"},"modelRevisionId":${smoke.actualModelRevisionId?.let { "\"$it\"" } ?: "null"}}""",
+                            // D18: codec-built JSON — complete escaping (the old
+                            // string concat mutated errorMessage with replace()).
+                            resultCanonicalJson = AdminResultJson.serverSmoke(
+                                result = smoke,
+                                fallbackRequestId = reqId,
+                            ),
                         ),
                     )
                 }
@@ -599,13 +606,10 @@ class OmniAdminFacade(
         return binding.resolveCapability(cap, cand).name
     }
 
-    private fun playgroundStripJson(strip: com.omnillm.features.playground.api.RequestStripUi): String {
-        val errCode = strip.error?.code?.code
-        val errMsg = strip.error?.message?.replace("\"", "'")
-        val text = strip.assistantText?.replace("\\", "\\\\")?.replace("\"", "\\\"")
-            ?.replace("\n", "\\n")
-        return """{"requestId":"${strip.requestId}","operationKind":"${strip.operationKind}","state":"${strip.state}","isTerminal":${strip.isTerminal},"engineBuildId":${strip.engineBuildId?.let { "\"$it\"" } ?: "null"},"backend":${strip.backend?.let { "\"$it\"" } ?: "null"},"actualModelRevisionId":${strip.actualModelRevisionId?.let { "\"$it\"" } ?: "null"},"assistantText":${text?.let { "\"$it\"" } ?: "null"},"degraded":${strip.degraded},"errorCode":${errCode?.let { "\"$it\"" } ?: "null"},"errorMessage":${errMsg?.let { "\"$it\"" } ?: "null"},"cancelPhase":${strip.cancelPhase?.name?.let { "\"$it\"" } ?: "null"}}"""
-    }
+    private fun playgroundStripJson(strip: com.omnillm.features.playground.api.RequestStripUi): String =
+        // D18: codec-built JSON — complete escaping (the old hand-rolled
+        // replace() chain leaked quotes/backslashes/control chars).
+        AdminResultJson.playgroundStrip(strip)
 
     // ------------------------------------------------------------------
 
