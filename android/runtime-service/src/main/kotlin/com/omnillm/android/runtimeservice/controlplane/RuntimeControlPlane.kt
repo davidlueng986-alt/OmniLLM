@@ -614,9 +614,12 @@ class RuntimeControlPlane private constructor(
                     lanTlsEndpoint = lanTlsEndpoint,
                     lanBindNetwork = true,
                 )
+                // C-08c hybrid: asset metadata durable (SQLDelight); content
+                // bytes stay in the quarantine dir with TTL enforced on access.
                 val assetBroker = AssetHandleBroker(
                     commandLedger = commands,
                     quarantineDir = assetQuarantine,
+                    durable = controlDb.assetRecords,
                 )
 
                 val plane = RuntimeControlPlane(

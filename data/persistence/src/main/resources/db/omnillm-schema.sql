@@ -504,7 +504,11 @@ CREATE TABLE job_events (
   FOREIGN KEY (job_id, attempt_no) REFERENCES job_attempts(job_id, attempt_no) ON DELETE CASCADE
 );
 
--- STATUS: PLANNED (not yet implemented)
+-- STATUS: IMPLEMENTED — SQLDelight .sq: Assets.sq (C-08c hybrid: metadata rows
+-- durable; content bytes stay in the runtime-owned quarantine dir, storage_key
+-- references the file, TTL enforced at access). Extension columns vs earlier
+-- PLANNED shape: resource_version, pin_count. specs/database/omnillm-schema.sql
+-- must be mirrored by the docs-mirror agent.
 CREATE TABLE assets (
   asset_id TEXT PRIMARY KEY,
   principal_id TEXT NOT NULL,
@@ -518,6 +522,8 @@ CREATE TABLE assets (
   detected_content_type TEXT,
   storage_key TEXT,
   expires_at TEXT NOT NULL,
+  resource_version INTEGER NOT NULL DEFAULT 1,
+  pin_count INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
