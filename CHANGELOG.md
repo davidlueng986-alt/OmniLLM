@@ -18,6 +18,7 @@ Launch-readiness fix wave (Stage 4 of 7, branch `fix/launch-readiness`).
 - **BLD-07** `5078b8b` — release workflow fail-fast signing + `apksigner verify` + SBOM.
 - **BLD-08** `99d82c0` — removed committed e2e junk artifacts; `.gitignore` extended.
 - **BLD-13** `b68e90a` — `verifyNativeLibsPresent` wired into root `check`; ELF 16 KB check fails closed when no `.so`.
+- **D21 (provenance policy)** — RELEASE_CHECKLIST §0 records: `0.2.0-rc1` APK 內嵌 revision `9d1dc13` (R16 recapture 之 commit); tag `v0.2.0-rc1` = `6f14f49`; GA 前必須 **tag == HEAD == APK 內嵌 revision 三點合一**,且由被 tag 的 commit 建置+重驗. Tag itself not moved.
 
 ### Engines (real, but all UNQUALIFIED — device evidence is Stage 5)
 

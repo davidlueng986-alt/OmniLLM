@@ -32,7 +32,11 @@ pip install -r tools/codegen/requirements.txt
 python tools/ci/check_elf_16kb_alignment.py --min-align 16384
 python tools/ci/check_apk_16kb_zipalign.py android/app-ui/build/outputs/apk/release/*.apk
 python tools/ci/check_apk_16kb_zipalign.py android/companion-sandbox/build/outputs/apk/release/*.apk
+./gradlew checkLlamaArtifactDigest   # D2: stripped-packaged digest gate (UPSTREAM.lock)
 ```
+
+**Provenance / 版本內嵌正確性 (D21) — GA 前強制三點合一：**
+`0.2.0-rc1` APK 內嵌 revision `9d1dc13` (R16 recapture 之 commit);tag `v0.2.0-rc1` = `6f14f49`;GA 前必須 **tag == HEAD == APK 內嵌 revision 三點合一**,且由被 tag 的 commit 建置+重驗 (build from the tagged commit, then re-verify the artifact).
 
 | Check | Expected |
 |---|---|
