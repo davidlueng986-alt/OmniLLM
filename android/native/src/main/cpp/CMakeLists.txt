@@ -15,6 +15,23 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ---------------------------------------------------------------------------
+# D1b: byte-reproducible builds — neutralize absolute checkout paths.
+#
+# Assert/fatal strings embed __FILE__ (absolute source path) into .rodata, so
+# .so bytes depended on the checkout directory (two clones of the same commit
+# produced different digests). Map source + build dirs to fixed canonical
+# prefixes; the D2 digest gate then matches across checkouts.
+# ---------------------------------------------------------------------------
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  string(REPLACE "\\" "/" _omnillm_src_dir "${CMAKE_CURRENT_SOURCE_DIR}")
+  string(REPLACE "\\" "/" _omnillm_bin_dir "${CMAKE_CURRENT_BINARY_DIR}")
+  add_compile_options(
+    "-ffile-prefix-map=${_omnillm_src_dir}=omnillm/src"
+    "-ffile-prefix-map=${_omnillm_bin_dir}=omnillm/build"
+  )
+endif()
+
 # 16 KB page-size safety (ANDROID-NATIVE §2).
 if(ANDROID)
   set(OMNILLM_PAGE_FLAGS "-Wl,-z,max-page-size=16384" "-Wl,-z,common-page-size=16384")
