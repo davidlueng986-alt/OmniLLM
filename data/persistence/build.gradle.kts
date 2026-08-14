@@ -37,6 +37,16 @@ dependencies {
     implementation(libs.sqldelight.coroutines)
     // JdbcSqliteDriver for ControlPlaneDatabase.openJdbcFile / openInMemory (tests + non-Android).
     // Android production opens AndroidSqliteDriver in :android:runtime-service and passes SqlDriver.
+    // D10 (GA-GAPS FIX) root-cause note: scope intentionally stays `implementation` —
+    // (a) main sources reference app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+    //     (ControlPlaneDatabase.kt), so `testImplementation` would break main compilation;
+    // (b) consumer modules (:runtime:session, :runtime:job-manager, :runtime:model-manager,
+    //     :features:ai-content-report, :android:runtime-service) reach JdbcSqliteDriver
+    //     transitively through this project dependency for their OWN tests — scoping down to
+    //     compileOnly+testImplementation would break them (out of packaging-fixer ownership).
+    // No production caller instantiates the JDBC driver (Android uses AndroidSqliteDriver),
+    // so the JVM-only sqlite-jdbc payload is stripped at packaging time instead
+    // (android/app-ui/build.gradle.kts packaging.excludes — D10b). See THIRD_PARTY_NOTICES.md.
     implementation(libs.sqldelight.sqlite.driver)
     implementation(project(":core:canonical"))
     implementation(project(":core:identity"))

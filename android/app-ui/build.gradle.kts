@@ -121,6 +121,20 @@ android {
                 "META-INF/*.SF",
                 "META-INF/*.DSA",
                 "META-INF/*.RSA",
+                // D10 (GA-GAPS FIX): strip JVM-only runtime garbage pulled in via
+                // releaseRuntimeClasspath — jansi 2.4.1 (io.ktor:ktor-server-core-jvm
+                // runtime scope; Mac/Windows natives ~343KB, never used on Android) and
+                // sqlite-jdbc 3.45.2.0 (app.cash.sqldelight:sqlite-driver ← :data:persistence;
+                // 6MB Mac/Windows natives + DriverManager registration — Android production
+                // opens AndroidSqliteDriver in :android:runtime-service instead).
+                // Class files stay (JdbcSqliteDriver is referenced by :data:persistence main);
+                // only the JVM-only payloads are excluded. ~6.4MB APK reduction.
+                "org/fusesource/jansi/**",
+                "org/sqlite/native/**",
+                "sqlite-jdbc.properties",
+                "META-INF/native-image/jansi/**",
+                "META-INF/native-image/org.xerial/**",
+                "META-INF/services/java.sql.Driver",
             )
         }
     }
