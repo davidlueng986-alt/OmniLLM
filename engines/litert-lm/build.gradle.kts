@@ -37,13 +37,13 @@ dependencies {
     // must package `com.google.ai.edge.litertlm:litertlm-android:0.15.0` (native libs
     // inside the AAR) instead of this JVM jar. Host JVM probes may use litertlm-jvm.
     // OfficialLitertLmSdkBridge fails closed (NOT_AVAILABLE) when the SDK is absent.
-    val litertLmSdkVersion = "0.15.0"
-    compileOnly("com.google.ai.edge.litertlm:litertlm-jvm:$litertLmSdkVersion")
+    // Version pinned via gradle/libs.versions.toml `litertlm` (R10 consolidation).
+    compileOnly(libs.litertlm.jvm)
 
     // Real SDK classes on the host test classpath: mapping tests construct genuine
     // EngineConfig/Backend/Contents/Message objects (no native calls — Engine/Conversation
     // are never instantiated in host unit tests).
-    testImplementation("com.google.ai.edge.litertlm:litertlm-jvm:$litertLmSdkVersion")
+    testImplementation(libs.litertlm.jvm)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.core)
