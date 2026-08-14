@@ -143,7 +143,7 @@ data class DashboardFeaturePorts(
     val traces: DashboardTracePort,
     val resources: DashboardResourcePort = EmptyDashboardResourcePort,
     val requests: DashboardRequestPort = EmptyDashboardRequestPort,
-    val capabilities: DashboardCapabilityPort = AllSupportedCapabilityPort,
+    val capabilities: DashboardCapabilityPort = HonestDashboardCapabilityPort,
     val measurements: DashboardMeasurementPort = EmptyDashboardMeasurementPort,
     val clockWallMs: () -> Long = { System.currentTimeMillis() },
 )
@@ -172,9 +172,69 @@ object EmptyDashboardRequestPort : DashboardRequestPort {
         )
 }
 
-/** Default: all catalog capabilities SUPPORTED (local admin test default). */
-object AllSupportedCapabilityPort : DashboardCapabilityPort {
-    override fun state(capability: CapabilityId): CapabilityState = CapabilityState.SUPPORTED
+/**
+ * Observability / product cells the dashboard feature's own software stack
+ * truly provides when composed with the control-plane observability facade
+ * and governor (C-04 honesty rule):
+ *
+ * - HEALTH views (service / engine / model) via the HealthRegistry snapshot
+ * - REQUEST_TRACE via TraceRecorder redacted views
+ * - PERFORMANCE_MEASUREMENT + EVIDENCE_LABELING via the MetricRegistry
+ * - RESOURCE_ACCOUNTING via the governor ledger snapshot (production wiring)
+ * - LOCAL_UI_INTERFACE: this feature is the local UI surface
+ * - CAPABILITY_NEGOTIATION: this feature implements the negotiate endpoint
+ *
+ * JOB_PROGRESS is CONDITIONAL, not SUPPORTED: the metric slot exists in the
+ * observability catalog but no producer records it today — the software path
+ * is partial, and honesty forbids a full SUPPORTED claim.
+ *
+ * Engine / orchestrator cells (TEXT_GENERATION, EMBEDDING, VISION_INPUT, ...)
+ * are deliberately absent here — they are never fabricated and must come from
+ * the plane's real CapabilityLookup ([RegistryBackedCapabilityPort]) or fail
+ * closed to UNKNOWN ([HonestDashboardCapabilityPort]).
+ */
+val DASHBOARD_SOFTWARE_CAPABILITIES: Map<CapabilityId, CapabilityState> = mapOf(
+    CapabilityId.SERVICE_HEALTH to CapabilityState.SUPPORTED,
+    CapabilityId.ENGINE_HEALTH to CapabilityState.SUPPORTED,
+    CapabilityId.MODEL_HEALTH to CapabilityState.SUPPORTED,
+    CapabilityId.REQUEST_TRACE to CapabilityState.SUPPORTED,
+    CapabilityId.RESOURCE_ACCOUNTING to CapabilityState.SUPPORTED,
+    CapabilityId.PERFORMANCE_MEASUREMENT to CapabilityState.SUPPORTED,
+    CapabilityId.EVIDENCE_LABELING to CapabilityState.SUPPORTED,
+    CapabilityId.LOCAL_UI_INTERFACE to CapabilityState.SUPPORTED,
+    CapabilityId.CAPABILITY_NEGOTIATION to CapabilityState.SUPPORTED,
+    CapabilityId.JOB_PROGRESS to CapabilityState.CONDITIONAL,
+)
+
+/**
+ * Honest default dashboard capability port (C-04): software-provided cells
+ * report their true state; every other cell fails closed to UNKNOWN.
+ * Never blanket SUPPORTED — engine cells stay UNKNOWN until a real
+ * CapabilityLookup-backed port is wired in production.
+ */
+object HonestDashboardCapabilityPort : DashboardCapabilityPort {
+    override fun state(capability: CapabilityId): CapabilityState =
+        DASHBOARD_SOFTWARE_CAPABILITIES[capability] ?: CapabilityState.UNKNOWN
+}
+
+/**
+ * Registry-backed honest capability port (C-04).
+ *
+ * - [softwareProvided]: cells the feature genuinely provides through its
+ *   attached software stack (see [DASHBOARD_SOFTWARE_CAPABILITIES]).
+ * - [engineState]: projection of the plane's real CapabilityLookup for engine
+ *   / orchestrator cells (e.g. EngineExecuteBinding-backed with a probe
+ *   candidate). Never fabricated here.
+ * - Everything else fails closed to [default] (UNKNOWN).
+ */
+class RegistryBackedCapabilityPort(
+    private val softwareProvided: Map<CapabilityId, CapabilityState> =
+        DASHBOARD_SOFTWARE_CAPABILITIES,
+    private val engineState: (CapabilityId) -> CapabilityState? = { null },
+    private val default: CapabilityState = CapabilityState.UNKNOWN,
+) : DashboardCapabilityPort {
+    override fun state(capability: CapabilityId): CapabilityState =
+        softwareProvided[capability] ?: engineState(capability) ?: default
 }
 
 /**

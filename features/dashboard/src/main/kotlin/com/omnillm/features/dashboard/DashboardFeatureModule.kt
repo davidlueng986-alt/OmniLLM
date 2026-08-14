@@ -37,7 +37,7 @@ object DashboardFeatureModule {
         requests: com.omnillm.features.dashboard.ports.DashboardRequestPort =
             com.omnillm.features.dashboard.ports.EmptyDashboardRequestPort,
         capabilities: com.omnillm.features.dashboard.ports.DashboardCapabilityPort =
-            com.omnillm.features.dashboard.ports.AllSupportedCapabilityPort,
+            com.omnillm.features.dashboard.ports.HonestDashboardCapabilityPort,
         measurements: com.omnillm.features.dashboard.ports.DashboardMeasurementPort =
             com.omnillm.features.dashboard.ports.EmptyDashboardMeasurementPort,
         clockWallMs: () -> Long = facade::nowEpochMs,
