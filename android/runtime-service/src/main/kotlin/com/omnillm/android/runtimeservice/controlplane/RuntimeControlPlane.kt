@@ -588,6 +588,9 @@ class RuntimeControlPlane private constructor(
                         // C-01: orchestrator INTENT must be durable — the same
                         // SQLite-backed CommitLedger already wired to the registry.
                         commitLedger = commits,
+                        // D7 (COR-18 residual): modelhub delete CAS + snapshot
+                        // read the durable installation row's resourceVersion.
+                        installationLedger = controlDb.installations,
                     ),
                 )
 

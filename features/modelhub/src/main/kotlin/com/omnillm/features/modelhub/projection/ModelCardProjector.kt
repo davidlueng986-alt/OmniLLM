@@ -72,6 +72,8 @@ object ModelCardProjector {
         loaded: LoadedModelSnapshot? = null,
         refs: LiveReferences = LiveReferences(),
         activeJob: JobRecord? = null,
+        /** Durable delete-CAS version (COR-18); null when unknown → fail closed. */
+        resourceVersion: Long? = null,
     ): ModelCard {
         val eval = snap.evaluation
         return ModelCard(
@@ -93,6 +95,7 @@ object ModelCardProjector {
             performanceRecorded = eval?.performanceRecorded == true,
             pinned = snap.pinned,
             liveReferenceCount = refs.total,
+            resourceVersion = resourceVersion,
             riskFlags = riskFlagsForChannel(acquisitionChannel) + riskFlagsForState(snap, eval),
             rejectReason = snap.rejectReason,
             activeJobId = activeJob?.jobId?.value,

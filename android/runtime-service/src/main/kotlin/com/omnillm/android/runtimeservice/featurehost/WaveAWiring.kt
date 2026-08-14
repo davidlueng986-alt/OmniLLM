@@ -17,6 +17,7 @@ import com.omnillm.core.contracts.PrincipalId
 import com.omnillm.core.errors.generated.OmniError
 import com.omnillm.core.state.domain.InstallationId
 import com.omnillm.core.state.domain.LoadedModelId
+import com.omnillm.data.persistence.InstallationLedgerPorts
 import com.omnillm.features.admin.AdminFeatureModule
 import com.omnillm.features.admin.ports.AdminModelPort
 import com.omnillm.features.admin.ports.AdminRuntimeStatusPort
@@ -154,6 +155,13 @@ object WaveAWiring {
          * persistence (existing test behavior unchanged).
          */
         val commitLedger: CommitLedger? = null,
+        /**
+         * Durable installation ledger (D7 / COR-18). When present, the modelhub
+         * delete CAS + snapshot projection read the installation row's
+         * resource_version (single authority, restart-surviving). Null in unit
+         * scaffolds — modelhub falls back to the in-memory counter (test-only).
+         */
+        val installationLedger: InstallationLedgerPorts? = null,
     )
 
     fun bootstrapForTest(
@@ -293,7 +301,12 @@ object WaveAWiring {
             ),
             loadRuntime = ControlPlaneModelLoadRuntimePort(deps.engineExecute),
             lifecycle = loadedModelTracker,
-            resourceVersions = InMemoryInstallationResourceVersionPort(),
+            // D7 (COR-18 residual): durable installation row is the single
+            // resource-version authority — delete CAS + snapshot projection
+            // agree, survive restart, and the re-fetch guidance converges.
+            resourceVersions = deps.installationLedger?.let {
+                SqlDelightInstallationResourceVersionPort(it)
+            } ?: InMemoryInstallationResourceVersionPort(),
             clockMs = deps.clockMs,
         )
         val playground = PlaygroundModule.createApi(
