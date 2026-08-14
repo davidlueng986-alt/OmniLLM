@@ -175,8 +175,31 @@ if (-not $SkipAssemble) {
         Write-Host "  zip-align: $($apk.FullName)"
         Invoke-Python -Arguments @("tools/ci/check_apk_16kb_zipalign.py", $apk.FullName)
     }
+
+    Write-Host "==> [13/14] D10 packaged-APK cleanliness (jansi/sqlite-jdbc junk + C-07 natives)"
+    $relApks = @(Get-Item "android/app-ui/build/outputs/apk/release/*.apk" -ErrorAction SilentlyContinue)
+    if ($relApks.Count -eq 0) {
+        throw "FAIL: no app-ui release APK for verify_apk_clean"
+    }
+    foreach ($apk in $relApks) {
+        Invoke-Python -Arguments @("tools/ci/verify_apk_clean.py", $apk.FullName)
+    }
+
+    Write-Host "==> [14/14] D9 SBOM vs APK (packaged set, both directions)"
+    $Sbom = $env:OMNILLM_SBOM
+    if (-not $Sbom) {
+        $Sbom = "C:\Users\daive\Downloads\OmniLLM_Release\SBOM-0.2.0-rc2.json"
+    }
+    if (-not (Test-Path $Sbom)) {
+        throw "FAIL: SBOM not found at $Sbom (set OMNILLM_SBOM)"
+    }
+    Invoke-Python -Arguments @(
+        "tools/ci/verify_sbom_vs_apk.py",
+        "--sbom", $Sbom,
+        "--apk", $relApks[0].FullName
+    )
 } else {
-    Write-Host "==> [10-11/12] assemble + APK 16 KB SKIPPED (-SkipAssemble)"
+    Write-Host "==> [10-14/14] assemble + APK gates SKIPPED (-SkipAssemble)"
     Invoke-Python -Arguments @("tools/ci/check_elf_16kb_alignment.py", "--min-align", "16384")
 }
 

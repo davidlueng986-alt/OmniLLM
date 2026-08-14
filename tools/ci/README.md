@@ -13,6 +13,8 @@ Automated CI/CD for the OmniLLM Android monorepo.
 | ELF 16 KB scan | [`check_elf_16kb_alignment.py`](./check_elf_16kb_alignment.py) |
 | APK zip-align 16 KB | [`check_apk_16kb_zipalign.py`](./check_apk_16kb_zipalign.py) |
 | Module dep edges (INV-001) | [`check_dependency_edges.py`](./check_dependency_edges.py) |
+| APK cleanliness (D10) | [`verify_apk_clean.py`](./verify_apk_clean.py) |
+| SBOM vs APK (D9) | [`verify_sbom_vs_apk.py`](./verify_sbom_vs_apk.py) |
 
 ## Pipeline (fail closed)
 
@@ -33,6 +35,55 @@ Order matches product codegen guidance: **drift gate before in-tree regenerate**
 13. **Upload** APK (and AAB on release workflow) artifacts (`if-no-files-found: error`)
 
 Any non-zero exit fails the job. Test failures are never ignored.
+
+### D10: packaged-APK cleanliness gate
+
+```bash
+python tools/ci/verify_apk_clean.py android/app-ui/build/outputs/apk/release/app-ui-release-unsigned.apk
+./gradlew checkApkClean          # aggregated in root `check`
+```
+
+Fail-closed, both directions:
+- **FORBIDDEN (D10)** — JVM-only payloads must NOT ship: jansi
+  (`org/fusesource/jansi/**`, `META-INF/native-image/jansi/**`; ←
+  `ktor-server-core` runtime scope) and sqlite-jdbc
+  (`org/sqlite/native/**`, `sqlite-jdbc.properties`,
+  `META-INF/native-image/org.xerial/**`, `META-INF/services/java.sql.Driver`;
+  ← `sqldelight:sqlite-driver`). Class files stay on the classpath; the
+  JVM-only payloads are stripped via `packaging.resources.excludes` +
+  a `META-INF/services/**` merge carve-out in
+  `android/app-ui/build.gradle.kts` (AGP default merge shadows excludes).
+- **REQUIRED (C-07)** — the engine natives must be present in both ABIs:
+  `liblitertlm_jni.so`, `libonnxruntime-genai.so`, `libonnxruntime-genai-jni.so`,
+  `libonnxruntime.so`, `libonnxruntime4j_jni.so`, `libomnillm_llama.so`,
+  `libandroidx.graphics.path.so`, `libc++_shared.so`.
+- **INVARIANT** — mllm (`libMllm*`, `libgojni.so`, `libomp.so`) stays
+  arm64-v8a-only; x86_64 presence is a regression.
+
+### D9: SBOM vs APK gate
+
+```bash
+python tools/ci/verify_sbom_vs_apk.py \
+  --sbom C:\Users\daive\Downloads\OmniLLM_Release\SBOM-0.2.0-rc2.json \
+  --apk android/app-ui/build/outputs/apk/release/app-ui-release-unsigned.apk
+./gradlew checkSbomVsApk -Pomnillm.sbom=...   # aggregated in root `check`
+```
+
+The canonical SBOM (`SBOM-0.2.0-rc2.json`, CycloneDX 1.5) lives **outside the
+repo** under `C:\Users\daive\Downloads\OmniLLM_Release\` (kept alongside
+`SBOM-0.2.0.json`). Every component carries an `omnillm:scope` property:
+
+| scope | meaning |
+|---|---|
+| `packaged-in-apk` | present in the release APK (verified against `omnillm:apk-entries` globs: `lib/<abi>/*.so`, `META-INF/*.version`, characteristic files) |
+| `excluded-from-packaging` | on the release runtime classpath but JVM-only payload stripped at packaging (D10: jansi, sqlite-jdbc) |
+| `compileOnly-not-shipped` | compile/test classpath only, never packaged (litertlm-jvm, ort-genai classes.jar) |
+| `pinned-not-shipped` | UPSTREAM.lock pin without a packaged artifact (mlc-llm) |
+| `metadata-only` | BOMs / per-device models never packaged (Compose BOM, gemma) |
+
+The verifier fails on a mismatch in **either** direction: a claimed APK entry
+that is missing, or a characteristic APK entry (`.so` / `.version`) not
+claimed by any packaged component.
 
 ### detekt (intentionally skipped)
 

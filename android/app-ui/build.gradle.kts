@@ -134,7 +134,23 @@ android {
                 "sqlite-jdbc.properties",
                 "META-INF/native-image/jansi/**",
                 "META-INF/native-image/org.xerial/**",
+                // AGP's default merge pattern `META-INF/services/**` wins over
+                // excludes, so carve the JDBC registration out of the merge set
+                // below (otherwise sqlite-jdbc's java.sql.Driver service file
+                // survives packaging — verified empirically on AGP 9.3.0).
                 "META-INF/services/java.sql.Driver",
+            )
+            // D10: drop the blanket META-INF/services merge so the java.sql.Driver
+            // exclude above actually applies, then re-merge ONLY the service files
+            // that are genuinely multi-provider in the release classpath merge
+            // (kotlin-reflect BuiltInsLoader helpers + Netty BlockHound hook).
+            // Single-provider service files (ktor, coroutines) merge to themselves
+            // and are unaffected. Without this carve-out, `META-INF/services/**`
+            // (an AGP default) shadows the exclude.
+            merges -= setOf("META-INF/services/**", "/META-INF/services/**")
+            merges += setOf(
+                "META-INF/services/kotlin.reflect.jvm.internal.impl.resolve.ExternalOverridabilityCondition",
+                "META-INF/services/reactor.blockhound.integration.BlockHoundIntegration",
             )
         }
     }

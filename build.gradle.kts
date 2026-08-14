@@ -187,6 +187,73 @@ val checkDependencyEdges by tasks.registering(Exec::class) {
     })
 }
 
+// ---------------------------------------------------------------------------
+// D10: packaged-APK cleanliness gate (GA-GAPS FIX)
+// Fail closed on the RELEASE app-ui APK (junk-free + C-07 natives present).
+// The task resolves the APK at execution time and skips with a warning when it
+// is absent, so pure-JVM / config-only `check` runs do not hard-fail.
+// ---------------------------------------------------------------------------
+
+val checkApkClean by tasks.registering(Exec::class) {
+    group = "verification"
+    description =
+        "Fail when the release APK contains D10 JVM junk (jansi/sqlite-jdbc) or misses C-07 engine natives"
+    workingDir = rootDir
+    doFirst {
+        val apks = fileTree("android/app-ui/build/outputs/apk/release") {
+            include("*-release*.apk")
+        }.files.sorted()
+        if (apks.isEmpty()) {
+            logger.warn("checkApkClean: no release APK found — skipping (assembleRelease runs this gate)")
+            commandLine(pythonExecutable(), "-c", "print('checkApkClean: skipped (no release APK)')")
+        } else {
+            commandLine(
+                pythonExecutable(),
+                "tools/ci/verify_apk_clean.py",
+                apks.first().absolutePath,
+            )
+        }
+    }
+    inputs.file("tools/ci/verify_apk_clean.py")
+    inputs.file("android/app-ui/build.gradle.kts")
+    outputs.upToDateWhen { false } // APK path resolved at execution time
+}
+
+val checkSbomVsApk by tasks.registering(Exec::class) {
+    group = "verification"
+    description =
+        "Fail when the SBOM packaged set drifts from the release APK contents (both directions). Pass -Pomnillm.sbom=<path>; skips with a warning when absent (canonical SBOM lives outside the repo)."
+    workingDir = rootDir
+    // The SBOM path is resolved at execution time (canonical copy is not in-repo).
+    doFirst {
+        val sbomPath = (findProperty("omnillm.sbom") as String?)?.let { rootProject.file(it) }
+            ?: rootProject.file("SBOM-0.2.0-rc2.json")
+        val apks = fileTree("android/app-ui/build/outputs/apk/release") {
+            include("*-release*.apk")
+        }.files.sorted()
+        if (apks.isEmpty() || !sbomPath.isFile) {
+            logger.warn(
+                "checkSbomVsApk: {} ({} missing; {} APKs) — skipping; assembleRelease + the release SBOM run this gate",
+                "skipped",
+                sbomPath.absolutePath,
+                apks.size,
+            )
+            commandLine(pythonExecutable(), "-c", "print('checkSbomVsApk: skipped (no release APK or SBOM)')")
+        } else {
+            commandLine(
+                pythonExecutable(),
+                "tools/ci/verify_sbom_vs_apk.py",
+                "--sbom",
+                sbomPath.absolutePath,
+                "--apk",
+                apks.first().absolutePath,
+            )
+        }
+    }
+    inputs.file("tools/ci/verify_sbom_vs_apk.py")
+    outputs.upToDateWhen { false } // path resolved at execution time
+}
+
 tasks.register("check") {
     group = "verification"
     description =
@@ -200,6 +267,10 @@ tasks.register("check") {
     dependsOn(":android:native:verifyNativeLibsPresent")
     // BLD-D2: stripped-packaged llama.cpp digest lock gate.
     dependsOn(checkLlamaArtifactDigest)
+    // D10/D9: packaged-APK cleanliness + SBOM-vs-APK gates (skip-warn when the
+    // release APK or the out-of-repo SBOM is absent; fail closed when present).
+    dependsOn(checkApkClean)
+    dependsOn(checkSbomVsApk)
 }
 
 // ---------------------------------------------------------------------------
