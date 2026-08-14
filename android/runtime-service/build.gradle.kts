@@ -149,6 +149,14 @@ dependencies {
     // the bound-port + TCP-reachability contract runs against a REAL server).
     testImplementation(libs.ktor.server.cio)
 
+    // C-07 host attach-test seams: the official LiteRT-LM JVM artifact and the
+    // ONNX-Runtime-GenAI classes.jar (extracted from the pinned AAR, sha256 in
+    // UPSTREAM.lock) put the real SDK/API surfaces on the host test classpath so
+    // EnginePackAttachment attach tests exercise the REAL backend path (never
+    // on Android packaging — host test only).
+    testImplementation(libs.litertlm.jvm)
+    testImplementation(files("../../engines/ort-genai/libs/onnxruntime-genai-android-0.14.0.jar"))
+
     androidTestImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.test.runner)

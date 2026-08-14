@@ -32,4 +32,25 @@ object GenAiBackendFactory {
 
     /** True only when the GenAI native libraries actually load on this runtime. */
     fun isRuntimeAvailable(): Boolean = OrtGenAiRuntime().isAvailable()
+
+    /**
+     * Supply-chain fact: whether the official `ai.onnxruntime.genai.*` classes
+     * are on the classpath (AAR / classes.jar present). This is **not** native
+     * availability ([isRuntimeAvailable]) and never qualification evidence —
+     * it only gates whether the control plane may attach the real backend
+     * object (execution still fails closed when natives are missing).
+     */
+    fun isOfficialApiOnClasspath(): Boolean =
+        try {
+            Class.forName(
+                "ai.onnxruntime.genai.Model",
+                false,
+                GenAiBackendFactory::class.java.classLoader,
+            )
+            true
+        } catch (_: ClassNotFoundException) {
+            false
+        } catch (_: LinkageError) {
+            false
+        }
 }

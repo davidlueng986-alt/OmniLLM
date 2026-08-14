@@ -37,11 +37,36 @@ class EnginePackAttachment private constructor(
     val registrationsByEngineId: Map<String, EngineRegistration>,
     val nativeLibraryPresent: Boolean,
     val notes: Map<String, String>,
+    /**
+     * Live-attached peer engines keyed by catalog engineId (C-07). Empty when
+     * policy is compliance or the official SDK/API is absent — peers stay
+     * metadata-only (mlc/mllm are ALWAYS metadata-only; see [EngineSelectionPolicy]).
+     */
+    val peerEngines: Map<String, com.omnillm.engines.api.OmniEngine> = emptyMap(),
 ) {
     val llamaCppAttached: Boolean get() = llamaCppEngine != null
 
     val llamaCppRegistration: EngineRegistration?
         get() = registrationsByEngineId[LlamaCppModule.ENGINE_ID]
+
+    /** LiteRT-LM real engine when attached live (C-07); null = metadata-only. */
+    val litertLmEngine: com.omnillm.engines.litertlm.LitertLmEngine?
+        get() = peerEngines[LitertLmModule.ENGINE_ID] as? com.omnillm.engines.litertlm.LitertLmEngine
+
+    /** ONNX Runtime GenAI real engine when attached live (C-07); null = metadata-only. */
+    val ortGenaiEngine: com.omnillm.engines.ortgenai.OrtGenaiEngine?
+        get() = peerEngines[OrtGenaiModule.ENGINE_ID] as? com.omnillm.engines.ortgenai.OrtGenaiEngine
+
+    /** Live peer engine by catalog engineId (null = metadata-only). */
+    fun liveEngine(engineId: String): com.omnillm.engines.api.OmniEngine? = peerEngines[engineId]
+
+    /** engineBuildId values of live-attached peer engines (binding route keys). */
+    val livePeerEngineBuildIds: List<String>
+        get() = peerEngines.values.map { it.engineBuildId.value }
+
+    /** Catalog engineIds of live-attached peer engines. */
+    val livePeerEngineIds: List<String>
+        get() = peerEngines.keys.toList()
 
     /** All registered engineIds (stable catalog order when present). */
     val registeredEngineIds: List<String>
