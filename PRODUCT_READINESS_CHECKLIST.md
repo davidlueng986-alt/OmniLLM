@@ -67,7 +67,7 @@ Status: `OPEN` | `PARTIAL` | `DONE`.
 | SW-BUILD-03 | Root `check` + 16 KB gates on packaged `.so` | **DONE** tooling; re-run when natives change | `./gradlew checkNative16kb`; `tools/ci/check_elf_16kb_alignment.py`; `check_apk_16kb_zipalign.py` |
 | SW-BUILD-04 | Refresh stale root `README.md` “skeleton only” blurb → point at `BUILD_STATUS.md` | **DONE** | `README.md` points at `BUILD_STATUS.md`, `PRODUCT_READINESS_CHECKLIST.md`, `AGENTS.md` |
 | SW-BUILD-05 | Optional: enable R8 minify only after smoke checklist | **OPEN** (default minify off is correct) | `android/app-ui/build.gradle.kts`; `gradle/RELEASE_CHECKLIST.md` §H; JNI/AIDL keep rules present |
-| SW-BUILD-06 | Coherent versionName/versionCode main + companion | **DONE** | `gradle/libs.versions.toml` `appVersion*` / `companionVersion*` → `0.1.0` / `1` |
+| SW-BUILD-06 | Coherent versionName/versionCode main + companion | **DONE** | `gradle/libs.versions.toml` `appVersion*` / `companionVersion*` → `0.2.0` / `2` (`a19d535`) |
 | SW-BUILD-07 | CI: test + assemble + contract drift + 16kb + dep edges | **DONE** | `.github/workflows/ci.yml`, `release.yml`, `tools/ci/local_ci.{sh,ps1}` |
 | SW-BUILD-08 | RELEASE_CHECKLIST human Play steps only | **DONE** | `gradle/RELEASE_CHECKLIST.md` |
 | SW-BUILD-09 | detekt baseline | **SKIPPED** (documented) | `tools/ci/README.md` — intentional; not a software launch blocker |
@@ -83,7 +83,7 @@ Status: `OPEN` | `PARTIAL` | `DONE`.
 | SW-DUR-05 | Durable content-report store (secondary) | **CLOSED** (baseline `dbf6f33`/`4a5bebe`) | `ContentReports.sq` + `SqlDelightContentReportStore`; `FeaturePackHost` → `ContentReportModule.createDurableApi(...)`; `payload_created_at`/`active_grant_id`/`receipt_*` columns in authority SQL (API-40..44 `1c66aff`) |
 | SW-DUR-06 | Durable tool proposal ledger (secondary) | **CLOSED** (baseline `dbf6f33`/`4a5bebe`) | `ToolProposals.sq`/`ToolResultClaims.sq` + `SqlDelightToolProposalStore`; `FeaturePackHost` → `ToolsFeatureModule.createDurableApi(ledger=toolProposalLedger)`; hermetic tests omit for `InMemoryToolProposalLedger` |
 | SW-DUR-07 | Model manager / catalog not process-memory only | **CLOSED** (baseline `dbf6f33`/`4a5bebe`) | `RuntimeControlPlane.attach` → `ModelManagerModule.createDurableControlPlane(installationPorts=controlDb.installations, leasePorts=controlDb.revisionLeases, modelStore=...)`; `Installations.sq`/`RevisionLeases.sq` + `SqlDelightInstallationStore`/`SqlDelightRevisionLeaseStore` |
-| SW-DUR-08 | SQLDelight subset vs full authority schema | **PARTIAL** | **26/51** tables projected (was claim/commit/session-only); remaining 25 marked `-- STATUS: PLANNED (not yet implemented)` in `specs/database/omnillm-schema.sql` (API-40..44 `1c66aff`); `applySchema=false` on Android open (`RuntimeControlPlane.kt` L342) — document bootstrap vs `omnillm-schema.sql` migration path |
+| SW-DUR-08 | SQLDelight subset vs full authority schema | **PARTIAL** | **28/51** tables + `client_registration_epoch` singleton IMPLEMENTED (was 26/51; C-08b/c `e661a22`/`e8b84ae`/`cfcbdd1` added `assets` + `client_registrations`); remaining 23 marked `-- STATUS: PLANNED (not yet implemented)` in `specs/database/omnillm-schema.sql`; `applySchema=false` on Android open (`RuntimeControlPlane.kt` L342) — document bootstrap vs `omnillm-schema.sql` migration path |
 | SW-DUR-09 | Modelhub display/link ports process-memory | **OPEN** (low severity) | `WaveAWiring.kt` `InMemoryModelDisplayMetadataPort`, `InMemoryAcquisitionLinkStore` |
 
 ### 3.3 Engine / native execute path (honest cells)
@@ -296,7 +296,7 @@ rg "FailClosedInferenceEngine|engine execute path not yet attached|playground en
 
 | Action | Result |
 |---|---|
-| Packaging pass | README, version `0.1.0`/`1`, ProGuard JNI/AIDL keeps, CI harden, RELEASE_CHECKLIST human Play steps, detekt skip documented |
+| Packaging pass | README, version `0.2.0`/`2`, ProGuard JNI/AIDL keeps, CI harden, RELEASE_CHECKLIST human Play steps, detekt skip documented |
 | assembleRelease | `:android:app-ui` + `:android:companion-sandbox` **BUILD SUCCESSFUL** (unsigned) |
 | Gates re-run | `checkContractDrift` + `checkDependencyEdges` + `checkNative16kb` **OK** |
 | Residual human-only | §4 OUT_OF_SCOPE (OO-01…OO-14) — device, OEM, Play Console |

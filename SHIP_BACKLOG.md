@@ -70,8 +70,8 @@
 |---|------|------|
 | **P1** | Companion sandbox 真協議 | Ticket + PFD + 加速路徑裝置驗證；缺 companion 時明確錯誤 |
 | **P2** | Durable worker（新） | `:android:workers` command gate + journal 已有；補 worker 側 crash-resume 的持久狀態（in-flight 引擎工作重啟恢復）與裝置驗證 |
-| **P3** | SQL schema 全量對齊 | 26/51 已 IMPLEMENTED；剩餘 25 張 PLANNED table 隨功能落地補 `.sq`；`applySchema=false` bootstrap 路徑文件化（SW-DUR-08） |
-| **P4** | Mode UI（新） | 目前 dev/release 行為只能靠 `BuildConfig`/`-P`；補設定頁「探索性執行」開關投影（唯 CONDITIONAL，不許宣稱 SUPPORTED） |
+| **P3** | SQL schema 全量對齊 | 28/51 + `client_registration_epoch` 已 IMPLEMENTED（C-08b/c 新增 assets/client_registrations）；剩餘 23 張 PLANNED table 隨功能落地補 `.sq`；`applySchema=false` bootstrap 路徑文件化（SW-DUR-08） |
+| ~~**P4**~~ | ~~Mode UI（探索性執行開關）~~ | ✅ **完成（GA-hardening 2026-08-15）**：`SettingsScreen` 已實作 `runtime.exploratoryExecuteEnabled` Switch（`patchSettings` + expectedVersion，`toggle_runtime_exploratoryExecuteEnabled`）；唯 CONDITIONAL、不許宣稱 SUPPORTED。後續：research/risky 模式旗標（`product.researchModeEnabled`／`product.riskyPerformanceModeEnabled`）的 UI 呈現（D6 gate 已上 plane，UI 未接） |
 | **P5** | Release 簽章 + R8 minify | 真 keystore、混淆 smoke（RELEASE_CHECKLIST §H） |
 | **P6** | Play Console | AAB、Data Safety、FGS declaration、AI 問卷 |
 | **P7** | 多 APK companion 分發策略 | 主包 + companion 同簽章 |
@@ -104,8 +104,20 @@
 
 ---
 
-## 8. 相關程式入口
+## 7.1 GA-hardening 新增剩餘項目（2026-08-15 wave C/D 後）
 
+| # | 項目 | 現況 | 要做 |
+|---|------|------|------|
+| **G1** | MODEL_FORMAT_INVALID pipeline 換用 | error-catalog 已加（docs-mirror wave）；`AcquisitionPipeline.dryLoadGgufHeader` 仍用 `INVALID_REQUEST` | 換成 `OmniError.MODEL_FORMAT_INVALID`（C-03），跑 `generateContracts` + drift 通過 |
+| **G2** | RiskAck durable adapter | D6 gate 上 plane（in-memory ledger） | `RiskAckStore` durable 版本（persistence port 落地），重啟後不需重新 acknowledge 的設計決策 |
+| **G3** | research/risky 模式 UI | `product.researchModeEnabled`／`product.riskyPerformanceModeEnabled` gate 已上 plane | SettingsScreen 呈現 research/risky 旗標 + risky 使用需 RiskAck 流程 UI |
+| **G4** | mllm 裝置驗證（D4 residual closure） | identity probe（D3）已 fail-closed；upstream server 無 auth 為殘餘 | 裝置上驗證 probe 在 port-squat 情境的行為；評估 upstream auth 改進 |
+| **G5** | D23 系列驗證收尾 | D23a–g 已修（CommandResult.error、TokenIssueResult、cursor pagination、chat digest、admin JSON、診斷 categories、omnillm omission） | 依 OpenAPI 更新後的對應測試保持 green；SSE error terminal 文件化完成 |
+| **G6** | C-07 attach 依賴探測常態化 | litert/ort 在 SDK/API 存在時 live attach | 釋出時 SDK/API 常態打包（`a4b582b` 已打包 runtime deps）；device 驗證 litert/ort 真實推理 |
+
+---
+
+## 8. 相關程式入口
 | 用途 | 路徑 |
 |------|------|
 | 開發模式開關（variant-scoped） | `core/contracts/.../ProductBuildMode.kt`（BLD-02）；`android/runtime-service/build.gradle.kts` BuildConfig |
