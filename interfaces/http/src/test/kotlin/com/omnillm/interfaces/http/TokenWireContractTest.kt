@@ -56,12 +56,14 @@ class TokenWireContractTest {
             scopes = listOf("inference.create"),
             expiresAt = "2026-08-05T00:00:00Z",
             revocationEpoch = 7,
-            loopbackOnly = true,
         )
         val json = HttpJson.codec.encodeToString(TokenIssueResultDto.serializer(), dto)
         assertTrue(json.contains("\"client_id\":\"client-abc\""))
         assertTrue(json.contains("\"revocation_epoch\":7"))
         assertTrue(json.contains("\"token\":"))
+        // D23b: TokenIssueResult is additionalProperties:false — loopback_only
+        // must never leak onto the wire.
+        assertTrue("legacy loopback_only must NOT leak: $json", !json.contains("loopback_only"))
     }
 
     @Test

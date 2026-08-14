@@ -2404,7 +2404,8 @@ class ControlPlaneHttpHandler(
                 expiresAt = issued.expiresAt.toString(),
                 revocationEpoch = issued.revocationEpoch,
                 receiptExpiresAt = clock().plusSeconds(300L).toString(),
-                loopbackOnly = true,
+                // D23b: TokenIssueResult is additionalProperties:false — no
+                // loopback_only field (transport constraint is a server fact).
             ),
             status = 201,
         )

@@ -446,6 +446,12 @@ data class TokenIssueRequestDto(
     @SerialName("expires_in_seconds") val expiresInSeconds: Long? = null,
 )
 
+/**
+ * OpenAPI `TokenIssueResult` (:2685-2714) — additionalProperties:false.
+ * D23b: `loopback_only` is NOT a spec property (the token's loopback-only
+ * constraint is a server-side transport fact, never a wire field) — it was
+ * emitted anyway and strict spec clients rejected the 201 response.
+ */
 @Serializable
 data class TokenIssueResultDto(
     @SerialName("token_id") val tokenId: String,
@@ -456,7 +462,6 @@ data class TokenIssueResultDto(
     @SerialName("expires_at") val expiresAt: String,
     @SerialName("revocation_epoch") val revocationEpoch: Long = 0L,
     @SerialName("receipt_expires_at") val receiptExpiresAt: String? = null,
-    @SerialName("loopback_only") val loopbackOnly: Boolean = true,
 )
 
 /** OpenAPI `#/components/schemas/TokenInfo` (metadata list entry). */
