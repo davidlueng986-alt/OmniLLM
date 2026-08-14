@@ -435,6 +435,14 @@ private class OrchestratorPlaygroundInferencePort(
                             (it as? OmniResult.Ok)?.value?.actualRouting?.engineBuildId?.value
                         } ?: candidate.engineBuildId.value,
                         backend = "cpu",
+                        // C-02: surface aggregated engine token-delta text as the
+                        // visible assistant text (null when the engine produced
+                        // no visible tokens).
+                        assistantText = if (err == null) {
+                            binding.boundLlamaAdapter?.deltaText(reqId.value)
+                        } else {
+                            null
+                        },
                         error = err,
                         degraded = true,
                         degradedReasons = listOf(
@@ -548,6 +556,12 @@ private class OrchestratorPlaygroundInferencePort(
                 actualModelRevisionId = view.actualRouting?.modelRevisionId?.hex,
                 engineBuildId = view.actualRouting?.engineBuildId?.value,
                 backend = view.actualRouting?.backend,
+                // C-02: visible assistant text from aggregated engine token
+                // deltas (polled by the SSE stream projection).
+                assistantText = binding.boundLlamaAdapter?.deltaText(requestId),
+                // D23: surface the durable error code so mid-stream failures
+                // terminate honestly (never a fabricated finish_reason "stop").
+                error = view.errorCode?.let { OmniError.INTERNAL(message = it) },
             ),
         )
     }

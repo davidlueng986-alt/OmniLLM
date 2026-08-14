@@ -133,6 +133,26 @@ class ControlPlaneSseStreamRegressionTest {
         }
     }
 
+    /** FAILED terminal handle (engine failure mid-stream). */
+    private fun portFailed(): PlaygroundInferencePort = object : PlaygroundInferencePort {
+        override suspend fun startChat(principal: PrincipalId, spec: ChatRequestSpec): OmniResult<InferenceHandle> =
+            OmniResult.err(OmniError.INTERNAL(message = "unused"))
+        override suspend fun startEmbedding(principal: PrincipalId, spec: EmbeddingRequestSpec): OmniResult<InferenceHandle> =
+            OmniResult.err(OmniError.INTERNAL(message = "unused"))
+        override suspend fun cancel(principal: PrincipalId, spec: CancelInferenceSpec): OmniResult<CancelPortResult> =
+            OmniResult.err(OmniError.INTERNAL(message = "unused"))
+        override suspend fun query(principal: PrincipalId, requestId: String): OmniResult<InferenceHandle> =
+            OmniResult.ok(
+                InferenceHandle(
+                    requestId = requestId,
+                    operationKind = "CHAT",
+                    state = "FAILED",
+                    actualModelRevisionId = "model-rev",
+                    assistantText = "partial text before failure",
+                ),
+            )
+    }
+
     @Test
     fun throwingPoll_emitsTerminalEventInsteadOfCrashingTheFlow() {
         val events = collect(handler(), "req-1", "model-x", portThrowing())
@@ -179,5 +199,23 @@ class ControlPlaneSseStreamRegressionTest {
             events.any { it.data.contains("final text") },
         )
         assertNotNull(last.id)
+    }
+
+    /**
+     * D23 regression: a FAILED handle must terminate with an honest error event —
+     * never a fabricated finish_reason "stop" (the previous code emitted a fake
+     * stop chunk for every terminal state, including engine failures).
+     */
+    @Test
+    fun failedHandle_emitsErrorTerminalWithoutFakeStop() {
+        val events = collect(handler(), "req-5", "model-x", portFailed())
+        val last = events.last()
+        assertTrue("failed stream must end with a terminal event", last.isTerminal)
+        assertEquals(SseFraming.EVENT_TERMINAL, last.event)
+        assertTrue("terminal event must carry the error", last.data.contains("error"))
+        assertFalse(
+            "failed stream must never emit a fake finish_reason stop",
+            events.any { !it.isTerminal && it.data.contains("\"finish_reason\":\"stop\"") },
+        )
     }
 }
