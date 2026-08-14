@@ -80,6 +80,7 @@ class GatewayLifecycleTest {
             handler = handler(),
             authenticator = LoopbackTokenService(),
             config = GatewayConfig(port = port),
+            admission = null,
         )
         try {
             assertEquals("bound port must equal the requested free port", port, gw.boundPort)

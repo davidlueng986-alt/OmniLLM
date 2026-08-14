@@ -83,9 +83,11 @@ import com.omnillm.runtime.job.JobManager
 import com.omnillm.runtime.job.JobParameters
 import com.omnillm.runtime.job.JobRecord
 import com.omnillm.runtime.orchestrator.Orchestrator
+import com.omnillm.runtime.policy.ConfigurationCatalog
 import com.omnillm.runtime.policy.PolicyManager
 import com.omnillm.runtime.policy.SettingValue
 import com.omnillm.runtime.policy.acl.AccessControlEnforcer
+import com.omnillm.runtime.policy.acl.PrincipalRateLimiter
 import com.omnillm.runtime.requestregistry.ClaimOutcome
 import com.omnillm.runtime.requestregistry.CommandLedger
 import com.omnillm.runtime.requestregistry.RequestRegistry
@@ -138,6 +140,15 @@ class ControlPlaneHttpHandler(
      * token-scope checks stay (defense in depth).
      */
     private val accessControl: AccessControlEnforcer = AccessControlEnforcer(),
+    /**
+     * C-11: principal request-rate admission (token bucket). The default
+     * resolves limits from the effective settings
+     * (security.principalRpsLimit; 0 = disabled fail-open). Production shares
+     * one limiter with the gateway (GatewayLifecycle) — the gateway enforces
+     * the concurrency dimension, this handler the rate dimension, so a
+     * request is never double-counted. Tests inject a hermetic limiter.
+     */
+    private val rateLimiter: PrincipalRateLimiter? = null,
     private val orchestrator: Orchestrator? = null,
     private val modelCatalog: () -> List<ModelInfoDto> = { emptyList() },
     private val metricSummary: () -> MetricSnapshotDto = {
@@ -178,6 +189,20 @@ class ControlPlaneHttpHandler(
 
     private val assets = ConcurrentHashMap<String, AssetRecord>()
     private val clients = ConcurrentHashMap<String, ClientInfoDto>()
+
+    /**
+     * C-11: rate admission limiter. Default reads the effective settings
+     * (security.principalRpsLimit / security.principalConcurrentRequests);
+     * the handler consumes only RATE tokens — the gateway (when wired) owns
+     * the concurrency leases against the same instance.
+     */
+    private val admission: PrincipalRateLimiter = rateLimiter ?: PrincipalRateLimiter(
+        rpsLimit = { securityLimits().principalRpsLimit },
+        concurrencyLimit = { securityLimits().principalConcurrentRequests },
+    )
+
+    private fun securityLimits(): ConfigurationCatalog.SecurityLimits =
+        ConfigurationCatalog.securityLimits(policyManager.settingsSnapshot())
 
     /**
      * API-16: background pump coroutines drive durable-request execution through
@@ -227,7 +252,7 @@ class ControlPlaneHttpHandler(
         enforceAccess(principal, "list-models", AccessScope.models_read)?.let { return it }
         // COR-23a: real cursor pagination — pageToken is honored, never ignored.
         val all = modelCatalog()
-        val from = decodePageCursor(pageToken)
+        val from = decodePageCursor(CURSOR_PREFIX_MODELS, pageToken)
             ?: return HttpHandlerResult.Err(
                 OmniError.INVALID_REQUEST(message = "malformed page token"),
             )
@@ -241,7 +266,7 @@ class ControlPlaneHttpHandler(
         }
         val page = all.drop(from).take(MODELS_PAGE_SIZE)
         val nextToken = if (from + page.size < all.size) {
-            encodePageCursor(from + page.size)
+            encodePageCursor(CURSOR_PREFIX_MODELS, from + page.size)
         } else {
             null
         }
@@ -257,15 +282,16 @@ class ControlPlaneHttpHandler(
     }
 
     /**
-     * Opaque cursor: `base64url("models-v1:<index>")`. Unparseable tokens fail
+     * Opaque cursor: `base64url("<prefix>:<index>")`. Unparseable tokens fail
      * closed with INVALID_REQUEST (never silently treated as page one).
+     * Prefixes isolate collections so a token can never page another list.
      */
-    private fun encodePageCursor(index: Int): String {
-        val raw = "models-v1:$index".toByteArray(Charsets.UTF_8)
+    private fun encodePageCursor(prefix: String, index: Int): String {
+        val raw = "$prefix:$index".toByteArray(Charsets.UTF_8)
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw)
     }
 
-    private fun decodePageCursor(token: String?): Int? {
+    private fun decodePageCursor(prefix: String, token: String?): Int? {
         if (token == null || token.isBlank()) return 0
         val raw = try {
             Base64.getUrlDecoder().decode(token)
@@ -273,10 +299,59 @@ class ControlPlaneHttpHandler(
             return null
         }
         val text = String(raw, Charsets.UTF_8)
-        if (!text.startsWith("models-v1:")) return null
-        val index = text.removePrefix("models-v1:").toIntOrNull() ?: return null
+        if (!text.startsWith("$prefix:")) return null
+        val index = text.removePrefix("$prefix:").toIntOrNull() ?: return null
         if (index < 0) return null
         return index
+    }
+
+    /**
+     * D23c: shared cursor pagination for the other paged collections. The
+     * source is sorted by id so page slices are stable across calls.
+     * Malformed tokens fail closed with INVALID_REQUEST; cursors beyond the
+     * collection fail closed with CURSOR_GONE (mirrors listModels).
+     */
+    private data class CursorSlice<T>(
+        val items: List<T>,
+        val nextPageToken: String?,
+        val error: HttpHandlerResult<Nothing>? = null,
+    )
+
+    private fun <T> cursorSlice(
+        prefix: String,
+        pageToken: String?,
+        items: List<T>,
+        pageSize: Int,
+        idOf: (T) -> String,
+    ): CursorSlice<T> {
+        val sorted = items.sortedBy(idOf)
+        val from = decodePageCursor(prefix, pageToken)
+            ?: return CursorSlice(
+                items = emptyList(),
+                nextPageToken = null,
+                error = HttpHandlerResult.Err(
+                    OmniError.INVALID_REQUEST(message = "malformed page token"),
+                ),
+            )
+        if (from > sorted.size) {
+            return CursorSlice(
+                items = emptyList(),
+                nextPageToken = null,
+                error = HttpHandlerResult.Err(
+                    OmniError.CURSOR_GONE(
+                        message = "page cursor beyond collection",
+                        details = mapOf("cursor" to from.toString()),
+                    ),
+                ),
+            )
+        }
+        val page = sorted.drop(from).take(pageSize)
+        val next = if (from + page.size < sorted.size) {
+            encodePageCursor(prefix, from + page.size)
+        } else {
+            null
+        }
+        return CursorSlice(items = page, nextPageToken = next)
     }
 
     // ----- Inference ---------------------------------------------------------
@@ -411,12 +486,16 @@ class ControlPlaneHttpHandler(
                                         // No token accounting exists on the control-plane
                                         // stream API — honest zeros, never invented counts.
                                         usage = UsageDto(),
-                                        omnillm = OmniExecutionInfoDto(
+                                        // D23e: honest omission — when the engine exposed
+                                        // no routing facts the omnillm object is omitted
+                                        // entirely (never a partial fabricated object).
+                                        omnillm = OmniExecutionInfoDto.ofFactsOrNull(
                                             requestId = requestId,
                                             actualModelRevisionId = handle.actualModelRevisionId,
                                             engineBuildId = handle.engineBuildId,
                                             backend = handle.backend,
                                             degradations = handle.degradedReasons,
+                                            evidenceLabel = null,
                                         ),
                                     ),
                                 )
@@ -829,6 +908,14 @@ class ControlPlaneHttpHandler(
         request: AsyncInferenceRequestDto,
     ): HttpHandlerResult<AcceptedRequestDto> {
         enforceAccess(principal, "create-request", AccessScope.inference_create)?.let { return it }
+        // D8: response_format / tools / tool_choice are spec fields on the
+        // durable payload, but the durable execution path has no structured or
+        // tool-calling pipeline — reject them explicitly (never silently
+        // accept-and-drop, mirroring the sync path). Checked BEFORE any
+        // orchestration admission so the parameter is always named.
+        request.chat?.let { payload ->
+            unsupportedDurableChatParamError(payload)?.let { return HttpHandlerResult.Err(it) }
+        }
         // API-16: durable requests are claim + EXECUTE. Without an orchestrator the
         // claim could never run — fail closed honestly instead of 202-never-execute.
         val orch = orchestrator
@@ -1203,12 +1290,26 @@ class ControlPlaneHttpHandler(
         if (row.principalId != principal.principalId) {
             return HttpHandlerResult.Err(OmniError.FORBIDDEN(message = "not owner of command"))
         }
+        // D23a: a FAILED ledger row carries errorCode — project it onto the wire
+        // CommandResult.error (spec optional OmniError). The ledger stores no
+        // free-form message, so the catalog's own message for the code is used
+        // (never fabricated client/domain details).
+        val error = row.errorCode?.let { code ->
+            OmniError.ofCode(code).let { e ->
+                com.omnillm.interfaces.http.OmniErrorDto(
+                    code = e.code.code,
+                    message = e.message ?: e.code.code,
+                    retryable = e.retryable,
+                )
+            }
+        }
         return HttpHandlerResult.Ok(
             CommandResultDto(
                 commandId = row.commandId,
                 state = row.state,
                 resourceVersion = row.resourceVersion,
                 affectedResourceId = row.affectedResourceId,
+                error = error,
             ),
         )
     }
@@ -1578,10 +1679,21 @@ class ControlPlaneHttpHandler(
         pageToken: String?,
     ): HttpHandlerResult<JobPageDto> {
         enforceAccess(principal, "read-own-jobs", AccessScope.jobs_read_own)?.let { return it }
-        val items = jobManager.listOwn(PrincipalId.parse(principal.principalId)).map { toJobInfo(it) }
+        val slice = cursorSlice(
+            CURSOR_PREFIX_JOBS,
+            pageToken,
+            jobManager.listOwn(PrincipalId.parse(principal.principalId)).map { toJobInfo(it) },
+            PAGE_SIZE,
+            idOf = { it.jobId },
+        )
+        slice.error?.let { return it }
         // API-07: JobPage requires snapshot_version — monotonic runtime epoch.
         return HttpHandlerResult.Ok(
-            JobPageDto(items = items, snapshotVersion = resourceVersion()),
+            JobPageDto(
+                items = slice.items,
+                nextPageToken = slice.nextPageToken,
+                snapshotVersion = resourceVersion(),
+            ),
         )
     }
 
@@ -1760,8 +1872,22 @@ class ControlPlaneHttpHandler(
             }
         }
         val items = lanItems ?: clients.values.toList()
+        // D23c: real cursor pagination (mirrors listModels) — pageToken honored,
+        // deterministic sort by client_id.
+        val slice = cursorSlice(
+            CURSOR_PREFIX_CLIENTS,
+            pageToken,
+            items,
+            PAGE_SIZE,
+            idOf = { it.clientId },
+        )
+        slice.error?.let { return it }
         return HttpHandlerResult.Ok(
-            ClientPageDto(items = items, snapshotVersion = resourceVersion()),
+            ClientPageDto(
+                items = slice.items,
+                nextPageToken = slice.nextPageToken,
+                snapshotVersion = resourceVersion(),
+            ),
         )
     }
 
@@ -2102,7 +2228,11 @@ class ControlPlaneHttpHandler(
             idempotencyKey = IdempotencyKey.parse(request.command.idempotencyKey),
             canonicalSpecDigest = request.command.canonicalInputDigest,
         )
-        val params = JobParameters.DiagnosticExport(includeDetail = request.includeDetail)
+        // D23g: spec optional `categories` passes through to the export job.
+        val params = JobParameters.DiagnosticExport(
+            includeDetail = request.includeDetail,
+            categories = request.categories.orEmpty(),
+        )
         return when (val created = jobManager.create(identity, params)) {
             is OmniResult.Ok -> {
                 commandLedger.recordResult(
@@ -2354,13 +2484,37 @@ class ControlPlaneHttpHandler(
     ): HttpHandlerResult<TokenIssueResultDto> {
         enforceAccess(principal, "issue-rotate-revoke-tokens", AccessScope.tokens_manage)
             ?.let { return it }
+        // D23d: TokenIssueRequest (spec :2650-2684) requires scopes (minItems 1)
+        // and expires_in_seconds (min 60 / max 31536000). No silent fallbacks —
+        // a sloppy caller must not mint a broad bootstrap token by omission.
+        if (request.scopes.isEmpty()) {
+            return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "scopes must be non-empty (spec minItems 1)",
+                    details = mapOf("parameter" to "scopes"),
+                ),
+            )
+        }
+        val ttl = request.expiresInSeconds
+            ?: return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "expires_in_seconds is required (spec required)",
+                    details = mapOf("parameter" to "expires_in_seconds"),
+                ),
+            )
+        if (ttl !in 60L..31_536_000L) {
+            return HttpHandlerResult.Err(
+                OmniError.INVALID_REQUEST(
+                    message = "expires_in_seconds must be 60..31536000 (spec bounds)",
+                    details = mapOf("parameter" to "expires_in_seconds"),
+                ),
+            )
+        }
         val claim = claimCommand(principal, "ISSUE_TOKEN", request.command)
         if (claim is HttpHandlerResult.Err) return claim
-        val scopes = request.scopes.ifEmpty { LoopbackTokenService.BOOTSTRAP_SCOPES.toList() }.toSet()
-        val ttl = request.expiresInSeconds ?: 86_400L
         val issued = tokenService.issue(
             principalId = "http-issued:${principal.principalId}",
-            scopes = scopes,
+            scopes = request.scopes.toSet(),
             ttlSeconds = ttl,
             loopbackOnly = true,
             label = request.displayName,
@@ -2382,7 +2536,8 @@ class ControlPlaneHttpHandler(
                 expiresAt = issued.expiresAt.toString(),
                 revocationEpoch = issued.revocationEpoch,
                 receiptExpiresAt = clock().plusSeconds(300L).toString(),
-                loopbackOnly = true,
+                // D23b: TokenIssueResult is additionalProperties:false — no
+                // loopback_only field (transport constraint is a server fact).
             ),
             status = 201,
         )
@@ -2412,9 +2567,23 @@ class ControlPlaneHttpHandler(
                 lastSeenAt = it.lastSeenAt?.toString(),
             )
         }
+        // D23c: real cursor pagination (mirrors listModels) — pageToken honored,
+        // deterministic sort by token_id.
+        val slice = cursorSlice(
+            CURSOR_PREFIX_TOKENS,
+            pageToken,
+            items,
+            PAGE_SIZE,
+            idOf = { it.tokenId },
+        )
+        slice.error?.let { return it }
         // API-07: TokenPage requires snapshot_version — monotonic runtime epoch.
         return HttpHandlerResult.Ok(
-            TokenPageDto(items = items, snapshotVersion = resourceVersion()),
+            TokenPageDto(
+                items = slice.items,
+                nextPageToken = slice.nextPageToken,
+                snapshotVersion = resourceVersion(),
+            ),
         )
     }
 
@@ -2536,7 +2705,22 @@ class ControlPlaneHttpHandler(
             )
         ) {
             is OmniResult.Err -> HttpHandlerResult.Err(r.error)
-            is OmniResult.Ok -> null
+            is OmniResult.Ok -> {
+                // C-11: authorized requests consume a principal RATE token
+                // (token bucket; denial -> RATE_LIMITED 429 retryable). The
+                // concurrency dimension lives at the gateway admission (same
+                // limiter instance) — see GatewayLifecycle.
+                if (!admission.tryAcquireRate(principal.principalId)) {
+                    HttpHandlerResult.Err(
+                        OmniError.RATE_LIMITED(
+                            message = "principal request rate limit exceeded",
+                            details = mapOf("principalId" to principal.principalId),
+                        ),
+                    )
+                } else {
+                    null
+                }
+            }
         }
     }
 
@@ -2588,6 +2772,10 @@ class ControlPlaneHttpHandler(
             JobKind.DIAGNOSTIC_EXPORT ->
                 JobParameters.DiagnosticExport(
                     includeDetail = params.bool("include_detail") ?: false,
+                    // D23g: categories wire field (spec optional) → job parameters.
+                    categories = (params["categories"] as? JsonArray)
+                        ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                        ?: emptyList(),
                 )
             JobKind.CONTENT_REPORT ->
                 JobParameters.ContentReport(reportId = params.string("report_id") ?: return null)
@@ -2656,6 +2844,26 @@ class ControlPlaneHttpHandler(
         )
 
     /**
+     * D8: same honest fail-closed for the DURABLE payload — the durable path
+     * executes plain chat only; structured output / tool calls are rejected,
+     * never silently dropped.
+     */
+    private fun unsupportedDurableChatParamError(payload: NativeChatPayloadDto): OmniError? =
+        when {
+            payload.responseFormat != null -> unsupportedDurableChatParam("response_format")
+            !payload.tools.isNullOrEmpty() -> unsupportedDurableChatParam("tools")
+            payload.toolChoice != null -> unsupportedDurableChatParam("tool_choice")
+            else -> null
+        }
+
+    private fun unsupportedDurableChatParam(name: String): OmniError =
+        OmniError.CAPABILITY_UNSUPPORTED(
+            message = "$name is not supported on the durable /omni/v1/requests path — " +
+                "no structured/tool-calling pipeline is attached",
+            details = mapOf("parameter" to name),
+        )
+
+    /**
      * API-09: spec `stop` is oneOf string | array<string> (:1971-1979).
      * Returns the normalized stop sequences, or null on an invalid shape
      * (caller fails closed with INVALID_REQUEST). Numbers/booleans/objects are
@@ -2694,6 +2902,15 @@ class ControlPlaneHttpHandler(
 
         /** COR-23a: listModels page size (cursor-paginated). */
         const val MODELS_PAGE_SIZE: Int = 50
+
+        /** D23c: shared page size for the cursor-paginated token/job/client lists. */
+        const val PAGE_SIZE: Int = 50
+
+        /** D23c: opaque cursor prefixes — one per collection (never cross-page). */
+        const val CURSOR_PREFIX_MODELS: String = "models-v1"
+        const val CURSOR_PREFIX_TOKENS: String = "tokens-v1"
+        const val CURSOR_PREFIX_JOBS: String = "jobs-v1"
+        const val CURSOR_PREFIX_CLIENTS: String = "clients-v1"
 
         /** API-10: LAN pairing challenge_id is a client-generated UUID. */
         internal val CLAIM_UUID =

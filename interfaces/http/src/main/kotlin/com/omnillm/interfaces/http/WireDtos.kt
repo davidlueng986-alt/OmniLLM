@@ -190,6 +190,15 @@ data class UsageDto(
  * OpenAPI `OmniExecutionInfo` (:2179-2209) — required on chat/embedding
  * responses. request_id is always populated; routing facts are omitted
  * (not fabricated) when the engine does not expose them.
+ *
+ * D23e honest-omission rule: the spec marks actual_model_revision_id /
+ * engine_build_id / backend as REQUIRED, but the engine is sometimes silent
+ * and fabricating placeholders would be dishonest. Per [ofFactsOrNull], an
+ * engine-silent response OMITS the whole object (nullable [ChatCompletionResponseDto.omnillm]
+ * serializes as absent), so the wire never carries a schema-invalid partial
+ * object and never invents facts. Spec amendment suggestion (for the specs
+ * agent): make the three fields — and/or the object — conditional on the
+ * engine actually reporting them.
  */
 @Serializable
 data class OmniExecutionInfoDto(
@@ -199,11 +208,50 @@ data class OmniExecutionInfoDto(
     val backend: String? = null,
     val degradations: List<String> = emptyList(),
     @SerialName("evidence_label") val evidenceLabel: EvidenceLabel? = null,
-)
+) {
+    companion object {
+        /**
+         * D23e: honest omission — returns null when the engine exposed NO
+         * routing facts (nothing honest to report). Callers embed the result
+         * in the response DTO; null → the object is omitted from the wire
+         * entirely. When facts exist, exactly those facts are carried and the
+         * rest stay absent (never fabricated).
+         */
+        fun ofFactsOrNull(
+            requestId: String,
+            actualModelRevisionId: String?,
+            engineBuildId: String?,
+            backend: String?,
+            degradations: List<String>,
+            evidenceLabel: EvidenceLabel?,
+        ): OmniExecutionInfoDto? =
+            if (actualModelRevisionId == null &&
+                engineBuildId == null &&
+                backend == null &&
+                degradations.isEmpty() &&
+                evidenceLabel == null
+            ) {
+                null
+            } else {
+                OmniExecutionInfoDto(
+                    requestId = requestId,
+                    actualModelRevisionId = actualModelRevisionId,
+                    engineBuildId = engineBuildId,
+                    backend = backend,
+                    degradations = degradations,
+                    evidenceLabel = evidenceLabel,
+                )
+            }
+    }
+}
 
 /**
  * API-07: ChatCompletionResponse requires usage + omnillm (:2210-2261).
  * additionalProperties:false — no extra envelope fields.
+ *
+ * D23e: [omnillm] is nullable — an engine-silent response omits the object
+ * entirely (honest omission) instead of emitting a schema-invalid partial
+ * object; see [OmniExecutionInfoDto.ofFactsOrNull].
  */
 @Serializable
 data class ChatCompletionResponseDto(
@@ -213,7 +261,7 @@ data class ChatCompletionResponseDto(
     val model: String,
     val choices: List<ChatCompletionChoiceDto>,
     val usage: UsageDto = UsageDto(),
-    val omnillm: OmniExecutionInfoDto,
+    val omnillm: OmniExecutionInfoDto? = null,
 )
 
 @Serializable
@@ -226,6 +274,7 @@ data class EmbeddingDataDto(
 /**
  * API-07: EmbeddingResponse requires usage + omnillm (:2262-2311).
  * Embedding usage schema only requires prompt_tokens/total_tokens.
+ * D23e: [omnillm] nullable — honest omission when the engine is silent.
  */
 @Serializable
 data class EmbeddingResponseDto(
@@ -234,7 +283,7 @@ data class EmbeddingResponseDto(
     val model: String,
     val data: List<EmbeddingDataDto>,
     val usage: UsageDto = UsageDto(),
-    val omnillm: OmniExecutionInfoDto,
+    val omnillm: OmniExecutionInfoDto? = null,
 )
 
 @Serializable
@@ -248,7 +297,14 @@ data class AsyncInferenceRequestDto(
     val embedding: NativeEmbeddingPayloadDto? = null,
 )
 
-/** OpenAPI `#/components/schemas/NativeChatPayload` (durable chat payload). */
+/**
+ * OpenAPI `#/components/schemas/NativeChatPayload` (durable chat payload).
+ *
+ * D8: response_format / tools / tool_choice are spec properties (:2624-2649)
+ * — modeled here so they can never be silently dropped (the codec used to
+ * swallow them via ignoreUnknownKeys). The durable path fails closed when
+ * they are present but unsupported (see ControlPlaneHttpHandler).
+ */
 @Serializable
 data class NativeChatPayloadDto(
     val model: String,
@@ -257,6 +313,12 @@ data class NativeChatPayloadDto(
     val temperature: Double? = null,
     @SerialName("top_p") val topP: Double? = null,
     val stop: List<String>? = null,
+    /** D8: spec ResponseFormat (:1980-1981 mirror) — modeled, fail-closed on durable path. */
+    @SerialName("response_format") val responseFormat: ResponseFormatDto? = null,
+    /** D8: spec ToolDefinition list — modeled, fail-closed on durable path. */
+    val tools: List<ToolDefinitionDto>? = null,
+    /** D8: spec oneOf string enum | NamedToolChoice — modeled, fail-closed on durable path. */
+    @SerialName("tool_choice") val toolChoice: JsonElement? = null,
     val user: String? = null,
     @SerialName("omnillm_fallback") val omnillmFallback: FallbackDto? = null,
     @SerialName("omnillm_deadline_ms") val omnillmDeadlineMs: Long? = null,
@@ -381,10 +443,16 @@ data class ClientPageDto(
     @SerialName("snapshot_version") val snapshotVersion: Long = 0,
 )
 
+/**
+ * OpenAPI `DiagnosticExportRequest` (:2600-2614) — categories is an optional
+ * array of strings (D23g: it used to be silently dropped by the codec, so the
+ * export job never received the requested categories).
+ */
 @Serializable
 data class DiagnosticExportRequestDto(
     val command: CommandRequestDto,
     @SerialName("include_detail") val includeDetail: Boolean = false,
+    val categories: List<String>? = null,
 )
 
 @Serializable
@@ -433,6 +501,12 @@ data class TokenIssueRequestDto(
     @SerialName("expires_in_seconds") val expiresInSeconds: Long? = null,
 )
 
+/**
+ * OpenAPI `TokenIssueResult` (:2685-2714) — additionalProperties:false.
+ * D23b: `loopback_only` is NOT a spec property (the token's loopback-only
+ * constraint is a server-side transport fact, never a wire field) — it was
+ * emitted anyway and strict spec clients rejected the 201 response.
+ */
 @Serializable
 data class TokenIssueResultDto(
     @SerialName("token_id") val tokenId: String,
@@ -443,7 +517,6 @@ data class TokenIssueResultDto(
     @SerialName("expires_at") val expiresAt: String,
     @SerialName("revocation_epoch") val revocationEpoch: Long = 0L,
     @SerialName("receipt_expires_at") val receiptExpiresAt: String? = null,
-    @SerialName("loopback_only") val loopbackOnly: Boolean = true,
 )
 
 /** OpenAPI `#/components/schemas/TokenInfo` (metadata list entry). */

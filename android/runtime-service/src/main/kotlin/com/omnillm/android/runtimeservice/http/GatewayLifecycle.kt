@@ -7,7 +7,9 @@ import com.omnillm.interfaces.http.auth.TokenAuthenticator
 import com.omnillm.interfaces.http.gateway.GatewayConfig
 import com.omnillm.interfaces.http.gateway.LoopbackHttpGateway
 import com.omnillm.runtime.job.JobManager
+import com.omnillm.runtime.policy.ConfigurationCatalog
 import com.omnillm.runtime.policy.PolicyManager
+import com.omnillm.runtime.policy.acl.PrincipalRateLimiter
 import io.ktor.server.engine.ApplicationEngine
 import io.ktor.server.engine.EmbeddedServer
 import java.net.InetSocketAddress
@@ -39,6 +41,14 @@ object GatewayLifecycle {
      */
     private val bootstrapDisplay = AtomicReference<BootstrapTokenDisplay?>(null)
     private val bootstrapIssuanceKey = AtomicReference<String?>(null)
+
+    /**
+     * C-11: shared principal admission limiter — the handler consumes RATE
+     * tokens, the gateway owns CONCURRENCY leases, both against this one
+     * instance (limits resolve from the effective settings each admission,
+     * so runtime settings changes apply without restart).
+     */
+    private val admissionRef = AtomicReference<PrincipalRateLimiter?>(null)
 
     fun tokenService(): LoopbackTokenService? = tokens.get()
 
@@ -106,7 +116,7 @@ object GatewayLifecycle {
                 ?: return null
 
             val gw = try {
-                gatewayStarter.start(handler, tokenService, config)
+                gatewayStarter.start(handler, tokenService, config, admission = admissionRef.get())
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start loopback HTTP gateway", e)
                 tokens.set(null)
@@ -163,6 +173,15 @@ object GatewayLifecycle {
             bootstrapIssuanceKey.set(issued.issuanceKey)
         }
         tokens.set(tokenService)
+        // C-11: one shared limiter for the HTTP surface — handler (rate) +
+        // gateway (concurrency). Limits resolve from the effective settings;
+        // 0 = disabled fail-open (documented in ConfigurationCatalog).
+        admissionRef.set(
+            PrincipalRateLimiter(
+                rpsLimit = { securityLimits(policyManager).principalRpsLimit },
+                concurrencyLimit = { securityLimits(policyManager).principalConcurrentRequests },
+            ),
+        )
         val handler = ControlPlaneHttpHandler(
             runtimeState = { plane.runtimeState },
             resourceVersion = { plane.identity.runtimeEpoch },
@@ -180,6 +199,8 @@ object GatewayLifecycle {
             benchmarkApi = plane.benchmarkApi,
             // API-50: ACL + profile/transport/epoch enforcement on the HTTP path.
             accessControl = stack.accessControl,
+            // C-11: rate dimension (RPS tokens; concurrency at the gateway).
+            rateLimiter = admissionRef.get(),
         )
         handlerRef.set(handler)
         return tokenService
@@ -194,14 +215,16 @@ object GatewayLifecycle {
             handler: OmniHttpHandlerPort,
             authenticator: TokenAuthenticator,
             config: GatewayConfig,
+            admission: PrincipalRateLimiter?,
         ): BoundGateway
     }
 
-    internal var gatewayStarter: GatewayStarter = GatewayStarter { handler, authenticator, config ->
-        val gw = LoopbackHttpGateway(handler, authenticator, config)
-        gw.start(wait = false)
-        BoundGateway(boundPort = gw.boundPort) { gw.stop() }
-    }
+    internal var gatewayStarter: GatewayStarter =
+        GatewayStarter { handler, authenticator, config, admission ->
+            val gw = LoopbackHttpGateway(handler, authenticator, config, admission = admission)
+            gw.start(wait = false)
+            BoundGateway(boundPort = gw.boundPort) { gw.stop() }
+        }
 
     /**
      * COR-23c: true only when [host]:[port] actually accepts TCP connections
@@ -235,6 +258,10 @@ object GatewayLifecycle {
      */
     internal fun resolveBoundPort(server: EmbeddedServer<*, *>): Int =
         runBlocking { server.engine.resolvedConnectors() }.first().port
+
+    /** C-11: effective principal admission limits (0 = disabled fail-open). */
+    private fun securityLimits(policy: PolicyManager): ConfigurationCatalog.SecurityLimits =
+        ConfigurationCatalog.securityLimits(policy.settingsSnapshot())
 
     private fun logI(msg: String) = runCatching { Log.i(TAG, msg) }
 
