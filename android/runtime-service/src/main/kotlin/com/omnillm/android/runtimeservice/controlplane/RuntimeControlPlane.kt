@@ -548,6 +548,9 @@ class RuntimeControlPlane private constructor(
                         // ARC-05: inject the plane's own registry instead of the
                         // process-global locator.
                         streamSessions = { streamSessions },
+                        // C-01: orchestrator INTENT must be durable — the same
+                        // SQLite-backed CommitLedger already wired to the registry.
+                        commitLedger = commits,
                     ),
                 )
 
