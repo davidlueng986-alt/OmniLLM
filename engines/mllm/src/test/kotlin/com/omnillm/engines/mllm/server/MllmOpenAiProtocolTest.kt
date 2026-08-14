@@ -5,6 +5,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -99,6 +100,81 @@ class MllmOpenAiProtocolTest {
         assertEquals(
             "http://127.0.0.1:8080/v1/chat/completions",
             MllmOpenAiProtocol.chatCompletionsUrl(),
+        )
+    }
+
+    // --- D3 identity probe ---
+
+    @Test
+    fun identityProbeModel_embedsUniqueNonce() {
+        val m1 = MllmOpenAiProtocol.identityProbeModel("nonce-1")
+        val m2 = MllmOpenAiProtocol.identityProbeModel("nonce-2")
+        assertTrue(m1.startsWith(MllmOpenAiProtocol.PROBE_MODEL_PREFIX))
+        assertTrue(m1 != m2)
+        assertTrue(MllmOpenAiProtocol.isIdentityProbeModel(m1))
+        assertFalse(MllmOpenAiProtocol.isIdentityProbeModel("qwen3"))
+    }
+
+    @Test
+    fun buildIdentityProbeBody_carriesProbeModelAndNonce() {
+        val body = MllmOpenAiProtocol.buildIdentityProbeBody(
+            probeModelName = "omnillm-identity-probe-n1",
+            nonce = "n1",
+        )
+        val root = json.parseToJsonElement(body).jsonObject
+        assertEquals("omnillm-identity-probe-n1", root["model"]?.jsonPrimitive?.content)
+        assertEquals("false", root["stream"]?.jsonPrimitive?.toString())
+        assertEquals("n1", root["id"]?.jsonPrimitive?.content)
+        val messages = root["messages"]!!.jsonArray
+        assertEquals(1, messages.size)
+        assertEquals("n1", messages[0].jsonObject["content"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun verifyIdentityProbeResponse_upstream404TemplatePasses() {
+        assertTrue(
+            MllmOpenAiProtocol.verifyIdentityProbeResponse(
+                status = 404,
+                body = "Model 'omnillm-identity-probe-n1' is not available on this server.\n",
+                probeModelName = "omnillm-identity-probe-n1",
+            ),
+        )
+    }
+
+    @Test
+    fun verifyIdentityProbeResponse_nonReflectingOrWrongShapeFails() {
+        val probeModel = "omnillm-identity-probe-n1"
+        assertFalse(
+            "generic OpenAI error shape must fail",
+            MllmOpenAiProtocol.verifyIdentityProbeResponse(
+                status = 404,
+                body = """{"error":{"message":"model not found"}}""",
+                probeModelName = probeModel,
+            ),
+        )
+        assertFalse(
+            "200 with arbitrary body must fail",
+            MllmOpenAiProtocol.verifyIdentityProbeResponse(
+                status = 200,
+                body = "hello",
+                probeModelName = probeModel,
+            ),
+        )
+        assertFalse(
+            "500 must fail",
+            MllmOpenAiProtocol.verifyIdentityProbeResponse(
+                status = 500,
+                body = "boom",
+                probeModelName = probeModel,
+            ),
+        )
+        assertFalse(
+            "template echoing a DIFFERENT model name must fail",
+            MllmOpenAiProtocol.verifyIdentityProbeResponse(
+                status = 404,
+                body = "Model 'other' is not available on this server.",
+                probeModelName = probeModel,
+            ),
         )
     }
 }

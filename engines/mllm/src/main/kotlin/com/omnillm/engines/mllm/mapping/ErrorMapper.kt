@@ -72,6 +72,8 @@ object ErrorMapper {
                 OmniError.ADMISSION_REJECTED(message = msg, details = details)
             ServerErrorCode.SERVER_CRASH ->
                 OmniError.WORKER_DIED(message = msg, details = details)
+            ServerErrorCode.SERVER_IMPERSONATED ->
+                OmniError.WORKER_DIED(message = msg, details = details)
             ServerErrorCode.INTERNAL ->
                 OmniError.INTERNAL(message = msg, details = details)
         }

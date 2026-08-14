@@ -49,6 +49,17 @@ interface MllmHttpTransport {
         cancelFlag: () -> Boolean,
         onData: (String) -> Boolean,
     ): Result
+
+    /**
+     * One-shot non-streaming POST (identity probe / diagnostics). Returns
+     * [Result.Completed] on 2xx (body not delivered) or [Result.Failed] with
+     * the HTTP status + response body snippet.
+     */
+    fun postJson(
+        url: String,
+        bodyJson: String,
+        credentialHeader: String?,
+    ): Result
 }
 
 /**
@@ -103,6 +114,30 @@ class OkHttpMllmTransport(private val client: OkHttpClient) : MllmHttpTransport 
             }
         } catch (e: IOException) {
             return MllmHttpTransport.Result.Failed(0, e.message ?: "transport failure")
+        }
+    }
+
+    override fun postJson(
+        url: String,
+        bodyJson: String,
+        credentialHeader: String?,
+    ): MllmHttpTransport.Result {
+        val builder = Request.Builder()
+            .url(url)
+            .post(bodyJson.toRequestBody(jsonMediaType))
+        credentialHeader?.let { builder.header(MllmHttpTransport.CREDENTIAL_HEADER, it) }
+        val request = builder.build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                val snippet = response.body?.string()?.take(512).orEmpty()
+                if (response.isSuccessful) {
+                    MllmHttpTransport.Result.Completed
+                } else {
+                    MllmHttpTransport.Result.Failed(response.code, snippet)
+                }
+            }
+        } catch (e: IOException) {
+            MllmHttpTransport.Result.Failed(0, e.message ?: "transport failure")
         }
     }
 }

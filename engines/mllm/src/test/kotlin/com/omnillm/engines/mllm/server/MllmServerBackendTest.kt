@@ -12,6 +12,7 @@ import org.junit.Test
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -26,10 +27,15 @@ class MllmServerBackendTest {
     private lateinit var backend: MllmServerBackend
     private lateinit var bridge: FakeBridge
 
-    /** Captures the last request body for protocol assertions. */
+    /** Captures the last non-probe request body for protocol assertions. */
     private val lastBody = AtomicReference<String>("")
     private val lastCredentialHeader = AtomicReference<String?>(null)
     private val cancelFirstDelta = AtomicReference(false)
+
+    /** D3 identity-probe tracking (requests with the probe model prefix). */
+    private val probeRequestCount = AtomicInteger(0)
+    private val lastProbeModel = AtomicReference<String>("")
+    private val lastProbeCredential = AtomicReference<String?>(null)
 
     private val config = PrivateChannelConfig(
         kind = ChannelKind.LOCALHOST_TCP,
@@ -46,8 +52,25 @@ class MllmServerBackendTest {
         httpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         httpServer.createContext("/v1/chat/completions") { exchange ->
             val body = exchange.requestBody.readBytes().toString(Charsets.UTF_8)
-            lastBody.set(body)
             lastCredentialHeader.set(exchange.requestHeaders.getFirst("X-Omni-Mllm-Credential"))
+            val model = extractModel(body)
+            if (MllmOpenAiProtocol.isIdentityProbeModel(model)) {
+                // Upstream shape (mllm-cli/pkg/server/handlers.go, verified):
+                // unknown model ⇒ HTTP 404 + "Model '<model>' is not available
+                // on this server." — the probe nonce is reflected in the text.
+                probeRequestCount.incrementAndGet()
+                lastProbeModel.set(model)
+                lastProbeCredential.set(
+                    exchange.requestHeaders.getFirst("X-Omni-Mllm-Credential"),
+                )
+                exchange.responseHeaders.add("Content-Type", "text/plain; charset=utf-8")
+                exchange.sendResponseHeaders(404, 0)
+                exchange.responseBody.use {
+                    it.write("Model '$model' is not available on this server.\n".toByteArray())
+                }
+                return@createContext
+            }
+            lastBody.set(body)
             if (cancelFirstDelta.get()) {
                 sendChunks(exchange, listOf("""{"id":"1","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}"""))
                 return@createContext
@@ -83,6 +106,11 @@ class MllmServerBackendTest {
         out.write("data: [DONE]\n\n".toByteArray())
         out.flush()
         out.close()
+    }
+
+    private fun extractModel(body: String): String {
+        val regex = Regex("\"model\"\\s*:\\s*\"([^\"]*)\"")
+        return regex.find(body)?.groupValues?.get(1) ?: ""
     }
 
     @After
@@ -371,6 +399,203 @@ class MllmServerBackendTest {
         assertEquals(ServerErrorCode.SERVER_CRASH, (loaded as ServerResult.Err).error.code)
     }
 
+    // --- D3: port-squat / server identity (post-start identity probe) ---
+
+    @Test
+    fun loadModel_rejectsPreBoundPort_whenProbeShapeMismatch() {
+        // Attacker pre-binds 127.0.0.1:8080 and serves ANY HTTP (e.g. 200
+        // "hello") while our Gomllm.startServer silently fails to bind (the
+        // upstream mobile StartServer drops the goroutine bind error and
+        // returns "Success"). The identity probe must reject the impostor.
+        val attacker = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        attacker.createContext("/") { exchange ->
+            exchange.sendResponseHeaders(200, 0)
+            exchange.responseBody.use { it.write("hello\n".toByteArray()) }
+        }
+        attacker.start()
+        try {
+            val squat = MllmServerBackend(
+                bridge = FakeBridge(status = "Success"),
+                transport = OkHttpMllmTransport(OkHttpClient()),
+                serverHost = "127.0.0.1",
+                serverPort = attacker.address.port,
+            )
+            squat.ensureReady(config)
+            val result = squat.loadModel(
+                ServerLoadRequest(
+                    storageRootKey = "k",
+                    installationKey = "i",
+                    backend = "cpu",
+                    privilegedLoadTicketId = "t",
+                    resolvedModelPath = "/sdcard/Download/model/qwen3",
+                ),
+            )
+            assertTrue("pre-bound port must fail closed", result.isErr)
+            assertEquals(
+                ServerErrorCode.SERVER_IMPERSONATED,
+                (result as ServerResult.Err).error.code,
+            )
+        } finally {
+            attacker.stop(0)
+        }
+    }
+
+    @Test
+    fun loadModel_rejectsGenericOpenAiErrorShape() {
+        // An OpenAI-compatible impostor answers 404 but with a different error
+        // shape — the upstream template + per-session nonce reflection are
+        // missing, so identity is NOT verified.
+        val attacker = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        attacker.createContext("/") { exchange ->
+            val body = """{"error":{"message":"model not found","type":"invalid_request_error"}}"""
+            exchange.sendResponseHeaders(404, 0)
+            exchange.responseBody.use { it.write(body.toByteArray()) }
+        }
+        attacker.start()
+        try {
+            val squat = MllmServerBackend(
+                bridge = FakeBridge(status = "Success"),
+                transport = OkHttpMllmTransport(OkHttpClient()),
+                serverHost = "127.0.0.1",
+                serverPort = attacker.address.port,
+            )
+            squat.ensureReady(config)
+            val result = squat.loadModel(
+                ServerLoadRequest(
+                    storageRootKey = "k",
+                    installationKey = "i",
+                    backend = "cpu",
+                    privilegedLoadTicketId = "t",
+                    resolvedModelPath = "/sdcard/Download/model/qwen3",
+                ),
+            )
+            assertTrue(result.isErr)
+            assertEquals(
+                ServerErrorCode.SERVER_IMPERSONATED,
+                (result as ServerResult.Err).error.code,
+            )
+        } finally {
+            attacker.stop(0)
+        }
+    }
+
+    @Test
+    fun loadModel_propagatesStartServerFailureStatus() {
+        // Gomllm.startServer reports failure (e.g. bind error) — the status
+        // must propagate as SERVER_CRASH, never swallowed into load success.
+        val failed = MllmServerBackend(
+            bridge = FakeBridge(
+                status = "error: listen tcp 127.0.0.1:8080: bind: address already in use",
+            ),
+            transport = OkHttpMllmTransport(OkHttpClient()),
+            serverHost = "127.0.0.1",
+            serverPort = httpServer.address.port,
+        )
+        failed.ensureReady(config)
+        val result = failed.loadModel(
+            ServerLoadRequest(
+                storageRootKey = "k",
+                installationKey = "i",
+                backend = "cpu",
+                privilegedLoadTicketId = "t",
+                resolvedModelPath = "/sdcard/Download/model/qwen3",
+            ),
+        )
+        assertTrue(result.isErr)
+        assertEquals(ServerErrorCode.SERVER_CRASH, (result as ServerResult.Err).error.code)
+    }
+
+    @Test
+    fun loadModel_identityProbeDisabled_failsClosed() {
+        // Escape hatch: environments where probing is impossible must fail
+        // closed — there is NO load path without identity verification.
+        val noProbe = MllmServerBackend(
+            bridge = bridge,
+            transport = OkHttpMllmTransport(OkHttpClient()),
+            serverHost = "127.0.0.1",
+            serverPort = httpServer.address.port,
+            identityProbeEnabled = false,
+        )
+        noProbe.ensureReady(config)
+        val result = noProbe.loadModel(
+            ServerLoadRequest(
+                storageRootKey = "k",
+                installationKey = "i",
+                backend = "cpu",
+                privilegedLoadTicketId = "t",
+                resolvedModelPath = "/sdcard/Download/model/qwen3",
+            ),
+        )
+        assertTrue(result.isErr)
+        assertEquals(ServerErrorCode.SERVER_IMPERSONATED, (result as ServerResult.Err).error.code)
+    }
+
+    @Test
+    fun loadModel_happyPath_identityProbeVerified() {
+        val result = loadModel()
+        assertTrue(result.isOk)
+        assertEquals(1, probeRequestCount.get())
+        assertTrue(MllmOpenAiProtocol.isIdentityProbeModel(lastProbeModel.get()))
+        assertEquals("test-credential-abc123", lastProbeCredential.get())
+    }
+
+    // --- D19: bounded cancel bookkeeping ---
+
+    @Test
+    fun cancelRegistry_boundedByCap_evictsOldest() {
+        for (i in 0 until 1100) {
+            backend.requestCancel("op-cancel-$i")
+        }
+        assertTrue(
+            "cancel registry must be bounded by cap",
+            backend.cancelRegistry.size <= BoundedCancelRegistry.MAX_CANCEL_TOKENS,
+        )
+        assertFalse(
+            "oldest cancel intent must be evicted",
+            backend.cancelRegistry.contains("op-cancel-0"),
+        )
+        assertTrue(
+            "newest cancel intent must survive",
+            backend.cancelRegistry.contains("op-cancel-1099"),
+        )
+    }
+
+    @Test
+    fun generate_consumesCancelTokenOnCompletion() {
+        loadModel()
+        val session = session(loadedToken())
+        backend.requestCancel("op-consume")
+        val first = backend.generate(
+            session,
+            ServerGenerateRequest(
+                operationToken = "op-consume",
+                canonicalInputDigest = "aa".repeat(32),
+                maxTokens = 16,
+                promptUtf8 = "hi",
+            ),
+            cancelFlag = { false },
+            onEvent = {},
+        )
+        assertTrue(first.isErr)
+        assertEquals(ServerErrorCode.CANCELLED, (first as ServerResult.Err).error.code)
+        assertFalse(
+            "completed operation must purge its cancel token",
+            backend.cancelRegistry.contains("op-consume"),
+        )
+        val second = backend.generate(
+            session,
+            ServerGenerateRequest(
+                operationToken = "op-consume",
+                canonicalInputDigest = "aa".repeat(32),
+                maxTokens = 16,
+                promptUtf8 = "hi",
+            ),
+            cancelFlag = { false },
+            onEvent = {},
+        )
+        assertTrue("purged cancel intent ⇒ re-invocation runs normally", second.isOk)
+    }
+
     // --- unsupported-by-default ---
 
     @Test
@@ -399,7 +624,7 @@ class MllmServerBackendTest {
     }
 
     @Test
-    fun probe_reportsStartedAndReachable() {
+    fun probe_reportsStartedAndIdentityVerified() {
         loadModel()
         val outcome = backend.probe(
             ServerProbeRequest(backend = "cpu", operationToken = "op-probe"),
@@ -407,6 +632,7 @@ class MllmServerBackendTest {
         assertTrue(outcome.isOk)
         assertEquals("true", (outcome as ServerResult.Ok).value.attributes["started"])
         assertEquals("true", outcome.value.attributes["reachable"])
+        assertEquals("true", outcome.value.attributes["identityVerified"])
     }
 
     @Test
@@ -417,7 +643,10 @@ class MllmServerBackendTest {
 }
 
 /** Records upstream bridge calls; never touches gomllm classes. */
-class FakeBridge : MllmServerBridge {
+class FakeBridge(
+    /** Status string returned by the upstream bridge (default nominal). */
+    private val status: String = "upstream-fake-status",
+) : MllmServerBridge {
     val started = ConcurrentLinkedQueue<String>()
 
     override fun startServer(
@@ -427,7 +656,7 @@ class FakeBridge : MllmServerBridge {
         enableProbing: Boolean,
     ): String {
         started.add(modelPath)
-        return "upstream-fake-status"
+        return status
     }
 
     override fun stopServer(): Boolean = false
