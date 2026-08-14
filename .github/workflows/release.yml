@@ -249,6 +249,23 @@ jobs:
             python tools/ci/verify_apk_clean.py "$apk"
           done
 
+      - name: D9 SBOM vs APK gate (packaged set, both directions)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(android/app-ui/build/outputs/apk/release/*.apk)
+          if [ ${#apks[@]} -eq 0 ]; then
+            echo "::error::No app-ui release APKs for verify_sbom_vs_apk (fail closed)."
+            exit 1
+          fi
+          if [ -f SBOM-0.2.0-rc2.json ]; then
+            python tools/ci/verify_sbom_vs_apk.py \
+              --sbom SBOM-0.2.0-rc2.json \
+              --apk "${apks[0]}"
+          else
+            echo "::warning::SBOM-0.2.0-rc2.json not checked in — pass it into the job (or download) so the SBOM-vs-APK gate runs."
+          fi
+
       - name: Assert release APK artifacts exist (fail closed)
         run: |
           set -euo pipefail
