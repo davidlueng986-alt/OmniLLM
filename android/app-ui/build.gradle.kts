@@ -144,6 +144,10 @@ android {
         warningsAsErrors = false
         checkReleaseBuilds = true
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 kotlin {

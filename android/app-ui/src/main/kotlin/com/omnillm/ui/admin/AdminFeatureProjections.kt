@@ -4,6 +4,8 @@ import ai.omnillm.api.IOmniAdmin
 import ai.omnillm.api.OmniBenchmarkJobParameters
 import ai.omnillm.api.OmniCommandRequest
 import ai.omnillm.api.OmniJobSpec
+import ai.omnillm.api.OmniSettingEntry
+import ai.omnillm.api.OmniSettingsPatch
 import android.os.RemoteException
 import com.omnillm.core.canonical.generated.CapabilityId
 import com.omnillm.core.canonical.generated.CapabilityState
@@ -786,11 +788,37 @@ private class AdminLoopbackPort(
 
     override suspend fun ensureStarted(principal: PrincipalId): OmniResult<LoopbackServerStatus> {
         requireLocalUi(principal)
-        return OmniResult.err(
-            OmniError.CAPABILITY_UNSUPPORTED(
-                message = "loopback ensure requires control-plane gateway lifecycle",
-            ),
-        )
+        // Loopback lifecycle is the durable `server.loopbackEnabled` settings
+        // command on the plane (LOCAL_ADMIN settings.write). The Admin binder
+        // applies it through AdminApiService → PolicyManager with CAS; the
+        // loopback bind detail itself is not projected over Admin (honest).
+        return try {
+            val current = admin.settings
+            val patch = OmniSettingsPatch()
+            patch.command = OmniCommandRequest().apply {
+                commandId = java.util.UUID.randomUUID().toString()
+                idempotencyKey = "loopback-ensure-${java.util.UUID.randomUUID()}"
+                canonicalInputDigest = com.omnillm.core.canonical.IdentityHashing.sha256Hex(
+                    "server.loopbackEnabled=true",
+                )
+                hasExpectedVersion = true
+                expectedVersion = current.resourceVersion
+            }
+            patch.changes = arrayOf(
+                OmniSettingEntry().apply {
+                    key = "server.loopbackEnabled"
+                    valueType = "boolean"
+                    boolValue = true
+                },
+            )
+            val result = admin.applySettings(patch)
+            if (result.error != null) {
+                return OmniResult.err(aidlErrorToDomain(result.error))
+            }
+            status()
+        } catch (e: RemoteException) {
+            OmniResult.err(OmniError.INTERNAL(message = e.message ?: "loopback ensure remote failure"))
+        }
     }
 }
 
@@ -1058,12 +1086,7 @@ private class AdminLanServicePort(
         spec: EnableLanSpec,
     ): OmniResult<LanServiceStatus> {
         requireLocalUi(principal)
-        // Prefer settings apply when control plane maps server.lanEnabled.
-        return OmniResult.err(
-            OmniError.CAPABILITY_UNSUPPORTED(
-                message = "LAN enable requires control-plane LAN host + TLS identity",
-            ),
-        )
+        return patchLanSetting(principal, enabled = true, spec.command)
     }
 
     override suspend fun disable(
@@ -1071,11 +1094,49 @@ private class AdminLanServicePort(
         spec: DisableLanSpec,
     ): OmniResult<LanServiceStatus> {
         requireLocalUi(principal)
-        return OmniResult.err(
-            OmniError.CAPABILITY_UNSUPPORTED(
-                message = "LAN disable requires control-plane LAN host",
-            ),
-        )
+        return patchLanSetting(principal, enabled = false, spec.command)
+    }
+
+    /**
+     * LAN lifecycle is a durable settings command on the plane
+     * (`server.lanEnabled`, LOCAL_ADMIN settings.write): the Admin binder
+     * applySettings path carries it through AdminApiService → PolicyManager
+     * (CAS on resourceVersion). Never claim success on a failed patch.
+     */
+    private suspend fun patchLanSetting(
+        principal: PrincipalId,
+        enabled: Boolean,
+        command: com.omnillm.features.lan.api.LanCommandIdentity,
+    ): OmniResult<LanServiceStatus> {
+        try {
+            val current = admin.settings
+            val patch = OmniSettingsPatch()
+            patch.command = OmniCommandRequest().apply {
+                commandId = command.commandId
+                idempotencyKey = command.idempotencyKey
+                canonicalInputDigest = com.omnillm.core.canonical.IdentityHashing.sha256Hex(
+                    "server.lanEnabled=$enabled|${command.commandId}",
+                )
+                hasExpectedVersion = true
+                expectedVersion = current.resourceVersion
+            }
+            patch.changes = arrayOf(
+                OmniSettingEntry().apply {
+                    key = "server.lanEnabled"
+                    valueType = "boolean"
+                    boolValue = enabled
+                },
+            )
+            val result = admin.applySettings(patch)
+            if (result.error != null) {
+                return OmniResult.err(aidlErrorToDomain(result.error))
+            }
+            return status()
+        } catch (e: RemoteException) {
+            return OmniResult.err(
+                OmniError.INTERNAL(message = e.message ?: "lan enable remote failure"),
+            )
+        }
     }
 }
 
