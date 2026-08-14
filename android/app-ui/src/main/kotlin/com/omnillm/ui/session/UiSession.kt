@@ -77,17 +77,23 @@ class UiSession(
         adminBound = admin != null
         if (admin != null) {
             // Wire live Admin feature VMs from non-exported IOmniAdmin (INV-001).
+            // C-06: the full bundle includes diagnostics / routing / content-report
+            // so the three screens render real data instead of fallback states.
+            val vms = BinderAdminFeatureFactory.createFeatureViewModels(admin)
             attachFeatureViewModels(
-                adminHome = BinderAdminFeatureFactory.createHomeViewModel(admin),
-                adminJobs = BinderAdminFeatureFactory.createJobsViewModel(admin),
-                adminSettings = BinderAdminFeatureFactory.createSettingsViewModel(admin),
-                modelHub = AdminLiveFeatureFactory.createModelHubViewModel(admin),
-                autoSetup = AdminLiveFeatureFactory.createAutoSetupViewModel(admin),
-                playground = AdminLiveFeatureFactory.createPlaygroundViewModel(admin),
-                dashboard = AdminLiveFeatureFactory.createDashboardViewModel(admin),
-                benchmark = AdminLiveFeatureFactory.createBenchmarkViewModel(admin),
-                server = AdminLiveFeatureFactory.createServerViewModel(admin),
-                lan = AdminLiveFeatureFactory.createLanViewModel(admin),
+                adminHome = vms.adminHome,
+                adminJobs = vms.adminJobs,
+                adminSettings = vms.adminSettings,
+                modelHub = vms.modelHub,
+                autoSetup = vms.autoSetup,
+                playground = vms.playground,
+                dashboard = vms.dashboard,
+                benchmark = vms.benchmark,
+                server = vms.server,
+                lan = vms.lan,
+                diagnostics = vms.diagnostics,
+                contentReport = vms.contentReport,
+                routing = vms.routing,
             )
         }
     }

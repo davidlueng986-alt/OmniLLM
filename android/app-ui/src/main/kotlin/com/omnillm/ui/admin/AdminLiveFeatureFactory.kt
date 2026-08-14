@@ -20,8 +20,10 @@ import com.omnillm.features.autosetup.ports.FailClosedAutoSetupOrchestratorPort
 import com.omnillm.features.autosetup.viewmodel.AutoSetupViewModel
 import com.omnillm.features.benchmark.BenchmarkFeatureModule
 import com.omnillm.features.benchmark.viewmodel.BenchmarkViewModel
+import com.omnillm.features.contentreport.viewmodel.ContentReportViewModel
 import com.omnillm.features.dashboard.DashboardFeatureModule
 import com.omnillm.features.dashboard.viewmodel.DashboardViewModel
+import com.omnillm.features.diagnostics.viewmodel.DiagnosticsViewModel
 import com.omnillm.features.lan.LanFeatureModule
 import com.omnillm.features.lan.viewmodel.LanAccessViewModel
 import com.omnillm.features.modelhub.ModelhubModule
@@ -49,6 +51,7 @@ import com.omnillm.features.modelhub.projection.ModelCardProjector
 import com.omnillm.features.modelhub.viewmodel.ModelHubViewModel
 import com.omnillm.features.playground.PlaygroundModule
 import com.omnillm.features.playground.viewmodel.PlaygroundViewModel
+import com.omnillm.features.routing.viewmodel.RoutingViewModel
 import com.omnillm.features.server.ServerFeatureModule
 import com.omnillm.features.server.viewmodel.DeveloperServerViewModel
 import com.omnillm.interfaces.admin.LocalUiPrincipal
@@ -113,6 +116,15 @@ object AdminLiveFeatureFactory {
         LanFeatureModule.createViewModel(
             LanFeatureModule.createApi(AdminFeatureProjections.lanPorts(admin)),
         )
+
+    fun createDiagnosticsViewModel(admin: IOmniAdmin): DiagnosticsViewModel =
+        com.omnillm.features.diagnostics.DiagnosticsModule.createViewModel(AdminDiagnosticsApi(admin))
+
+    fun createRoutingViewModel(admin: IOmniAdmin): RoutingViewModel =
+        com.omnillm.features.routing.RoutingFeatureModule.createViewModel(AdminRoutingApi(admin))
+
+    fun createContentReportViewModel(admin: IOmniAdmin): ContentReportViewModel =
+        com.omnillm.features.contentreport.ContentReportModule.createViewModel(AdminContentReportApi(admin))
 }
 
 /**
@@ -313,7 +325,8 @@ class AdminProjectedModelHubApi(
     ): OmniResult<ModelHubJobHandle> =
         OmniResult.err(
             OmniError.CAPABILITY_UNSUPPORTED(
-                message = "delete via Admin job requires DELETE kind + resource version CAS",
+                message = "model delete requires the control-plane ModelHubService drain path " +
+                    "(DELETE jobs are not executed by the runtime worker pipeline yet)",
             ),
         )
 

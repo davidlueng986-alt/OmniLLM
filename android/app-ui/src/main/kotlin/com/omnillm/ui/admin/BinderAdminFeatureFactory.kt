@@ -21,7 +21,7 @@ import com.omnillm.features.admin.ports.AdminJobPort
 import com.omnillm.features.admin.ports.AdminModelPort
 import com.omnillm.features.admin.ports.AdminRuntimeStatusPort
 import com.omnillm.features.admin.ports.AdminSnapshotPort
-import com.omnillm.features.admin.ports.EmptyAdminModelPort
+import com.omnillm.features.admin.ports.ModelRevisionSummary
 import com.omnillm.features.admin.usecase.AdminFeatureApi
 import com.omnillm.features.admin.viewmodel.AdminHomeViewModel
 import com.omnillm.features.admin.viewmodel.AdminJobsViewModel
@@ -62,25 +62,88 @@ object BinderAdminFeatureFactory {
 
     fun createSettingsViewModel(admin: IOmniAdmin): AdminSettingsViewModel =
         AdminFeatureModule.createSettingsViewModel(createFeatureApi(admin))
+
+    /**
+     * Production VM bundle for the UiSession binder listener (C-06): every
+     * feature screen receives a live ViewModel when the Admin binder connects,
+     * including diagnostics / routing / content-report. Screens render real
+     * session data instead of the disconnected fallback state.
+     */
+    fun createFeatureViewModels(admin: IOmniAdmin): UiFeatureViewModels =
+        UiFeatureViewModels(
+            adminHome = createHomeViewModel(admin),
+            adminJobs = createJobsViewModel(admin),
+            adminSettings = createSettingsViewModel(admin),
+            modelHub = AdminLiveFeatureFactory.createModelHubViewModel(admin),
+            autoSetup = AdminLiveFeatureFactory.createAutoSetupViewModel(admin),
+            playground = AdminLiveFeatureFactory.createPlaygroundViewModel(admin),
+            dashboard = AdminLiveFeatureFactory.createDashboardViewModel(admin),
+            benchmark = AdminLiveFeatureFactory.createBenchmarkViewModel(admin),
+            server = AdminLiveFeatureFactory.createServerViewModel(admin),
+            lan = AdminLiveFeatureFactory.createLanViewModel(admin),
+            diagnostics = AdminLiveFeatureFactory.createDiagnosticsViewModel(admin),
+            contentReport = AdminLiveFeatureFactory.createContentReportViewModel(admin),
+            routing = AdminLiveFeatureFactory.createRoutingViewModel(admin),
+        )
 }
 
 /**
+ * All feature ViewModels served to the UI session over the Admin binder (INV-001).
+ * Mirrors the [com.omnillm.ui.session.UiSession] VM slots so the session can
+ * attach the full production set from one bundle.
+ */
+data class UiFeatureViewModels(
+    val adminHome: AdminHomeViewModel,
+    val adminJobs: AdminJobsViewModel,
+    val adminSettings: AdminSettingsViewModel,
+    val modelHub: com.omnillm.features.modelhub.viewmodel.ModelHubViewModel,
+    val autoSetup: com.omnillm.features.autosetup.viewmodel.AutoSetupViewModel,
+    val playground: com.omnillm.features.playground.viewmodel.PlaygroundViewModel,
+    val dashboard: com.omnillm.features.dashboard.viewmodel.DashboardViewModel,
+    val benchmark: com.omnillm.features.benchmark.viewmodel.BenchmarkViewModel,
+    val server: com.omnillm.features.server.viewmodel.DeveloperServerViewModel,
+    val lan: com.omnillm.features.lan.viewmodel.LanAccessViewModel,
+    val diagnostics: com.omnillm.features.diagnostics.viewmodel.DiagnosticsViewModel,
+    val contentReport: com.omnillm.features.contentreport.viewmodel.ContentReportViewModel,
+    val routing: com.omnillm.features.routing.viewmodel.RoutingViewModel,
+)
+
+/**
  * AIDL ??FEAT-ADMIN ports (transport projection only; semantics stay on control plane).
+ * Also the default [AdminModelPort]: the AIDL snapshot already carries
+ * [OmniModelInfo] entries, so the binder path projects the real model list
+ * (C-05) instead of silently failing closed with [EmptyAdminModelPort].
  */
 class BinderAdminPorts(
     private val admin: IOmniAdmin,
-) : AdminSnapshotPort, AdminCommandPort, AdminJobPort, AdminRuntimeStatusPort {
+) : AdminSnapshotPort, AdminCommandPort, AdminJobPort, AdminRuntimeStatusPort, AdminModelPort {
 
     fun asFeaturePorts(
-        models: AdminModelPort = EmptyAdminModelPort,
+        models: AdminModelPort? = null,
     ): AdminFeaturePorts =
         AdminFeaturePorts(
             snapshot = this,
             commands = this,
             jobs = this,
-            models = models,
+            models = models ?: this,
             runtimeStatus = this,
         )
+
+    override fun listRevisionSummaries(): List<ModelRevisionSummary> =
+        try {
+            admin.snapshot.models.orEmpty().mapNotNull { m ->
+                if (m == null || m.modelRevisionId.isNullOrBlank()) return@mapNotNull null
+                ModelRevisionSummary(
+                    modelRevisionId = m.modelRevisionId,
+                    displayName = m.displayName.orEmpty().ifBlank { null },
+                    installationState = m.installationState,
+                    // AIDL OmniModelInfo carries no trust label — honest null.
+                    trustLabel = null,
+                )
+            }
+        } catch (_: RemoteException) {
+            emptyList()
+        }
 
     override fun getSnapshot(principal: PrincipalId): AdminSnapshotView {
         requireLocalUi(principal)
