@@ -48,6 +48,8 @@ data class CommandResultDto(
     @SerialName("state") val state: String,
     @SerialName("resource_version") val resourceVersion: Long,
     @SerialName("affected_resource_id") val affectedResourceId: String? = null,
+    /** D23a: spec optional `error: $ref OmniError` — carried for FAILED results. */
+    val error: OmniErrorDto? = null,
 )
 
 /**

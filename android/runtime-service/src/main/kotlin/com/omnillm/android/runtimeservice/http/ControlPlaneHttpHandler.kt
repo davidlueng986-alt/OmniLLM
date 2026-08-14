@@ -1211,12 +1211,26 @@ class ControlPlaneHttpHandler(
         if (row.principalId != principal.principalId) {
             return HttpHandlerResult.Err(OmniError.FORBIDDEN(message = "not owner of command"))
         }
+        // D23a: a FAILED ledger row carries errorCode — project it onto the wire
+        // CommandResult.error (spec optional OmniError). The ledger stores no
+        // free-form message, so the catalog's own message for the code is used
+        // (never fabricated client/domain details).
+        val error = row.errorCode?.let { code ->
+            OmniError.ofCode(code).let { e ->
+                com.omnillm.interfaces.http.OmniErrorDto(
+                    code = e.code.code,
+                    message = e.message ?: e.code.code,
+                    retryable = e.retryable,
+                )
+            }
+        }
         return HttpHandlerResult.Ok(
             CommandResultDto(
                 commandId = row.commandId,
                 state = row.state,
                 resourceVersion = row.resourceVersion,
                 affectedResourceId = row.affectedResourceId,
+                error = error,
             ),
         )
     }
