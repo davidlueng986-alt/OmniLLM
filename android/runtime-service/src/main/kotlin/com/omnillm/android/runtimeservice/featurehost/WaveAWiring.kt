@@ -30,8 +30,8 @@ import com.omnillm.features.autosetup.wiring.JobManagerAutoSetupPort
 import com.omnillm.features.autosetup.wiring.ModelManagerAutoSetupPort
 import com.omnillm.features.autosetup.wiring.OrchestratorAutoSetupPort
 import com.omnillm.features.dashboard.DashboardFeatureModule
-import com.omnillm.features.dashboard.ports.AllSupportedCapabilityPort
 import com.omnillm.features.dashboard.ports.GovernorResourceAdapter
+import com.omnillm.features.dashboard.ports.RegistryBackedCapabilityPort
 import com.omnillm.features.modelhub.ModelhubModule
 import com.omnillm.features.modelhub.catalog.OfflineFixtureCatalog
 import com.omnillm.features.modelhub.ports.AcquisitionLinkStore
@@ -77,6 +77,7 @@ import com.omnillm.runtime.orchestrator.InferenceEnginePort
 import com.omnillm.runtime.orchestrator.OrchestrationRequest
 import com.omnillm.runtime.orchestrator.Orchestrator
 import com.omnillm.runtime.orchestrator.PlanningResult
+import com.omnillm.runtime.orchestrator.RoutingCandidate
 import com.omnillm.runtime.requestregistry.RequestRegistry
 import com.omnillm.runtime.requestregistry.CommitLedger
 import kotlinx.coroutines.runBlocking
@@ -437,10 +438,15 @@ object WaveAWiring {
         )
         // Observability capabilities are software-side SUPPORTED when the control-plane
         // facade is attached (honest: no engine QUALIFIED claim; EVIDENCE_LABELING always on).
+        // C-04: engine/orchestrator cells are projected from the plane's real
+        // CapabilityLookup (never fabricated SUPPORTED) — bound+dev → CONDITIONAL,
+        // release/unbound → UNKNOWN.
         val dashboard = DashboardFeatureModule.createApi(
             facade = deps.observability,
             resources = GovernorResourceAdapter(snapshot = { governor.snapshot() }, clockWallMs = deps.clockMs),
-            capabilities = AllSupportedCapabilityPort,
+            capabilities = RegistryBackedCapabilityPort(
+                engineState = { cap -> capabilities.state(cap, dashboardCapabilityProbe(binding)) },
+            ),
             measurements = DeferredDashboardMeasurementPort(deps.benchmarkApiHolder),
             clockWallMs = deps.clockMs,
         )
@@ -462,6 +468,35 @@ object WaveAWiring {
         packs.assertAllServicesNonNull()
         return packs
     }
+}
+
+/**
+ * C-04: probe candidate for dashboard capability projection. Carries the
+ * binding's own attached engineBuildId (or the unbound marker) so the plane's
+ * real CapabilityLookup resolves honestly: unbound → UNKNOWN, bound+release →
+ * UNKNOWN, bound+dev-override → CONDITIONAL. Never SUPPORTED without the
+ * engine evidence path. The candidate is ephemeral — projection only, never
+ * submitted to claim/commit ledgers.
+ */
+private fun dashboardCapabilityProbe(binding: EngineExecuteBinding): RoutingCandidate {
+    val build = binding.attachment?.llamaCppEngine?.engineBuildId
+        ?: binding.attachment?.llamaCppRegistration?.engineBuildId
+        ?: com.omnillm.core.contracts.EngineBuildId.parse("engine-build-unbound")
+    return RoutingCandidate(
+        candidateId = "dashboard-probe",
+        modelRevisionId = com.omnillm.core.canonical.generated.ModelRevisionId.parse("0".repeat(64)),
+        installationId = com.omnillm.core.identity.InstallationId.parse(
+            "550e8400-e29b-41d4-a716-446655440000",
+        ),
+        engineBuildId = build,
+        backend = "cpu",
+        placementClass = EngineExecuteBinding.EXPLORATORY_PLACEMENT,
+        loadKeyDigest = com.omnillm.core.canonical.generated.Sha256Digest.parse("a".repeat(64)),
+        isPrimary = true,
+        deviceExecutionFingerprint = com.omnillm.core.contracts.DeviceExecutionFingerprint.parse(
+            "device-fp-dashboard-probe",
+        ),
+    )
 }
 
 class JvmDeviceProbe(private val clockMs: () -> Long) : DeviceProbePort {
