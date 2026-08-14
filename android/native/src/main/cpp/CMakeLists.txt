@@ -31,6 +31,29 @@ set(OMNILLM_HAS_UPSTREAM OFF)
 if(OMNILLM_LLAMA_WITH_UPSTREAM AND EXISTS "${OMNILLM_LLAMA_VENDOR_DIR}/CMakeLists.txt")
   message(STATUS "OmniLLM: vendored llama.cpp found at ${OMNILLM_LLAMA_VENDOR_DIR}")
 
+  # -------------------------------------------------------------------------
+  # D1 build-repro pin: embed the UPSTREAM commit regardless of outer repo.
+  #
+  # The vendored tree is committed WITHOUT .git, so llama.cpp's
+  # cmake/build-info.cmake and ggml/CMakeLists.txt run `git rev-parse` with
+  # WORKING_DIRECTORY = the vendored tree. git then walks UP to the outer
+  # OmniLLM repo and embeds the WRONG commit (e.g. OmniLLM HEAD) instead of
+  # the upstream llama.cpp pin — breaking byte reproducibility of the .so.
+  #
+  # Pin from HERE (our own CMakeLists; no upstream file change for the pin):
+  #   - LLAMA_BUILD_COMMIT is honored by llama.cpp's
+  #     `if (NOT DEFINED LLAMA_BUILD_COMMIT)` guard (CMakeLists.txt:130) and
+  #     forwarded to GGML_BUILD_COMMIT before add_subdirectory(ggml).
+  #   - The vendored ggml/CMakeLists.txt carries a MINIMAL one-line guard
+  #     (`if(GIT_EXE AND NOT DEFINED GGML_BUILD_COMMIT)`) so the ggml subtree
+  #     keeps the pinned value instead of re-deriving it from the outer repo.
+  #     See that file for the full rationale.
+  #
+  # Keep in sync with engines/llama-cpp/UPSTREAM.lock upstream.commit.
+  # -------------------------------------------------------------------------
+  set(LLAMA_BUILD_COMMIT "47c786924ad1ab7e91da2cdc72fcdb563780c2bd"
+      CACHE STRING "omnillm D1: pinned upstream llama.cpp commit (b9999; see UPSTREAM.lock)" FORCE)
+
   # Library-only consumer build (no tools/server/tests/UI).
   set(LLAMA_BUILD_COMMON OFF CACHE BOOL "omnillm: no common utils" FORCE)
   set(LLAMA_BUILD_TESTS OFF CACHE BOOL "omnillm: no tests" FORCE)

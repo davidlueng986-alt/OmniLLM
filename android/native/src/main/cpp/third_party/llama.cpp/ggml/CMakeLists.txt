@@ -10,8 +10,13 @@ set(GGML_VERSION_BASE "${GGML_VERSION_MAJOR}.${GGML_VERSION_MINOR}.${GGML_VERSIO
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
+# OmniLLM D1 (build-repro) MINIMAL pin guard: the vendored tree is committed
+# without .git, so the git derivation below would walk UP to the outer OmniLLM
+# repo and embed the WRONG commit. When llama.cpp (or OmniLLM's own
+# CMakeLists.txt) already defined GGML_BUILD_COMMIT, keep that pinned value.
+# Standalone upstream builds are unaffected (GGML_BUILD_COMMIT undefined here).
 find_program(GIT_EXE NAMES git git.exe NO_CMAKE_FIND_ROOT_PATH)
-if(GIT_EXE)
+if(GIT_EXE AND NOT DEFINED GGML_BUILD_COMMIT)
     # Get current git commit hash
     execute_process(COMMAND ${GIT_EXE} rev-parse --short HEAD
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
