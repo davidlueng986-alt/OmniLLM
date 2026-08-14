@@ -398,9 +398,10 @@ class OmniAdminFacade(
             ?: return failed(domainCommand.commandId, OmniError.INVALID_REQUEST(message = "idempotencyKey required"))
         val plane = RuntimeControlPlane.require()
         plane.ensureEnginePacksAttached()
-        val digest = com.omnillm.core.canonical.IdentityHashing.sha256Hex(
-            "admin-playground-chat|$reqId|$idem|$model|${message.length}",
-        )
+        // D23f: full-content canonical digest (mirrors OmniRuntimeFacade.chatDigest /
+        // COR-13) — the old message.length digest collided for same-length
+        // different-content replays.
+        val digest = AdminChatDigest.digest(reqId, idem, model, message)
         val revisionHex = model.lowercase().let {
             if (it.matches(Regex("^[0-9a-f]{64}$"))) it
             else com.omnillm.core.canonical.IdentityHashing.sha256Hex("model|$model")
