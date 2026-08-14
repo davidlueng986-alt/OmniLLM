@@ -13,6 +13,7 @@ Automated CI/CD for the OmniLLM Android monorepo.
 | ELF 16 KB scan | [`check_elf_16kb_alignment.py`](./check_elf_16kb_alignment.py) |
 | APK zip-align 16 KB | [`check_apk_16kb_zipalign.py`](./check_apk_16kb_zipalign.py) |
 | Module dep edges (INV-001) | [`check_dependency_edges.py`](./check_dependency_edges.py) |
+| APK cleanliness (D10) | [`verify_apk_clean.py`](./verify_apk_clean.py) |
 
 ## Pipeline (fail closed)
 
@@ -33,6 +34,30 @@ Order matches product codegen guidance: **drift gate before in-tree regenerate**
 13. **Upload** APK (and AAB on release workflow) artifacts (`if-no-files-found: error`)
 
 Any non-zero exit fails the job. Test failures are never ignored.
+
+### D10: packaged-APK cleanliness gate
+
+```bash
+python tools/ci/verify_apk_clean.py android/app-ui/build/outputs/apk/release/app-ui-release-unsigned.apk
+./gradlew checkApkClean          # aggregated in root `check`
+```
+
+Fail-closed, both directions:
+- **FORBIDDEN (D10)** — JVM-only payloads must NOT ship: jansi
+  (`org/fusesource/jansi/**`, `META-INF/native-image/jansi/**`; ←
+  `ktor-server-core` runtime scope) and sqlite-jdbc
+  (`org/sqlite/native/**`, `sqlite-jdbc.properties`,
+  `META-INF/native-image/org.xerial/**`, `META-INF/services/java.sql.Driver`;
+  ← `sqldelight:sqlite-driver`). Class files stay on the classpath; the
+  JVM-only payloads are stripped via `packaging.resources.excludes` +
+  a `META-INF/services/**` merge carve-out in
+  `android/app-ui/build.gradle.kts` (AGP default merge shadows excludes).
+- **REQUIRED (C-07)** — the engine natives must be present in both ABIs:
+  `liblitertlm_jni.so`, `libonnxruntime-genai.so`, `libonnxruntime-genai-jni.so`,
+  `libonnxruntime.so`, `libonnxruntime4j_jni.so`, `libomnillm_llama.so`,
+  `libandroidx.graphics.path.so`, `libc++_shared.so`.
+- **INVARIANT** — mllm (`libMllm*`, `libgojni.so`, `libomp.so`) stays
+  arm64-v8a-only; x86_64 presence is a regression.
 
 ### detekt (intentionally skipped)
 

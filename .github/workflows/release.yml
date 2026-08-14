@@ -236,6 +236,19 @@ jobs:
             python tools/ci/check_apk_16kb_zipalign.py "$apk"
           done
 
+      - name: D10 packaged-APK cleanliness gate (jansi/sqlite-jdbc junk + C-07 natives)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(android/app-ui/build/outputs/apk/release/*.apk)
+          if [ ${#apks[@]} -eq 0 ]; then
+            echo "::error::No app-ui release APKs for verify_apk_clean (fail closed)."
+            exit 1
+          fi
+          for apk in "${apks[@]}"; do
+            python tools/ci/verify_apk_clean.py "$apk"
+          done
+
       - name: Assert release APK artifacts exist (fail closed)
         run: |
           set -euo pipefail

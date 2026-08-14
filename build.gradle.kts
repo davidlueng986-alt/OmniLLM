@@ -187,6 +187,38 @@ val checkDependencyEdges by tasks.registering(Exec::class) {
     })
 }
 
+// ---------------------------------------------------------------------------
+// D10: packaged-APK cleanliness gate (GA-GAPS FIX)
+// Fail closed on the RELEASE app-ui APK (junk-free + C-07 natives present).
+// The task resolves the APK at execution time and skips with a warning when it
+// is absent, so pure-JVM / config-only `check` runs do not hard-fail.
+// ---------------------------------------------------------------------------
+
+val checkApkClean by tasks.registering(Exec::class) {
+    group = "verification"
+    description =
+        "Fail when the release APK contains D10 JVM junk (jansi/sqlite-jdbc) or misses C-07 engine natives"
+    workingDir = rootDir
+    doFirst {
+        val apks = fileTree("android/app-ui/build/outputs/apk/release") {
+            include("*-release*.apk")
+        }.files.sorted()
+        if (apks.isEmpty()) {
+            logger.warn("checkApkClean: no release APK found — skipping (assembleRelease runs this gate)")
+            commandLine(pythonExecutable(), "-c", "print('checkApkClean: skipped (no release APK)')")
+        } else {
+            commandLine(
+                pythonExecutable(),
+                "tools/ci/verify_apk_clean.py",
+                apks.first().absolutePath,
+            )
+        }
+    }
+    inputs.file("tools/ci/verify_apk_clean.py")
+    inputs.file("android/app-ui/build.gradle.kts")
+    outputs.upToDateWhen { false } // APK path resolved at execution time
+}
+
 tasks.register("check") {
     group = "verification"
     description =
@@ -200,6 +232,9 @@ tasks.register("check") {
     dependsOn(":android:native:verifyNativeLibsPresent")
     // BLD-D2: stripped-packaged llama.cpp digest lock gate.
     dependsOn(checkLlamaArtifactDigest)
+    // D10: packaged-APK cleanliness gate (skip-warn when the release APK is
+    // absent; fail closed when present).
+    dependsOn(checkApkClean)
 }
 
 // ---------------------------------------------------------------------------
