@@ -22,8 +22,11 @@ import com.omnillm.engines.ortgenai.OrtGenaiModule
  *
  * Attaches **all catalog engines** to a single [EngineRegistry]:
  * - `llama.cpp` — real [JniNativeBackend] when packaged; else fail-closed (no Stub).
- * - LiteRT-LM, MLC-LLM, mllm, ONNX-Runtime-GenAI — metadata + UNQUALIFIED cells only
- *   (stub/UNKNOWN; no real native/SDK load).
+ * - LiteRT-LM, ONNX-Runtime-GenAI — REAL SDK/API backends (C-07) when the
+ *   official SDK/API is present AND policy allows (dev ship mode); else
+ *   metadata-only. Attachability is NOT qualification: cells stay UNQUALIFIED.
+ * - MLC-LLM, mllm — metadata + UNQUALIFIED cells only, ALWAYS (product decision
+ *   until upstream lock / auth hardening completes; guards stay).
  *
  * Rules:
  * - Runs only after lifecycle READY/DEGRADED (caller enforces).
@@ -89,6 +92,7 @@ class EnginePackAttachment private constructor(
         ): EnginePackAttachment {
             val registry = EngineRegistry()
             val registrations = linkedMapOf<String, EngineRegistration>()
+            val peerEngines = linkedMapOf<String, com.omnillm.engines.api.OmniEngine>()
 
             // ---- llama.cpp (native-eligible) ----
             val llamaLock = UpstreamLockLoader.loadFromClasspathOrTemplate()
@@ -115,7 +119,7 @@ class EnginePackAttachment private constructor(
             val nativePresent = llamaEngine != null || JniNativeBackend.isNativePresent()
 
             // Peer engines: register catalog adapters (native allowed in DEVELOPMENT_SHIP_MODE).
-            registerPeerEngines(registry, deviceFingerprint, registrations, buildMode)
+            registerPeerEngines(registry, deviceFingerprint, registrations, buildMode, peerEngines)
 
             if (!buildMode.allowSupportedProjectionWithoutPass()) {
                 check(!EngineSelectionPolicy.anyExecutableCell(registry, buildMode)) {
@@ -153,12 +157,41 @@ class EnginePackAttachment private constructor(
                     "anyExecutable",
                     EngineSelectionPolicy.anyExecutableCell(registry, buildMode).toString(),
                 )
+                put(
+                    "litert.sdkPresent",
+                    LitertLmModule.isOfficialSdkOnClasspath().toString(),
+                )
+                put(
+                    "ort.apiPresent",
+                    com.omnillm.engines.ortgenai.session.GenAiBackendFactory
+                        .isOfficialApiOnClasspath().toString(),
+                )
+                put("litert.attached", (LitertLmModule.ENGINE_ID in peerEngines).toString())
+                put("ort.attached", (OrtGenaiModule.ENGINE_ID in peerEngines).toString())
+                put(
+                    "peerEngines.live",
+                    peerEngines.keys.sorted().joinToString(",").ifEmpty { "none" },
+                )
                 if (llamaEngine == null) {
                     put(
                         "llama.failClosed",
                         "libomnillm_llama missing or ABI mismatch — execute path remains fail-closed",
                     )
                 }
+            }
+
+            if (peerEngines.isNotEmpty()) {
+                Log.i(
+                    TAG,
+                    "peer engines attached live=${peerEngines.keys.sorted().joinToString()} " +
+                        "mode=${notes["mode"]}",
+                )
+            } else {
+                Log.i(
+                    TAG,
+                    "peer engines stay metadata-only (policy or SDK/API absent) " +
+                        "mode=${notes["mode"]}",
+                )
             }
 
             if (llamaEngine != null) {
@@ -188,6 +221,7 @@ class EnginePackAttachment private constructor(
                 registrationsByEngineId = registrations.toMap(),
                 nativeLibraryPresent = nativePresent,
                 notes = notes,
+                peerEngines = peerEngines.toMap(),
             )
         }
 
@@ -210,6 +244,7 @@ class EnginePackAttachment private constructor(
         ): EnginePackAttachment {
             val registry = EngineRegistry()
             val registrations = linkedMapOf<String, EngineRegistration>()
+            val peerEngines = linkedMapOf<String, com.omnillm.engines.api.OmniEngine>()
 
             val llamaLock = UpstreamLockLoader.loadFromClasspathOrTemplate()
             val llamaReg = LlamaCppModule.registerWith(
@@ -225,7 +260,7 @@ class EnginePackAttachment private constructor(
             )
             registrations[LlamaCppModule.ENGINE_ID] = llamaReg
 
-            registerPeerEngines(registry, deviceFingerprint, registrations, buildMode)
+            registerPeerEngines(registry, deviceFingerprint, registrations, buildMode, peerEngines)
 
             if (!buildMode.allowSupportedProjectionWithoutPass()) {
                 check(!EngineSelectionPolicy.anyExecutableCell(registry, buildMode)) {
@@ -270,19 +305,39 @@ class EnginePackAttachment private constructor(
                         "anyExecutable",
                         EngineSelectionPolicy.anyExecutableCell(registry, buildMode).toString(),
                     )
+                    put(
+                        "litert.sdkPresent",
+                        LitertLmModule.isOfficialSdkOnClasspath().toString(),
+                    )
+                    put(
+                        "ort.apiPresent",
+                        com.omnillm.engines.ortgenai.session.GenAiBackendFactory
+                            .isOfficialApiOnClasspath().toString(),
+                    )
+                    put("litert.attached", (LitertLmModule.ENGINE_ID in peerEngines).toString())
+                    put("ort.attached", (OrtGenaiModule.ENGINE_ID in peerEngines).toString())
+                    put(
+                        "peerEngines.live",
+                        peerEngines.keys.sorted().joinToString(",").ifEmpty { "none" },
+                    )
                 },
+                peerEngines = peerEngines.toMap(),
             )
         }
 
         /**
-         * Register peer Engine Packs as metadata + UNQUALIFIED cells only.
-         * Never loads real native/SDK backends (see [EngineSelectionPolicy]).
+         * Register peer Engine Packs and — when policy allows (dev ship mode)
+         * AND the official SDK/API is present — attach the REAL litert/ort
+         * backends as live engines (C-07). mlc/mllm NEVER attach live:
+         * metadata + UNQUALIFIED cells only, require-guards stay.
+         * Cells remain UNQUALIFIED/UNKNOWN — attachability is not qualification.
          */
         private fun registerPeerEngines(
             registry: EngineRegistry,
             deviceFingerprint: DeviceExecutionFingerprint,
             out: MutableMap<String, EngineRegistration>,
             buildMode: ProductBuildMode,
+            outEngines: MutableMap<String, com.omnillm.engines.api.OmniEngine>,
         ) {
             // In compliance mode peers may never use real native/SDK backends.
             // In DEVELOPMENT_SHIP_MODE every catalog engine may attempt a real backend
@@ -292,7 +347,14 @@ class EnginePackAttachment private constructor(
             // LiteRT-LM — cells must live under the SAME engineBuildId as the
             // registration (INV-018: catalog cells exist, status UNKNOWN; the packaged
             // UPSTREAM.lock resolves a real build id, so defaults must not diverge).
-            val litertReg = LitertLmModule.registerWith(registry = registry)
+            val litertLock = com.omnillm.engines.litertlm.lock.UpstreamLockLoader
+                .loadFromClasspathOrTemplate()
+            val litertReg = LitertLmModule.registerWith(
+                registry = registry,
+                lock = litertLock,
+                engineBuildId = litertLock.resolvedEngineBuildId()
+                    ?: LitertLmModule.defaultEngineBuildId(),
+            )
             LitertLmModule.seedUnqualifiedPlaceholders(
                 registry = registry,
                 deviceFingerprint = deviceFingerprint,
@@ -302,6 +364,16 @@ class EnginePackAttachment private constructor(
             out[LitertLmModule.ENGINE_ID] = litertReg
             if (complianceOnly) {
                 require(!EngineSelectionPolicy.mayUseRealNativeBackend(LitertLmModule.ENGINE_ID, buildMode))
+            } else if (EngineSelectionPolicy.mayUseRealNativeBackend(LitertLmModule.ENGINE_ID, buildMode) &&
+                LitertLmModule.isOfficialSdkOnClasspath()
+            ) {
+                // Real backend (fail-closed when the AAR is absent at runtime);
+                // exploratory execute only in dev posture + complete lock.
+                outEngines[LitertLmModule.ENGINE_ID] = LitertLmModule.createProductionEngine(
+                    lock = litertLock,
+                    forceExploratory = buildMode.allowExecuteWithoutQualification(),
+                    engineBuildId = litertReg.engineBuildId,
+                )
             }
 
             // MLC-LLM (register without default seed so we can pass device fingerprint)
@@ -337,14 +409,29 @@ class EnginePackAttachment private constructor(
             }
 
             // ONNX Runtime GenAI
+            val ortLock = com.omnillm.engines.ortgenai.lock.UpstreamLockLoader
+                .loadFromClasspathOrTemplate()
             val ortReg = OrtGenaiModule.registerDesignCompleteUnqualified(
                 registry = registry,
+                lock = ortLock,
+                engineBuildId = ortLock.resolvedEngineBuildId()
+                    ?: OrtGenaiModule.defaultEngineBuildId(),
                 deviceFingerprint = deviceFingerprint,
                 driverFingerprint = DRIVER_PLACEHOLDER,
             )
             out[OrtGenaiModule.ENGINE_ID] = ortReg
             if (complianceOnly) {
                 require(!EngineSelectionPolicy.mayUseRealNativeBackend(OrtGenaiModule.ENGINE_ID, buildMode))
+            } else if (EngineSelectionPolicy.mayUseRealNativeBackend(OrtGenaiModule.ENGINE_ID, buildMode) &&
+                com.omnillm.engines.ortgenai.session.GenAiBackendFactory.isOfficialApiOnClasspath()
+            ) {
+                // Real backend (fail-closed when natives are absent at runtime);
+                // unproven execution only in dev posture.
+                outEngines[OrtGenaiModule.ENGINE_ID] = OrtGenaiModule.createEngine(
+                    lock = ortLock,
+                    engineBuildId = ortReg.engineBuildId,
+                    allowUnprovenExecution = buildMode.allowExecuteWithoutQualification(),
+                )
             }
         }
 

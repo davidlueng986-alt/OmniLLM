@@ -75,42 +75,102 @@ class EngineExecuteBinding(
 
     /**
      * Apply [EnginePackAttachment] from [ensureEnginePacksAttached].
-     * When llama-cpp adapter present → bind [LlamaCppInferenceEngineAdapter].
-     * When missing → keep fail-closed with clear reason.
+     *
+     * C-07 multi-engine binding: every attached engine (llama-cpp + live
+     * LiteRT-LM / ONNX-Runtime-GenAI peers) gets an adapter, routed by
+     * engineBuildId via [MultiEngineInferenceRouter] (model's engine → matching
+     * backend; no match → llama fallback; nothing attached → fail-closed).
+     * When no engine is attached → keep fail-closed with clear reason.
      */
     fun applyAttachment(pack: EnginePackAttachment): ApplyResult {
         attachmentRef.set(pack)
-        if (pack.llamaCppEngine != null) {
+        val adapters = linkedMapOf<String, com.omnillm.runtime.orchestrator.InferenceEnginePort>()
+        var llamaAdapter: LlamaCppInferenceEngineAdapter? = null
+        pack.llamaCppEngine?.let { llama ->
             val adapter = LlamaCppInferenceEngineAdapter(
-                engine = pack.llamaCppEngine!!,
+                engine = llama,
                 modelSourceResolver = modelSourceResolver,
                 fallbackToFixtureOnUnresolved = fallbackToFixtureOnUnresolved,
             )
-            boundLlamaAdapter = adapter
-            inferenceEngine.bind(adapter)
-            boundOnce.set(true)
-            logI(
-                "inference port bound to llama-cpp native=${pack.nativeLibraryPresent} " +
-                    "exploratoryDefault=${exploratoryEnabled()} " +
-                    "anyExecutable=${EngineSelectionPolicy.anyExecutableCell(pack.registry, buildMode)}",
-            )
-            return ApplyResult(
-                bound = true,
-                nativePresent = pack.nativeLibraryPresent,
-                message = "llama-cpp adapter bound; cells remain UNKNOWN/UNQUALIFIED",
+            llamaAdapter = adapter
+            adapters[llama.engineBuildId.value] = adapter
+        }
+        pack.litertLmEngine?.let { litert ->
+            adapters[litert.engineBuildId.value] = PeerEngineInferenceAdapter(
+                engineId = com.omnillm.engines.litertlm.LitertLmModule.ENGINE_ID,
+                engine = litert,
+                planningAvailable = {
+                    com.omnillm.engines.litertlm.LitertLmModule.isOfficialSdkOnClasspath()
+                },
+                envelopeProvider = {
+                    com.omnillm.engines.litertlm.resource.ResourceEnvelopeEstimator
+                        .estimateInference(
+                            com.omnillm.engines.litertlm.resource.ResourceEnvelopeEstimator
+                                .EstimateInput(
+                                    contextLength = 2048,
+                                    nThreads = com.omnillm.engines.litertlm.resource
+                                        .ResourceEnvelopeEstimator.DEFAULT_THREADS.toInt(),
+                                    scratchBytes = 1L * 1024L * 1024L,
+                                ),
+                        )
+                },
             )
         }
-        inferenceEngine.unbind()
-        boundLlamaAdapter = null
-        logW(
-            "llama-cpp native missing — inference remains fail-closed " +
-                "(${pack.notes["llama.failClosed"] ?: "no adapter"})",
+        pack.ortGenaiEngine?.let { ort ->
+            adapters[ort.engineBuildId.value] = PeerEngineInferenceAdapter(
+                engineId = com.omnillm.engines.ortgenai.OrtGenaiModule.ENGINE_ID,
+                engine = ort,
+                planningAvailable = {
+                    com.omnillm.engines.ortgenai.session.GenAiBackendFactory
+                        .isOfficialApiOnClasspath()
+                },
+                envelopeProvider = {
+                    com.omnillm.engines.ortgenai.resource.ResourceEnvelopeEstimator
+                        .estimateInference(
+                            com.omnillm.engines.ortgenai.resource.ResourceEnvelopeEstimator
+                                .EstimateInput(
+                                    contextLength = 2048,
+                                    nThreads = com.omnillm.engines.ortgenai.resource
+                                        .ResourceEnvelopeEstimator.DEFAULT_THREADS.toInt(),
+                                ),
+                        )
+                },
+            )
+        }
+        boundLlamaAdapter = llamaAdapter
+
+        if (adapters.isEmpty()) {
+            inferenceEngine.unbind()
+            logW(
+                "no engine attached — inference remains fail-closed " +
+                    "(${pack.notes["llama.failClosed"] ?: "no adapter"})",
+            )
+            return ApplyResult(
+                bound = false,
+                nativePresent = pack.nativeLibraryPresent,
+                message = pack.notes["llama.failClosed"]
+                    ?: "no engine attached — execute path fail-closed",
+            )
+        }
+
+        inferenceEngine.bind(
+            MultiEngineInferenceRouter(
+                byEngineBuildId = adapters,
+                fallback = llamaAdapter,
+            ),
+        )
+        boundOnce.set(true)
+        logI(
+            "inference port bound engines=${adapters.keys.joinToString()} " +
+                "native=${pack.nativeLibraryPresent} " +
+                "exploratoryDefault=${exploratoryEnabled()} " +
+                "anyExecutable=${EngineSelectionPolicy.anyExecutableCell(pack.registry, buildMode)}",
         )
         return ApplyResult(
-            bound = false,
+            bound = true,
             nativePresent = pack.nativeLibraryPresent,
-            message = pack.notes["llama.failClosed"]
-                ?: "libomnillm_llama missing — execute path fail-closed",
+            message = "bound ${adapters.size} engine(s): " +
+                "${adapters.keys.joinToString()}; cells remain UNKNOWN/UNQUALIFIED",
         )
     }
 
@@ -145,10 +205,14 @@ class EngineExecuteBinding(
             return CapabilityState.UNKNOWN
         }
 
-        val attachedBuild = pack?.llamaCppEngine?.engineBuildId?.value
-            ?: pack?.llamaCppRegistration?.engineBuildId?.value
-        if (attachedBuild != null && candidate.engineBuildId.value != attachedBuild) {
-            // No silent cross-revision / cross-build fallback.
+        // C-07: accept any ATTACHED engine's build (llama + live peers). Unknown
+        // builds stay UNKNOWN — no silent cross-revision / cross-build fallback.
+        val attachedBuilds = buildSet {
+            pack?.llamaCppEngine?.engineBuildId?.value?.let(::add)
+            pack?.llamaCppRegistration?.engineBuildId?.value?.let(::add)
+            pack?.livePeerEngineBuildIds?.forEach(::add)
+        }
+        if (attachedBuilds.isNotEmpty() && candidate.engineBuildId.value !in attachedBuilds) {
             return CapabilityState.UNKNOWN
         }
 
@@ -239,6 +303,11 @@ class EngineExecuteBinding(
             add("no_device_evidence_pack")
             add("native=${attachment?.nativeLibraryPresent == true}")
             add("engineId=${LlamaCppModule.ENGINE_ID}")
+            attachment?.livePeerEngineIds?.sorted()?.forEach { engineId ->
+                // C-07: disclose every live-attached engine in the negotiation
+                // conditions (attachability only — never SUPPORTED evidence).
+                add("engineId=$engineId")
+            }
             if (buildMode.developmentShipMode) {
                 // COR-10: dev-override marker — CONDITIONAL is a development
                 // posture, not evidence-backed SUPPORTED.
