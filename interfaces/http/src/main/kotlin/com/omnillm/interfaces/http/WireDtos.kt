@@ -248,7 +248,14 @@ data class AsyncInferenceRequestDto(
     val embedding: NativeEmbeddingPayloadDto? = null,
 )
 
-/** OpenAPI `#/components/schemas/NativeChatPayload` (durable chat payload). */
+/**
+ * OpenAPI `#/components/schemas/NativeChatPayload` (durable chat payload).
+ *
+ * D8: response_format / tools / tool_choice are spec properties (:2624-2649)
+ * — modeled here so they can never be silently dropped (the codec used to
+ * swallow them via ignoreUnknownKeys). The durable path fails closed when
+ * they are present but unsupported (see ControlPlaneHttpHandler).
+ */
 @Serializable
 data class NativeChatPayloadDto(
     val model: String,
@@ -257,6 +264,12 @@ data class NativeChatPayloadDto(
     val temperature: Double? = null,
     @SerialName("top_p") val topP: Double? = null,
     val stop: List<String>? = null,
+    /** D8: spec ResponseFormat (:1980-1981 mirror) — modeled, fail-closed on durable path. */
+    @SerialName("response_format") val responseFormat: ResponseFormatDto? = null,
+    /** D8: spec ToolDefinition list — modeled, fail-closed on durable path. */
+    val tools: List<ToolDefinitionDto>? = null,
+    /** D8: spec oneOf string enum | NamedToolChoice — modeled, fail-closed on durable path. */
+    @SerialName("tool_choice") val toolChoice: JsonElement? = null,
     val user: String? = null,
     @SerialName("omnillm_fallback") val omnillmFallback: FallbackDto? = null,
     @SerialName("omnillm_deadline_ms") val omnillmDeadlineMs: Long? = null,

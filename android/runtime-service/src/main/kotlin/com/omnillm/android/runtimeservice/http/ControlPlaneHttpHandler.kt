@@ -829,6 +829,14 @@ class ControlPlaneHttpHandler(
         request: AsyncInferenceRequestDto,
     ): HttpHandlerResult<AcceptedRequestDto> {
         enforceAccess(principal, "create-request", AccessScope.inference_create)?.let { return it }
+        // D8: response_format / tools / tool_choice are spec fields on the
+        // durable payload, but the durable execution path has no structured or
+        // tool-calling pipeline — reject them explicitly (never silently
+        // accept-and-drop, mirroring the sync path). Checked BEFORE any
+        // orchestration admission so the parameter is always named.
+        request.chat?.let { payload ->
+            unsupportedDurableChatParamError(payload)?.let { return HttpHandlerResult.Err(it) }
+        }
         // API-16: durable requests are claim + EXECUTE. Without an orchestrator the
         // claim could never run — fail closed honestly instead of 202-never-execute.
         val orch = orchestrator
@@ -2652,6 +2660,26 @@ class ControlPlaneHttpHandler(
         OmniError.CAPABILITY_UNSUPPORTED(
             message = "$name is not supported on the sync/SSE OpenAI chat path — " +
                 "use the structured/tool-calling pipeline or durable /omni/v1/requests",
+            details = mapOf("parameter" to name),
+        )
+
+    /**
+     * D8: same honest fail-closed for the DURABLE payload — the durable path
+     * executes plain chat only; structured output / tool calls are rejected,
+     * never silently dropped.
+     */
+    private fun unsupportedDurableChatParamError(payload: NativeChatPayloadDto): OmniError? =
+        when {
+            payload.responseFormat != null -> unsupportedDurableChatParam("response_format")
+            !payload.tools.isNullOrEmpty() -> unsupportedDurableChatParam("tools")
+            payload.toolChoice != null -> unsupportedDurableChatParam("tool_choice")
+            else -> null
+        }
+
+    private fun unsupportedDurableChatParam(name: String): OmniError =
+        OmniError.CAPABILITY_UNSUPPORTED(
+            message = "$name is not supported on the durable /omni/v1/requests path — " +
+                "no structured/tool-calling pipeline is attached",
             details = mapOf("parameter" to name),
         )
 
