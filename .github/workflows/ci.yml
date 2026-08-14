@@ -392,6 +392,10 @@ jobs:
           disable-animations: true
           force-avd-creation: false
           script: |
+            set -euo pipefail
+            # Fail closed: BOTH gradlew invocations must succeed — the first
+            # (assemble) is a hard precondition for the second (connected tests),
+            # so a masked first-command failure must never be ignored.
             ./gradlew \
               :android:app-ui:assembleDebug \
               :android:runtime-service:assembleDebug \

@@ -148,29 +148,72 @@ class SessionManagerConcurrencyTest {
         createPublished(mgr, "sess-offer")
 
         // Race: some threads re-offer, some acquire; pool membership must stay
-        // a single consistent boolean per record (inPool), never negative ops.
+        // a SINGLE CONSISTENT boolean per record (inPool), never negative ops.
+        // The documented invariant is per-caller consistency, NOT a final value:
+        // an offer landing after the winning acquire legitimately leaves the
+        // session pooled again (last-writer-wins on the synchronized store).
         val threads = 12
         val results = runConcurrently(threads) {
             val outcome: String
             if (Thread.currentThread().id % 2 == 0L) {
                 val r = mgr.offerToPool(sid, nowMonotonic = 10L)
-                outcome = if (r is OmniResult.Ok) "offered" else "offer-rejected"
+                outcome = when (r) {
+                    is OmniResult.Ok -> "offered:inPool=${r.value.inPool}"
+                    is OmniResult.Err -> "offer-rejected"
+                }
             } else {
                 val r = mgr.acquireFromPool(poolQuery())
-                outcome = if (r is OmniResult.Ok) "acquired" else "acquire-miss"
+                outcome = when (r) {
+                    is OmniResult.Ok -> "acquired:inPool=${r.value.inPool}"
+                    is OmniResult.Err -> "acquire-miss"
+                }
             }
             outcome
         }
 
-        val record = mgr.getRequired(sid).getOrNull()!!
-        assertTrue(record.activeOperationCount == 0)
-        // If an acquire won, inPool is false; otherwise the session stays pooled.
-        if ("acquired" in results) {
-            assertFalse(record.inPool)
-            // Re-offer must succeed afterwards (still ACTIVE and quiescent).
-            assertTrue(mgr.offerToPool(sid, nowMonotonic = 11L) is OmniResult.Ok)
+        // Per-caller consistency: every caller that SUCCEEDED observed a record
+        // whose inPool flag matches its own outcome — an offer observes inPool
+        // true, an acquire observes inPool false. No caller can observe a torn
+        // boolean (a single consistent boolean per record).
+        for (outcome in results) {
+            if (outcome.startsWith("offered")) {
+                assertTrue(
+                    "offer Ok must observe inPool=true, got '$outcome'",
+                    outcome == "offered:inPool=true",
+                )
+            }
+            if (outcome.startsWith("acquired")) {
+                assertTrue(
+                    "acquire Ok must observe inPool=false, got '$outcome'",
+                    outcome == "acquired:inPool=false",
+                )
+            }
         }
-        assertTrue(mgr.listPoolCandidates(poolQuery()).size <= 1)
+        assertTrue("some caller must have won the acquire", results.any { it.startsWith("acquired") })
+        assertTrue("some caller must have offered", results.any { it.startsWith("offered") })
+
+        // No operation count drift from the race.
+        val record = mgr.getRequired(sid).getOrNull()!!
+        assertEquals(0, record.activeOperationCount)
+
+        // Final-state consistency (last-writer-wins): the stored record's inPool
+        // flag must agree with the pool candidate list — a single consistent
+        // boolean, never a torn one. Either interleaving is legal.
+        val pooled = mgr.listPoolCandidates(poolQuery())
+        assertTrue("at most one candidate", pooled.size <= 1)
+        assertEquals(
+            "record.inPool must agree with pool membership (got inPool=${record.inPool}, candidates=${pooled.size})",
+            pooled.isNotEmpty(),
+            record.inPool,
+        )
+
+        // Whichever way the race landed, the session is still ACTIVE + quiescent:
+        // re-offer always succeeds and re-entry is single-winner again.
+        assertTrue(mgr.offerToPool(sid, nowMonotonic = 11L) is OmniResult.Ok)
+        val acquires = runConcurrently(threads) {
+            mgr.acquireFromPool(poolQuery())
+        }
+        assertEquals(1, acquires.count { it is OmniResult.Ok })
     }
 
     @Test
