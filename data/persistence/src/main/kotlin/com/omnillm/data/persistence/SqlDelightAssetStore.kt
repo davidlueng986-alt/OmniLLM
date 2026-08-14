@@ -63,7 +63,7 @@ class SqlDelightAssetStore(
     }
 }
 
-private fun Asset_records.toAssetRow(): AssetRecordRow =
+private fun Assets.toAssetRow(): AssetRecordRow =
     AssetRecordRow(
         assetId = asset_id,
         ownerPrincipalId = principal_id,
