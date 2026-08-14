@@ -95,8 +95,9 @@ object ModelManagerModule {
         engine: EngineLoadPort = FailClosedEngineLoadPort(),
         trustEvaluation: TrustEvaluationPort = DefaultTrustEvaluationPort(),
         references: ReferenceSnapshotPort = ZeroReferenceSnapshotPort,
+        supplyChainHooks: SupplyChainHooks = NoopSupplyChainHooks(),
         privilegedReverify: PrivilegedLoadReverifyPort =
-            DefaultPrivilegedLoadReverify.failClosedUntilSupplyWired(modelStore),
+            DefaultPrivilegedLoadReverify.hooksBacked(modelStore, supplyChainHooks),
         loadedModels: LoadedModelRepository = InMemoryLoadedModelRepository(),
         clock: () -> String = { java.time.Instant.now().toString() },
     ): ModelManager {

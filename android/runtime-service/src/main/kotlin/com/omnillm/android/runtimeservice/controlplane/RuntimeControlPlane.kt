@@ -26,7 +26,6 @@ import com.omnillm.core.canonical.generated.OmniResult
 import com.omnillm.core.ports.ledger.ControlPlaneWriter
 import com.omnillm.data.persistence.OmniLlmDatabase
 import com.omnillm.core.ports.ledger.SingleWriterPolicy
-import com.omnillm.runtime.modelmanager.DefaultPrivilegedLoadReverify
 import com.omnillm.features.admin.usecase.AdminFeatureApi
 import com.omnillm.features.autosetup.api.AutoSetupApi
 import com.omnillm.features.benchmark.api.BenchmarkApi
@@ -50,6 +49,8 @@ import com.omnillm.runtime.governor.ResourceGovernor
 import com.omnillm.runtime.job.JobManager
 import com.omnillm.runtime.modelmanager.ModelManager
 import com.omnillm.runtime.modelmanager.ModelManagerModule
+import com.omnillm.runtime.modelmanager.supply.CatalogRootBootstrap
+import com.omnillm.runtime.modelmanager.supply.ProductionSupplyChainHooks
 import com.omnillm.runtime.observability.ObservabilityFacade
 import com.omnillm.runtime.orchestrator.Orchestrator
 import com.omnillm.runtime.policy.PolicyManager
@@ -496,6 +497,28 @@ class RuntimeControlPlane private constructor(
                     ),
                 )
                 val observability = ObservabilityModule.createFacade()
+                // C-14: live supply-chain hook surface. The embedded catalog root
+                // is provisioned by the release pipeline (assets/catalog/root-v1.bin,
+                // see EmbeddedCatalogRootAssets); until present, bootstrap rejects
+                // and every hook decision fails closed — that is the intended
+                // pre-provisioning posture, documented in ProductionSupplyChainHooks.
+                // The moment a root is provisioned, trust state is established here
+                // and privileged-load re-verify consults the real hooks.
+                val supplyChain = ProductionSupplyChainHooks(
+                    embeddedRootProvider = {
+                        com.omnillm.android.runtimeservice.security
+                            .EmbeddedCatalogRootAssets.lookup(appContext.assets)
+                    },
+                )
+                when (
+                    val outcome = ModelManagerModule.supplyChainBootstrap(supplyChain)
+                        .ensureBootstrapped()
+                ) {
+                    is CatalogRootBootstrap.Outcome.Accepted ->
+                        Log.i(TAG, "catalog trust bootstrapped (rootVersion=${outcome.state.highestRootVersion})")
+                    is CatalogRootBootstrap.Outcome.Rejected ->
+                        Log.w(TAG, "catalog trust not bootstrapped (fail-closed): ${outcome.reason}")
+                }
                 // Durable ModelManager: SQL installations/leases + FS quarantine (CORE-MODEL).
                 val modelStore = ModelStoreModule.createFilesystemPort(
                     filesRoot = AndroidStorageRoots.filesRootPath(appContext),
@@ -505,9 +528,7 @@ class RuntimeControlPlane private constructor(
                     installationPorts = controlDb.installations,
                     leasePorts = controlDb.revisionLeases,
                     modelStore = modelStore,
-                    privilegedReverify = DefaultPrivilegedLoadReverify.failClosedUntilSupplyWired(
-                        modelStore,
-                    ),
+                    supplyChainHooks = supplyChain,
                     clock = clock,
                 )
                 val assetQuarantine = File(appContext.cacheDir, "omnillm-asset-quarantine")

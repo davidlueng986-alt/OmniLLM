@@ -28,6 +28,20 @@ interface SupplyChainHooks {
      * Implementations fail closed on unknown algorithms (SEC-PROFILE).
      */
     fun verifySignatures(envelope: CatalogMetadataEnvelope): Boolean
+
+    /**
+     * Privileged-load gate (SEC-PLACEMENT §4): is the installed revision's
+     * manifest signature / root chain acceptable under the current catalog
+     * trust state? Must fail closed (false) while no trust state is
+     * bootstrapped (no embedded root provisioned).
+     */
+    fun isInstalledRevisionSignatureOk(modelRevisionIdHex: String): Boolean
+
+    /**
+     * Privileged-load gate: is this revision revoked by the current ledger?
+     * False = not revoked (a genuinely empty ledger revokes nothing).
+     */
+    fun isInstalledRevisionRevoked(modelRevisionIdHex: String, nowEpochMs: Long): Boolean
 }
 
 /**
@@ -45,14 +59,23 @@ class NoopSupplyChainHooks : SupplyChainHooks {
     }
     override fun revocationLedger(): RevocationLedger = ledger
     override fun verifySignatures(envelope: CatalogMetadataEnvelope): Boolean = false
+    override fun isInstalledRevisionSignatureOk(modelRevisionIdHex: String): Boolean = false
+    override fun isInstalledRevisionRevoked(modelRevisionIdHex: String, nowEpochMs: Long): Boolean =
+        ledger.isRevoked(RevocationTargetKind.MODEL_REVISION, modelRevisionIdHex, nowEpochMs)
 }
 
 /**
  * In-memory hooks with a provided embedded root (tests + offline bootstrap).
+ *
+ * The provided root IS the trust: [installedRevisionSignatureOk] defaults to
+ * accepting the revision (overridable) and revocation consults the ledger
+ * (plus an overridable extra check).
  */
 class InMemorySupplyChainHooks(
     private val root: EmbeddedCatalogRoot,
     private val verify: (CatalogMetadataEnvelope) -> Boolean = { false },
+    private val installedRevisionSignatureOk: (String) -> Boolean = { true },
+    private val installedRevisionRevoked: (String, Long) -> Boolean = { _, _ -> false },
 ) : SupplyChainHooks {
     private val ledger = RevocationLedger()
     private var state: CatalogTrustState? = null
@@ -64,6 +87,11 @@ class InMemorySupplyChainHooks(
     }
     override fun revocationLedger(): RevocationLedger = ledger
     override fun verifySignatures(envelope: CatalogMetadataEnvelope): Boolean = verify(envelope)
+    override fun isInstalledRevisionSignatureOk(modelRevisionIdHex: String): Boolean =
+        installedRevisionSignatureOk(modelRevisionIdHex)
+    override fun isInstalledRevisionRevoked(modelRevisionIdHex: String, nowEpochMs: Long): Boolean =
+        ledger.isRevoked(RevocationTargetKind.MODEL_REVISION, modelRevisionIdHex, nowEpochMs) ||
+            installedRevisionRevoked(modelRevisionIdHex, nowEpochMs)
 }
 
 /**
