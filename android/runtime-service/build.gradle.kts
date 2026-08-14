@@ -58,11 +58,26 @@ android {
                 "META-INF/NOTICE*",
             )
         }
+        // NOTE (C-07): 32-bit ABI exclusion happens at the app via app-ui's
+        // BLD-10 ndk.abiFilters (arm64-v8a + x86_64) — verified in the packaged
+        // APK. Library-level packaging.jniLibs excludes do NOT filter AAR jniLibs
+        // merged into consuming apps (AGP 9), so no dead config lives here.
     }
 }
 
 kotlin {
     jvmToolchain(libs.versions.jdk.get().toInt())
+}
+
+// C-07 test seam: litertlm-jvm 0.15.0 ships Java 21 bytecode (class file major 65)
+// — host unit tests must run on a JVM >= 21 (mirrors :engines:litert-lm). The
+// module's compile toolchain stays at the product default (libs.versions.jdk).
+tasks.withType<Test>().configureEach {
+    javaLauncher.set(
+        javaToolchains.launcherFor {
+            languageVersion.set(JavaLanguageVersion.of(21))
+        },
+    )
 }
 
 dependencies {
@@ -126,6 +141,23 @@ dependencies {
     // Packages libomnillm_llama.so into the runtime process (not loaded by app-ui).
     implementation(project(":android:native"))
 
+    // C-07: peer-engine runtime natives on the control plane (execute-attachable;
+    // NOT qualification evidence — cells stay UNQUALIFIED/UNKNOWN until device
+    // evidence, and mlc/mllm remain metadata-only by product decision).
+    // LiteRT-LM Android AAR (UPSTREAM.lock: litertlm-android 0.15.0, sha256
+    // b398c474…, arm64-v8a+x86_64, minSdk 24). The JVM engine module compiles
+    // against litertlm-jvm compileOnly; THIS AAR is the packaged native surface.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.15.0")
+    // ONNX Runtime GenAI Android AAR — GitHub release asset (NOT on Maven
+    // Central; UPSTREAM.lock artifactProvisioning). File dep beside the lock;
+    // sha256 c2e9b967… re-verified from downloaded bytes. API classes are
+    // compileOnly in :engines:ort-genai (libs/*.jar).
+    implementation(files("../../engines/ort-genai/libs/onnxruntime-genai-android-0.14.0.aar"))
+    // Base ONNX Runtime required by GenAI.init() → System.loadLibrary("onnxruntime")
+    // (UPSTREAM.lock ortRuntime pin: com.microsoft.onnxruntime:onnxruntime-android:1.25.1,
+    // sha256 08ccb60c…). ABIs beyond 64-bit are excluded in `packaging` above.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.25.1")
+
     // Wave-A Feature Packs (admin, auto-setup, modelhub, playground, server, dashboard).
     implementation(project(":features:admin"))
     implementation(project(":features:auto-setup"))
@@ -148,6 +180,14 @@ dependencies {
     // itself is an implementation dep of :interfaces:http — test-only here so
     // the bound-port + TCP-reachability contract runs against a REAL server).
     testImplementation(libs.ktor.server.cio)
+
+    // C-07 host attach-test seams: the official LiteRT-LM JVM artifact and the
+    // ONNX-Runtime-GenAI classes.jar (extracted from the pinned AAR, sha256 in
+    // UPSTREAM.lock) put the real SDK/API surfaces on the host test classpath so
+    // EnginePackAttachment attach tests exercise the REAL backend path (never
+    // on Android packaging — host test only).
+    testImplementation(libs.litertlm.jvm)
+    testImplementation(files("../../engines/ort-genai/libs/onnxruntime-genai-android-0.14.0.jar"))
 
     androidTestImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
