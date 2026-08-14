@@ -184,6 +184,12 @@ class AcquisitionPipeline(
     /**
      * SAF / local import: stream → quarantine → verify → promote.
      * Trust stays untrusted (channel LOCAL_IMPORT); compatibility ≠ authenticity.
+     *
+     * C-03 dry-load gate: when the import is LABELED gguf ([expectedFormat]), the
+     * first bytes are PARSED as a GGUF header before any quarantine materialize —
+     * a non-GGUF / truncated / corrupt file fails closed (INVALID_REQUEST) and the
+     * job + installation are rejected. Header parse only (24 bytes); engine-level
+     * "load without execution" is not exposed by llama-cpp and is a device-wave item.
      */
     suspend fun executeSafImport(
         installationId: String,
@@ -239,6 +245,18 @@ class AcquisitionPipeline(
             is OmniResult.Ok -> Unit
         }
         phases += "ACQUIRING"
+
+        // C-03: parse dry-load before any quarantine materialize — the gguf LABEL
+        // alone must not make a file installable. Fail closed on non-GGUF bytes.
+        if (expectedFormat?.trim()?.equals("gguf", ignoreCase = true) == true) {
+            val header = dryLoadGgufHeader(source = source, cancel = cancel)
+            if (header is OmniResult.Err) {
+                modelHub.failAcquisition(jobId, header.error.message ?: "gguf header rejected")
+                phases += "GGUF_HEADER_REJECTED"
+                return header
+            }
+            phases += "GGUF_HEADER_VALIDATED"
+        }
 
         val materialize = materializeDeclared(
             jobId = jobId,
@@ -385,6 +403,37 @@ class AcquisitionPipeline(
             phases += "MATERIALIZED_${d.role}"
         }
         return OmniResult.ok(MaterializeBundle(files = out, alreadyRecordedOnStore = alreadyOnStore))
+    }
+
+    /**
+     * C-03 dry-load: open the declared weights stream once and parse the GGUF
+     * header without materializing/executing. Returns the parsed header on
+     * success; INVALID_REQUEST (mapped) on any parse failure.
+     */
+    private fun dryLoadGgufHeader(
+        source: ArtifactByteSource,
+        cancel: AtomicBoolean,
+    ): OmniResult<GgufHeaderValidator.Header> {
+        val stream = when (val opened = source.open(FixtureArtifact.ROLE_WEIGHTS, cancel)) {
+            is OmniResult.Ok -> opened.value
+            is OmniResult.Err -> return opened
+        }
+        stream.use { input ->
+            return when (val outcome = GgufHeaderValidator.validate(input)) {
+                is GgufHeaderValidator.Outcome.Valid -> OmniResult.ok(outcome.header)
+                is GgufHeaderValidator.Outcome.Invalid -> OmniResult.err(
+                    OmniError.INVALID_REQUEST(
+                        message = "import rejected: file is not a valid GGUF model",
+                        details = mapOf(
+                            "reason" to outcome.reason,
+                            "field" to outcome.field,
+                            "actual" to outcome.actual,
+                            "expectedFormat" to "gguf",
+                        ),
+                    ),
+                )
+            }
+        }
     }
 
     private suspend fun cancelAndReport(
