@@ -305,7 +305,7 @@ jobs:
 
       - name: Upload APK artifacts
         # Only when assemble produced artifacts; fail closed if globs empty.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: omnillm-apks-${{ github.sha }}
           path: |
@@ -316,7 +316,7 @@ jobs:
 
       - name: Upload test reports (on failure)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: omnillm-test-reports-${{ github.sha }}
           path: |
