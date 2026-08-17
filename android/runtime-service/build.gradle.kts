@@ -147,7 +147,7 @@ dependencies {
     // LiteRT-LM Android AAR (UPSTREAM.lock: litertlm-android 0.15.0, sha256
     // b398c474…, arm64-v8a+x86_64, minSdk 24). The JVM engine module compiles
     // against litertlm-jvm compileOnly; THIS AAR is the packaged native surface.
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.15.0")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.0")
     // ONNX Runtime GenAI Android AAR — GitHub release asset (NOT on Maven
     // Central; UPSTREAM.lock artifactProvisioning). File dep beside the lock;
     // sha256 c2e9b967… re-verified from downloaded bytes. API classes are
