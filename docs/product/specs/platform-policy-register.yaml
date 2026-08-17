@@ -1,0 +1,61 @@
+schemaVersion: 1
+asOf: '2026-07-31'
+policies:
+- id: PLAY-TARGET-API-2026
+  claim: Starting 2026-08-31, new apps and app updates submitted to Google Play must target Android 16 / API 36 or higher,
+    subject to documented form-factor exceptions.
+  source: https://developer.android.com/google/play/requirements/target-sdk
+  retrievedAt: '2026-07-31'
+  affects:
+  - ANDROID-BASELINE
+  - ANDROID-DIST
+  recheckTrigger: before every Play submission or policy change
+- id: PLAY-AI-REPORTING
+  claim: Apps that generate AI content must provide in-app reporting or flagging so users can report offensive content to
+    developers.
+  source: https://support.google.com/googleplay/android-developer/answer/13985936?hl=en
+  retrievedAt: '2026-07-31'
+  affects:
+  - ANDROID-DIST
+  - FEAT-AI-REPORTING
+  recheckTrigger: before every Play submission or policy change
+- id: PLAY-FGS-DECLARATION
+  claim: For apps targeting Android 14+, every used FGS type requires the matching manifest permission/type and a Play Console
+    declaration describing functionality, user impact and demonstration material for a user-initiated or perceptible use case.
+  source: https://support.google.com/googleplay/android-developer/answer/16559646?hl=en
+  retrievedAt: '2026-07-31'
+  affects:
+  - ANDROID-SERVICE
+  - ANDROID-DIST
+  recheckTrigger: target SDK, FGS type or Play policy change
+- id: ANDROID-16KB
+  claim: New apps and updates targeting Android 15+ submitted to Google Play must support 16 KB page sizes; all native dependencies
+    and APK/AAB packaging require verification.
+  source: https://developer.android.com/guide/practices/page-sizes
+  retrievedAt: '2026-07-31'
+  affects:
+  - ANDROID-NATIVE
+  - ANDROID-DIST
+  recheckTrigger: NDK/AGP/bundletool/native dependency or Play policy change
+- id: ANDROID-BINDER-LIMIT
+  claim: The Binder transaction buffer is finite and shared by in-flight transactions in a process; large payloads must use
+    bounded handles/files or chunking.
+  source: https://developer.android.com/reference/android/os/TransactionTooLargeException
+  retrievedAt: '2026-07-31'
+  affects:
+  - ANDROID-BINDER
+  - CORE-INTERFACE
+  recheckTrigger: Android API behavior or transport design change
+- id: ANDROID-ISOLATED-PROCESS
+  claim: An isolated service runs under a special isolated identity without the app own permissions; this does not remove
+    resource exhaustion or native parser risk.
+  source: https://developer.android.com/guide/topics/manifest/service-element
+  retrievedAt: '2026-07-31'
+  affects:
+  - ARCH-TRUST-TOPOLOGY
+  - SEC-PLACEMENT
+  recheckTrigger: process topology or Android platform change
+rules:
+- recheck before each Play submission and whenever targetSdk, FGS type, NDK/AGP/bundletool or policy changes
+- policy design obligations do not imply that a real AAB or Play Console review has passed
+- unverified policy status fails closed for publication claims

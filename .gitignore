@@ -85,3 +85,12 @@ coverage/
 
 # Node
 node_modules/
+
+# Model weights and JVM crash dumps (never evidence)
+*.gguf
+hs_err_pid*.log
+replay_pid*.log
+
+# Local Gradle homes accidentally dropped next to the repo
+gradle-home*/
+.gradle-home*/

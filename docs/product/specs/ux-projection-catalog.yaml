@@ -1,0 +1,115 @@
+schemaVersion: 2
+states:
+- canonical: QUEUED
+  labelKey: request.queued
+  severity: info
+  actions:
+  - cancel
+- canonical: RESERVED
+  labelKey: request.preparing
+  severity: info
+  actions:
+  - cancel
+- canonical: STREAMING
+  labelKey: request.generating
+  severity: info
+  actions:
+  - cancel
+  - view-details
+- canonical: RECONCILING
+  labelKey: request.reconciling
+  severity: warning
+  actions:
+  - wait
+  - view-details
+- canonical: ABORTED_UNCERTAIN
+  labelKey: request.uncertain
+  severity: error
+  actions:
+  - do-not-reuse-session
+  - export-diagnostics
+- canonical: POISONED
+  labelKey: session.unusable
+  severity: error
+  actions:
+  - start-new-session
+- canonical: TEMPORARILY_UNAVAILABLE
+  labelKey: capability.temporarily-unavailable
+  severity: warning
+  actions:
+  - view-reason
+  - retry-when-safe
+- canonical: UNKNOWN
+  labelKey: capability.unknown
+  severity: warning
+  actions:
+  - run-qualification
+  - choose-safe-option
+- canonical: CONSENTED
+  labelKey: content-report.confirmed
+  severity: info
+  actions:
+  - queue
+  - cancel
+  - review-payload
+- canonical: SUBMITTING
+  labelKey: content-report.submitting
+  severity: info
+  actions:
+  - wait
+- canonical: FAILED_RETRYABLE
+  labelKey: content-report.retryable-failure
+  severity: warning
+  actions:
+  - retry
+  - cancel
+  - review-payload
+- canonical: SUBMITTED
+  labelKey: content-report.submitted
+  severity: info
+  actions:
+  - view-receipt
+errors:
+- code: CONTEXT_LIMIT_EXCEEDED
+  messageKey: error.context-limit
+  actions:
+  - reduce-context
+  - reduce-output
+- code: ADMISSION_REJECTED
+  messageKey: error.resource-admission
+  actions:
+  - reduce-context
+  - close-model
+  - wait
+- code: MODEL_REVOKED
+  messageKey: error.model-revoked
+  actions:
+  - select-another-model
+  - view-source-status
+- code: TRUST_PLACEMENT_REQUIRED
+  messageKey: error.trust-placement
+  actions:
+  - use-safe-mode
+  - review-risk
+- code: STREAM_INTERRUPTED
+  messageKey: error.stream-interrupted
+  actions:
+  - resume-when-supported
+  - start-new-session
+- code: ABORTED_UNCERTAIN
+  messageKey: error.uncertain-outcome
+  actions:
+  - query-status
+  - export-diagnostics
+- code: CONTENT_REPORT_UNAVAILABLE
+  messageKey: error.content-report-unavailable
+  actions:
+  - keep-local-draft
+  - retry
+  - cancel
+copyInvariants:
+- never call dry-load safe
+- never call same-UID process a security sandbox
+- never hide actual revision/engine/backend after fallback
+- never expose internal exception, token, private path or raw prompt
+- never describe a submitted content report as moderated or resolved

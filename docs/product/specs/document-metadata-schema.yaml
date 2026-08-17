@@ -1,0 +1,37 @@
+schemaVersion: 1
+required:
+- id
+- title
+- status
+- stage
+- authority
+- owner
+- lastReviewed
+properties:
+  id:
+    type: string
+    pattern: ^[A-Z0-9][A-Z0-9_-]*$
+  title:
+    type: string
+    minLength: 1
+  status:
+    enum:
+    - DRAFT
+    - REVIEW
+    - BASELINE
+    - VALIDATION_REQUIRED
+    - FUTURE_BASELINE
+    - RETIRED
+  stage:
+    enum:
+    - PRE_BUILD_DESIGN
+  authority:
+    enum:
+    - NORMATIVE
+    - GUIDANCE
+  owner:
+    type: string
+    minLength: 1
+  lastReviewed:
+    type: date
+additionalProperties: false

@@ -1,0 +1,179 @@
+schemaVersion: 2
+streamRule: Before the first stream event use a normal response/onError. After stream commit emit exactly one terminal error
+  event. A transport failure that prevents the request reaching the service is not a semantic error response.
+errors:
+- code: INVALID_REQUEST
+  httpStatus: 400
+  category: semantic
+  retryable: false
+  requiredClientAction: correct-request
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: UNAUTHORIZED
+  httpStatus: 401
+  category: semantic
+  retryable: false
+  requiredClientAction: reauthenticate
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: FORBIDDEN
+  httpStatus: 403
+  category: semantic
+  retryable: false
+  requiredClientAction: request-scope-or-complete-local-approval
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: NOT_FOUND
+  httpStatus: 404
+  category: semantic
+  retryable: false
+  requiredClientAction: refresh-resource
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: IDEMPOTENCY_CONFLICT
+  httpStatus: 409
+  category: semantic
+  retryable: false
+  requiredClientAction: query-existing-or-use-a-new-key
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: STATE_CONFLICT
+  httpStatus: 409
+  category: semantic
+  retryable: false
+  requiredClientAction: refresh-state-and-retry-only-if-safe
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: CONTEXT_LIMIT_EXCEEDED
+  httpStatus: 413
+  category: semantic
+  retryable: false
+  requiredClientAction: reduce-context-or-output
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: TRANSPORT_TOO_LARGE
+  httpStatus: 413
+  category: transport
+  retryable: false
+  requiredClientAction: use-handle-chunk-or-client-preflight
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: RATE_LIMITED
+  httpStatus: 429
+  category: semantic
+  retryable: true
+  requiredClientAction: respect-retry-after
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: CAPABILITY_UNSUPPORTED
+  httpStatus: 422
+  category: semantic
+  retryable: false
+  requiredClientAction: select-a-supported-operation
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: CAPABILITY_UNKNOWN
+  httpStatus: 503
+  category: semantic
+  retryable: true
+  requiredClientAction: qualify-the-cell-or-select-a-known-safe-option
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: ADMISSION_REJECTED
+  httpStatus: 503
+  category: semantic
+  retryable: true
+  requiredClientAction: reduce-resource-requirement-close-resident-work-or-wait
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: MODEL_REVOKED
+  httpStatus: 410
+  category: semantic
+  retryable: false
+  requiredClientAction: select-a-trusted-revision
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: TRUST_PLACEMENT_REQUIRED
+  httpStatus: 412
+  category: semantic
+  retryable: false
+  requiredClientAction: use-the-safe-placement-or-complete-the-explicit-risk-flow
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: PAIRING_REQUIRED
+  httpStatus: 428
+  category: semantic
+  retryable: false
+  requiredClientAction: complete-local-pairing
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: CURSOR_GONE
+  httpStatus: 410
+  category: semantic
+  retryable: false
+  requiredClientAction: load-a-current-snapshot-and-resubscribe
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: ASSET_NOT_READY
+  httpStatus: 409
+  category: semantic
+  retryable: true
+  requiredClientAction: wait-for-ready-or-query-asset
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: ASSET_EXPIRED
+  httpStatus: 410
+  category: semantic
+  retryable: false
+  requiredClientAction: create-a-new-asset
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: DEADLINE_EXCEEDED
+  httpStatus: 504
+  category: semantic
+  retryable: true
+  requiredClientAction: query-status-before-retry
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: CANCELLED
+  httpStatus: 499
+  category: semantic
+  retryable: false
+  requiredClientAction: none
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: WORKER_DIED
+  httpStatus: 503
+  category: semantic
+  retryable: true
+  requiredClientAction: query-and-reconcile
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: ABORTED_UNCERTAIN
+  httpStatus: 500
+  category: semantic
+  retryable: false
+  requiredClientAction: query-diagnostics-and-never-reuse-the-affected-session
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: STREAM_INTERRUPTED
+  httpStatus: 503
+  category: semantic
+  retryable: true
+  requiredClientAction: resume-only-with-an-explicit-protocol-checkpoint-otherwise-start-a-new-session
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: CONTENT_REPORT_UNAVAILABLE
+  httpStatus: 503
+  category: semantic
+  retryable: true
+  requiredClientAction: keep-the-local-encrypted-draft-and-retry-with-user-consent
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle
+- code: INTERNAL
+  httpStatus: 500
+  category: semantic
+  retryable: false
+  requiredClientAction: collect-redacted-diagnostics
+  redaction: no private path, secret/token, raw prompt/output or internal exception unless user explicitly exports a redacted
+    diagnostic bundle

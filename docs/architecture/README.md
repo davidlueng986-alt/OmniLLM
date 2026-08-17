@@ -1,6 +1,6 @@
 # Implementation architecture notes
 
-Product normative architecture lives in the product document package (`docs/20-architecture/`, ADRs, invariants).
+Product normative architecture lives in the packed product package ([`docs/product/docs/20-architecture/`](../product/docs/20-architecture/), ADRs, invariants).
 
 This directory holds **implementation-facing** notes for the Android monorepo (module wiring, process map, build locks) that should not fork product authority.
 

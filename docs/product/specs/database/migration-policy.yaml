@@ -1,0 +1,26 @@
+schemaVersion: 1
+authority: specs/database/omnillm-schema.sql
+rules:
+- PRAGMA foreign_keys=ON is mandatory for every connection and migration test
+- schemaVersion is monotonically increasing; migrations are forward-only unless a tested downgrade path exists
+- each migration declares minimum readable and writable versions
+- identity, trust, request/commit, reservation/allocation, license and content-report data use shadow-copy verification before
+  destructive change
+- the Runtime control plane is the only writer
+- kill-at-every-step must leave either the old valid schema or the new valid schema
+- schema SQL, indexes, triggers and migration fixtures are diffed by repository validation
+- unknown security-critical state or enum values fail closed
+journal:
+  table: schema_migration_attempts
+  requiredFields:
+  - migrationId
+  - fromVersion
+  - toVersion
+  - state
+  - startedAt
+  - updatedAt
+  - errorCode
+  terminalStates:
+  - COMPLETED
+  - ROLLED_BACK
+  - QUARANTINED

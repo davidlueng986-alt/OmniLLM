@@ -6,7 +6,7 @@ Instructions for humans and coding agents working in this repository.
 
 1. User / task instructions in the current session.
 2. Machine-readable `specs/` catalogs (types, errors, states, capabilities, OpenAPI, AIDL, SQL).
-3. Product normative docs (when accessible): invariants, ADRs, ANDROID-BASELINE.
+3. Product normative docs in `docs/product/` (invariants, ADRs, ANDROID-BASELINE).
 4. This file and module `build.gradle.kts` dependency edges.
 5. Implementation notes under `docs/architecture/`.
 
@@ -136,7 +136,7 @@ Gradle modules must encode these edges in `dependencies {}`. CI fails closed via
 
 ## How to add a Feature Pack
 
-1. **Product first:** design under product `docs/70-features/` + update capability maps in `specs/` if new capabilities are required. Do not invent capability IDs in code first.
+1. **Product first:** design under `docs/product/docs/70-features/` + update capability maps in `specs/` if new capabilities are required. Do not invent capability IDs in code first.
 2. **Module:** create `features/<name>/` with `build.gradle.kts` (copy a peer Feature Pack).
 3. **Register:** `include(":features:<name>")` in `settings.gradle.kts`.
 4. **Dependencies:** depend on `:core:*` + needed `:runtime:*` / `:interfaces:admin` APIs only. No direct `:engines:llama-cpp` unless the feature is explicitly engine-qualification UI.
@@ -145,11 +145,11 @@ Gradle modules must encode these edges in `dependencies {}`. CI fails closed via
 7. **Docs:** add a short note under `docs/architecture/` if process topology or new IPC is introduced.
 8. **Tests:** unit tests for pure logic; instrumentation only where Android APIs are required.
 
-Template reference: product `templates/feature-design-template.md`.
+Template reference: `docs/product/templates/feature-design-template.md`.
 
 ## How to add an Engine Pack
 
-1. **Product first:** design under product `docs/80-engines/` + qualification schema (`specs/engine-qualification-*.yaml`).
+1. **Product first:** design under `docs/product/docs/80-engines/` + qualification schema (`specs/engine-qualification-*.yaml`).
 2. **Module:** create `engines/<name>/` implementing `:engines:api` SPI only.
 3. **Register:** `include(":engines:<name>")` in `settings.gradle.kts`.
 4. **Placement:** declare process placement (in-process trusted / worker / isolated / companion). Untrusted accelerated paths **must** use `:android:companion-sandbox` (ADR-007 / INV-009).
@@ -158,11 +158,11 @@ Template reference: product `templates/feature-design-template.md`.
 7. **Resources:** publish ResourceVector envelope and cancellation phases; Plan remains pure.
 8. **Evidence:** qualification status is evidence-driven; dry-load/benchmark does not elevate trust (INV-008).
 
-Template reference: product `templates/engine-design-template.md`.
+Template reference: `docs/product/templates/engine-design-template.md`.
 
 ## Specs and codegen
 
-- Treat `specs/` as read-mostly authority. Prefer re-copy from the product package over hand edits.
+- Treat repo-root `specs/` as read-mostly build authority. The packed product snapshot lives in `docs/product/` (including `docs/product/specs/`). Prefer `python tools/sync_product_specs.py` over hand edits; see `docs/MAINTENANCE.md`.
 - Codegen tools belong in `tools/codegen/` and should emit into `core/` or dedicated `generated/` source sets.
 - OpenAPI: `specs/openapi/omnillm.openapi.yaml` → packaged in `:interfaces:http` (`openapi/omnillm.openapi.yaml`); Ktor stubs in `OmniHttpRoutes`.
 - AIDL catalog: `specs/aidl/omnillm-aidl.yaml` → `tools/codegen/extract_aidl.py` → `:interfaces:aidl` `src/main/aidl/`.
@@ -188,7 +188,7 @@ Play deploy readiness (policy locks, not fake evidence):
 
 ## What agents must not do
 
-- Modify the product document package from this repo tasking.
+- Casually rewrite `docs/product/` from an implementation task. Follow `docs/MAINTENANCE.md`.
 - Expand scope into full feature implementation unless the task asks for it.
 - Add dependency edges that violate INV-001 or single-writer rules “for convenience”.
 - Commit secrets, model weights, or large binaries without explicit policy.

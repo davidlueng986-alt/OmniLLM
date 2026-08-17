@@ -1,0 +1,76 @@
+schemaVersion: 2
+statusValues:
+- UNQUALIFIED
+- STATIC_REVIEWED
+- SPIKE_REQUIRED
+- QUALIFIED_WITH_ENVELOPE
+- SUSPENDED
+requiredSections:
+- upstream
+- license
+- integrationShape
+- formats
+- backends
+- capabilityMapping
+- lifecycle
+- phaseCancellation
+- resourceEnvelope
+- trustPlacement
+- packaging
+- knownLimitations
+- qualification
+requiredIdentity:
+- engineId
+- engineBuildId
+- upstreamCommitOrTag
+- patchSetDigest
+- toolchainDigest
+- artifactDigest
+phaseCapabilityKey:
+- engineBuildId
+- backend
+- phase
+- platform
+- deviceFingerprint
+- driverFingerprint
+- modelEnvelope
+- workloadEnvelope
+requiredPhases:
+- PROBE
+- LOAD
+- CREATE_SESSION
+- PLAN
+- COMMIT
+- START
+- GENERATE
+- CLOSE
+- UNLOAD
+cancellationModes:
+- COOPERATIVE
+- INTERRUPTIBLE
+- WORKER_KILL_ONLY
+- NOT_SUPPORTED
+- UNKNOWN
+qualificationEvidence:
+- build-log
+- artifact-digest
+- license-record
+- 16kb-alignment
+- device-driver-profile
+- phase-cancellation
+- resource-peak
+- fault-injection
+- capability-conformance
+failClosedRules:
+- UNKNOWN cancellation is worker-only
+- UNKNOWN memory envelope cannot enter privileged placement
+- unsupported capability is explicit and never silently ignored
+designStatus: BASELINE
+evidenceStatusValues:
+- NOT_EXECUTED
+- PASS
+- FAIL
+- EXPIRED
+- INVALIDATED
+defaultEvidenceStatus: NOT_EXECUTED
+defaultRuntimeCapability: UNKNOWN

@@ -1,2 +1,8 @@
-﻿# sdk.dir= set by local Android Studio / sdkmanager
-
+## Copy to local.properties (gitignored) and set your SDK path.
+## Windows example (escape backslashes, or use forward slashes):
+##   sdk.dir=C:\\Users\\daive\\AppData\\Local\\Android\\Sdk
+##   sdk.dir=C:/Users/daive/AppData/Local/Android/Sdk
+##
+## Required packages (see docs/setup/prerequisites.md):
+##   platform 36, build-tools 36.0.0, NDK 28.2.13676358, CMake 3.22.1
+sdk.dir=

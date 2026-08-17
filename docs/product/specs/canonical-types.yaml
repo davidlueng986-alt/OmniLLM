@@ -1,0 +1,214 @@
+schemaVersion: 2
+encoding:
+  digest: lower-case hexadecimal without prefix
+  time: RFC3339 UTC for wall time; monotonic nanoseconds plus bootId for deadlines
+  sequenceRange: '[fromInclusive,toExclusive)'
+  canonicalJson: RFC 8785 JSON data model; binary values represented by lower-case hex or base64url without padding as declared
+    by field
+  integer: signed 64-bit unless a narrower range is stated; byte counters are non-negative and use checked arithmetic
+types:
+- id: BlobId
+  kind: string
+  pattern: ^[0-9a-f]{64}$
+  meaning: SHA-256 of exactly one raw byte sequence
+- id: ArtifactPackageId
+  kind: string
+  pattern: ^[0-9a-f]{64}$
+  meaning: Hash of a canonical, totally ordered role/blob multiset plus package schema version
+- id: ModelRevisionId
+  kind: string
+  pattern: ^[0-9a-f]{64}$
+  meaning: 'Hash of executable semantic identity: artifact package, format profile, tokenizer/template identity and model
+    descriptor'
+- id: InstallationId
+  kind: uuid
+  meaning: One installed instance of one ModelRevisionId
+- id: EngineBuildId
+  kind: string
+  meaning: Upstream revision, patches, build options, toolchain and artifact digests
+- id: DeviceExecutionFingerprint
+  kind: string
+  meaning: Platform, OS build, ABI, CPU features and backend-specific driver/runtime fingerprint
+- id: LoadKey
+  kind: object
+  required:
+  - modelRevisionId
+  - engineBuildId
+  - backend
+  - deviceExecutionFingerprint
+  - templateEpoch
+  - tokenizerEpoch
+  - loadConfigurationDigest
+- id: PrincipalId
+  kind: string
+  meaning: Authenticated caller principal; never a caller-supplied package name
+- id: RequestId
+  kind: uuid
+  generatedBy: client
+- id: IdempotencyKey
+  kind: string
+  maxBytes: 128
+  scope:
+  - principalId
+  - operationKind
+- id: PlanId
+  kind: opaque-handle
+  oneShot: true
+  boundTo:
+  - requestId
+  - principalId
+  - loadKey
+  - sourceSessionEpoch
+  - canonicalInputDigest
+  - expiry
+- id: CommitId
+  kind: uuid
+  queryable: true
+  boundTo:
+  - planId
+  - requestId
+  - principalId
+- id: PreparedOperationId
+  kind: opaque-handle
+  queryable: true
+  oneShotStartClaim: true
+- id: SessionHandleId
+  kind: opaque-handle
+  boundTo:
+  - principalId
+  - runtimeEpoch
+  - sessionEpoch
+  - loadKey
+- id: AssetHandleId
+  kind: opaque-handle
+  boundTo:
+  - principalId
+  - purpose
+  - ttl
+  - maxBytes
+  - expectedDigest
+- id: RevisionLeaseId
+  kind: opaque-handle
+  boundTo:
+  - requestId
+  - modelRevisionId
+  - principalId
+  - runtimeEpoch
+- id: ReservationId
+  kind: opaque-handle
+  boundTo:
+  - issuerBootId
+  - runtimeEpoch
+  - principalId
+  - resourceEnvelope
+  - deadline
+- id: AllocationHandleId
+  kind: opaque-handle
+  meaning: Resident resource ownership produced by reservation conversion
+- id: ResourceVector
+  kind: object
+  semantics: All dimensions are additive charges; no peak field is embedded in this type
+  dimensions:
+  - cpuAnonBytes
+  - cpuFileBytes
+  - sharedMemoryChargeBytes
+  - gpuDedicatedBytes
+  - gpuSharedBytes
+  - npuBytes
+  - nativeThreads
+  - fileDescriptors
+  - temporaryDiskBytes
+  - networkBytesInFlight
+- id: ResourceEnvelope
+  kind: object
+  required:
+  - steady
+  - peak
+  fields:
+    steady: ResourceVector resident after operation commit
+    peak: ResourceVector maximum during the bounded operation; each dimension MUST be >= steady
+- id: OperationContext
+  kind: object
+  required:
+  - operationId
+  - principalId
+  - deadline
+  - cancelHandle
+  - runtimeEpoch
+  - revocationEpoch
+- id: FallbackPolicy
+  kind: enum
+  values:
+  - NONE
+  - SAME_REVISION_ONLY
+  - ALLOW_LIST
+- id: CapabilityState
+  kind: enum
+  values:
+  - SUPPORTED
+  - UNSUPPORTED
+  - CONDITIONAL
+  - UNKNOWN
+  - TEMPORARILY_UNAVAILABLE
+- id: EvidenceLabel
+  kind: enum
+  values:
+  - MEASURED
+  - ESTIMATED
+  - REPORTED
+  - LAST_SAMPLED
+  - UNKNOWN
+- id: PrefixDecision
+  kind: enum
+  values:
+  - NONE
+  - EXACT_SAME_SESSION
+  - EXACT_CROSS_SESSION
+  - TRUNCATE
+  - FORK
+- id: StreamBatch
+  kind: object
+  required:
+  - streamEpoch
+  - seqFrom
+  - seqTo
+  - events
+  range: '[seqFrom,seqTo)'
+  invariants:
+  - seqTo >= seqFrom
+  - terminal event position equals current next sequence
+  - application acknowledgement is distinct from transport write completion
+- id: CommandResult
+  kind: object
+  required:
+  - commandId
+  - state
+  - resourceVersion
+  optional:
+  - result
+  - error
+- id: QualificationStatus
+  kind: enum
+  values:
+  - NOT_EXECUTED
+  - PASS
+  - FAIL
+  - EXPIRED
+  - INVALIDATED
+- id: DocumentStatus
+  kind: enum
+  values:
+  - BASELINE
+  - VALIDATION_REQUIRED
+  - FUTURE_BASELINE
+  - RETIRED
+- id: TokenState
+  kind: enum
+  values:
+  - ISSUING
+  - ACTIVE
+  - REVOCATION_REQUESTED
+  - DRAINING
+  - REVOKED
+  - EXPIRED
+  - FAILED

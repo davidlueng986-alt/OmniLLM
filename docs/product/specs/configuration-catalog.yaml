@@ -1,0 +1,153 @@
+schemaVersion: 2
+resolutionModel:
+  hardConstraintOrder:
+  - platform-safety
+  - security-trust
+  - resource-hard-cap
+  - administrator-policy
+  valueSourcePrecedence:
+  - request-explicit
+  - principal-profile
+  - model-recommendation
+  - device-policy
+  - product-default
+  algorithm:
+  - collect candidate values from allowed value sources
+  - choose the highest-precedence candidate
+  - apply every hard constraint from highest to lowest authority
+  - reject when clamping would change a contractually exact request; otherwise clamp only when the setting declares clampAllowed
+  - persist the effective value, each source, each constraint and the reason code
+classes:
+- PUBLIC_STABLE
+- LOCAL_ADMIN
+- ENGINE_INTERNAL
+- EXPERIMENTAL_EVIDENCE_GATED
+settings:
+- key: inference.contextTokens
+  type: integer
+  min: 1
+  class: PUBLIC_STABLE
+  admissionBound: true
+  allowedSources:
+  - request-explicit
+  - principal-profile
+  - model-recommendation
+  - device-policy
+  - product-default
+  clampAllowed: true
+- key: inference.maxOutputTokens
+  type: integer
+  min: 1
+  class: PUBLIC_STABLE
+  admissionBound: true
+  allowedSources:
+  - request-explicit
+  - principal-profile
+  - model-recommendation
+  - device-policy
+  - product-default
+  clampAllowed: true
+- key: inference.temperature
+  type: number
+  min: 0
+  max: 2
+  class: PUBLIC_STABLE
+  allowedSources:
+  - request-explicit
+  - principal-profile
+  - model-recommendation
+  - product-default
+  clampAllowed: false
+- key: inference.topP
+  type: number
+  exclusiveMin: 0
+  max: 1
+  class: PUBLIC_STABLE
+  allowedSources:
+  - request-explicit
+  - principal-profile
+  - model-recommendation
+  - product-default
+  clampAllowed: false
+- key: runtime.cpuThreads
+  type: integer
+  min: 1
+  class: LOCAL_ADMIN
+  evidenceBound: true
+  allowedSources:
+  - principal-profile
+  - model-recommendation
+  - device-policy
+  - product-default
+  clampAllowed: true
+- key: runtime.prefillBatch
+  type: integer
+  min: 1
+  class: LOCAL_ADMIN
+  requiresPlanReservationCommit: true
+  allowedSources:
+  - principal-profile
+  - model-recommendation
+  - device-policy
+  - product-default
+  clampAllowed: true
+- key: runtime.backendPreference
+  type: enum
+  values:
+  - AUTO
+  - CPU
+  - GPU
+  - NPU
+  class: LOCAL_ADMIN
+  allowedSources:
+  - principal-profile
+  - model-recommendation
+  - device-policy
+  - product-default
+  clampAllowed: false
+- key: runtime.fallbackPolicy
+  type: enum
+  values:
+  - NONE
+  - SAME_REVISION_ONLY
+  - ALLOW_LIST
+  class: PUBLIC_STABLE
+  allowedSources:
+  - request-explicit
+  - principal-profile
+  - product-default
+  clampAllowed: false
+- key: server.loopbackEnabled
+  type: boolean
+  default: false
+  class: LOCAL_ADMIN
+  allowedSources:
+  - administrator-policy
+  - product-default
+- key: server.lanEnabled
+  type: boolean
+  default: false
+  class: LOCAL_ADMIN
+  allowedSources:
+  - administrator-policy
+  - product-default
+  requires:
+  - TLS identity
+  - pairing
+  - scoped token
+- key: privacy.telemetryMode
+  type: enum
+  values:
+  - 'OFF'
+  - LOCAL_ONLY
+  - EXPLICIT_EXPORT
+  default: LOCAL_ONLY
+  class: LOCAL_ADMIN
+  allowedSources:
+  - administrator-policy
+  - product-default
+invariants:
+- device-local settings cannot silently alter public wire semantics
+- resource-increasing changes require plan/reservation/commit
+- a lower authority never relaxes a higher hard constraint
+- the resolution result is deterministic and can be reproduced from the recorded inputs

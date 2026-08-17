@@ -1,0 +1,56 @@
+schemaVersion: 2
+policies:
+- dataClass: model-artifacts
+  defaultRetention: until user delete/revocation
+  pins:
+  - active request revision lease
+  - loaded model allocation
+  - session reference
+  deletion: drain then atomic remove
+- dataClass: inference-request-ledger
+  defaultRetention: 30 days
+  minimum: until idempotency and recovery window expires
+  containsPrompt: false
+- dataClass: partial-output
+  defaultRetention: disabled unless explicit recovery policy
+  containsPrompt: true
+  encryption: app-private
+  deleteOn:
+  - user request
+  - policy expiry
+- dataClass: job-events
+  defaultRetention: 30 days after terminal
+  compaction: snapshot + watermark
+- dataClass: request-traces
+  defaultRetention: 7 days
+  redaction: no raw prompt, token or private path
+- dataClass: metrics-rollup
+  defaultRetention: 90 days
+  methodVersionRequired: true
+- dataClass: compatibility-evidence
+  defaultRetention: until profile expiry or engine/device invalidation
+  invalidateOn:
+  - engine build
+  - driver
+  - OS
+  - model profile
+  - method version
+- dataClass: license-events
+  defaultRetention: append-only while installation or legal record required
+  contentAddressedText: true
+- dataClass: security-audit-events
+  defaultRetention: 90 days local or explicit export
+  redaction: principal pseudonymization
+- dataClass: diagnostic-export
+  defaultRetention: user-controlled temporary file
+  expires: 24h default
+  requiresExplicitAction: true
+records:
+- dataClass: ai-content-report-drafts
+  defaultRetention: 24 hours unless user submits or cancels earlier
+  encryptedAtRest: true
+  deleteOn:
+  - submitted
+  - cancelled
+  - expired
+  requiresExplicitAction: true

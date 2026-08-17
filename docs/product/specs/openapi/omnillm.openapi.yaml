@@ -1,0 +1,2759 @@
+openapi: 3.1.0
+info:
+  title: OmniLLM Local Edge API
+  version: 1.1.0-design
+  description: Pre-build canonical HTTP contract. OpenAI-style synchronous compatibility and native durable asynchronous requests
+    are distinct profiles. Runtime support remains evidence-gated.
+servers:
+- url: http://127.0.0.1:{port}
+  description: Loopback listener
+  variables:
+    port:
+      default: '11434'
+- url: https://{host}:{port}
+  description: Optional TLS 1.3 LAN listener; operation transport allowlists still apply
+  variables:
+    host:
+      default: omnillm.local
+    port:
+      default: '11435'
+security:
+- BearerToken: []
+tags:
+- name: Health
+- name: Models
+- name: Inference
+- name: Requests
+- name: Assets
+- name: Jobs
+- name: Metrics
+- name: Settings
+- name: Clients
+- name: LAN
+- name: Diagnostics
+- name: ContentReports
+- name: Tokens
+- name: Pairing
+paths:
+  /health:
+    get:
+      tags:
+      - Health
+      operationId: getHealth
+      summary: getHealth
+      x-omnillm-required-scope: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '400': &id001
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security: []
+  /v1/models:
+    get:
+      tags:
+      - Models
+      operationId: listModels
+      summary: listModels
+      x-omnillm-required-scope: models.read
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelPage'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/PageToken'
+  /v1/chat/completions:
+    post:
+      tags:
+      - Inference
+      operationId: createChatCompletion
+      summary: OpenAI-style synchronous chat completion
+      description: Returns HTTP 200 JSON when stream=false and HTTP 200 SSE when stream=true. This compatibility profile does
+        not require client-generated IDs; use /omni/v1/requests for durable asynchronous acceptance and reply-loss reconciliation.
+      x-omnillm-required-scope: inference.create
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalRequestIdHeader'
+      - $ref: '#/components/parameters/OptionalIdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenAIChatRequest'
+      responses:
+        '200':
+          description: Completion JSON or SSE stream selected by request.stream.
+          headers:
+            X-OmniLLM-Request-Id:
+              required: true
+              schema:
+                type: string
+                format: uuid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionResponse'
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                terminal:
+                  value: 'data: {"id":"...","object":"chat.completion.chunk"}\n\ndata: [DONE]\n\n'
+        '400':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '401':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '403':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '409':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '413':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '429':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '503':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '500':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+  /v1/embeddings:
+    post:
+      tags:
+      - Inference
+      operationId: createEmbedding
+      summary: OpenAI-style synchronous embeddings
+      description: Returns a completed embedding response with HTTP 200. Use /omni/v1/requests for durable asynchronous acceptance.
+      x-omnillm-required-scope: inference.create
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalRequestIdHeader'
+      - $ref: '#/components/parameters/OptionalIdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenAIEmbeddingRequest'
+      responses:
+        '200':
+          description: Completed embedding response
+          headers:
+            X-OmniLLM-Request-Id:
+              required: true
+              schema:
+                type: string
+                format: uuid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingResponse'
+        '400':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '401':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '403':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '409':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '413':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '429':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '503':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '500':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+  /omni/v1/requests/{requestId}:
+    get:
+      tags:
+      - Requests
+      operationId: getRequest
+      summary: getRequest
+      x-omnillm-required-scope: inference.read-own
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestState'
+        '404': *id001
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/RequestIdPath'
+  /omni/v1/requests/{requestId}/cancel:
+    post:
+      tags:
+      - Requests
+      operationId: cancelRequest
+      summary: cancelRequest
+      x-omnillm-required-scope: inference.cancel
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResult'
+        '404': *id001
+        '409': *id001
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/RequestIdPath'
+  /omni/v1/requests/{requestId}/events:
+    get:
+      tags:
+      - Requests
+      operationId: streamRequestEvents
+      summary: streamRequestEvents
+      x-omnillm-required-scope: inference.read-own
+      responses:
+        '200':
+          description: SSE stream; terminal event required after stream commit
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '404': *id001
+        '410': *id001
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/RequestIdPath'
+      - name: after_seq
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+  /omni/v1/assets:
+    post:
+      tags:
+      - Assets
+      operationId: createAsset
+      summary: createAsset
+      x-omnillm-required-scope: assets.create
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetInfo'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetCreateRequest'
+  /omni/v1/assets/{assetId}/content:
+    put:
+      tags:
+      - Assets
+      operationId: uploadAsset
+      summary: uploadAsset
+      x-omnillm-required-scope: assets.create
+      responses:
+        '204':
+          description: Uploaded
+        '409': *id001
+        '410': *id001
+        '413': *id001
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              contentEncoding: binary
+      parameters:
+      - $ref: '#/components/parameters/AssetIdPath'
+  /omni/v1/assets/{assetId}/commit:
+    post:
+      tags:
+      - Assets
+      operationId: commitAsset
+      summary: commitAsset
+      x-omnillm-required-scope: assets.create
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetInfo'
+        '409': *id001
+        '410': *id001
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/AssetIdPath'
+  /omni/v1/assets/{assetId}:
+    get:
+      tags:
+      - Assets
+      operationId: getAsset
+      summary: getAsset
+      x-omnillm-required-scope: assets.read-own
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetInfo'
+        '404': *id001
+        '410': *id001
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/AssetIdPath'
+    delete:
+      tags:
+      - Assets
+      operationId: deleteAsset
+      summary: deleteAsset
+      x-omnillm-required-scope: assets.delete-own
+      responses:
+        '204':
+          description: Deleted
+        '409': *id001
+        '404': *id001
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/AssetIdPath'
+  /omni/v1/jobs:
+    post:
+      tags:
+      - Jobs
+      operationId: createJob
+      summary: createJob
+      x-omnillm-required-scope: jobs.manage
+      responses:
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobInfo'
+        '409': *id001
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobSpec'
+    get:
+      tags:
+      - Jobs
+      operationId: listOwnJobs
+      summary: listOwnJobs
+      x-omnillm-required-scope: jobs.read-own
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobPage'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/PageToken'
+  /omni/v1/jobs/{jobId}:
+    get:
+      tags:
+      - Jobs
+      operationId: getJob
+      summary: getJob
+      x-omnillm-required-scope: jobs.read-own
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobInfo'
+        '404': *id001
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/JobIdPath'
+  /omni/v1/jobs/{jobId}/cancel:
+    post:
+      tags:
+      - Jobs
+      operationId: cancelJob
+      summary: cancelJob
+      x-omnillm-required-scope: jobs.manage
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResult'
+        '404': *id001
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/JobIdPath'
+  /omni/v1/metrics/summary:
+    get:
+      tags:
+      - Metrics
+      operationId: getMetricSummary
+      summary: getMetricSummary
+      x-omnillm-required-scope: metrics.read-summary
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricSnapshot'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+  /omni/v1/metrics/detail:
+    get:
+      tags:
+      - Metrics
+      operationId: getMetricDetail
+      summary: getMetricDetail
+      x-omnillm-required-scope: metrics.read-detail
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricSnapshot'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      x-omnillm-allowed-transports:
+      - LOOPBACK
+  /omni/v1/settings:
+    get:
+      tags:
+      - Settings
+      operationId: getSettings
+      summary: getSettings
+      x-omnillm-required-scope: settings.read
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsSnapshot'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      x-omnillm-allowed-transports:
+      - LOOPBACK
+    patch:
+      tags:
+      - Settings
+      operationId: patchSettings
+      summary: patchSettings
+      x-omnillm-required-scope: settings.write
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResult'
+        '409': *id001
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsPatch'
+      x-omnillm-allowed-transports:
+      - LOOPBACK
+  /omni/v1/clients:
+    get:
+      tags:
+      - Clients
+      operationId: listClients
+      summary: listClients
+      x-omnillm-required-scope: clients.read
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientPage'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/PageToken'
+      x-omnillm-allowed-transports:
+      - LOOPBACK
+  /omni/v1/clients/{clientId}/revoke:
+    post:
+      tags:
+      - Clients
+      operationId: revokeClient
+      summary: revokeClient
+      x-omnillm-required-scope: clients.manage
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResult'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      parameters:
+      - name: clientId
+        in: path
+        required: true
+        schema:
+          type: string
+      x-omnillm-allowed-transports:
+      - LOOPBACK
+  /omni/v1/lan/enable:
+    post:
+      tags:
+      - LAN
+      operationId: enableLan
+      summary: enableLan
+      x-omnillm-required-scope: lan.manage
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResult'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      x-omnillm-allowed-transports:
+      - LOOPBACK
+  /omni/v1/lan/disable:
+    post:
+      tags:
+      - LAN
+      operationId: disableLan
+      summary: disableLan
+      x-omnillm-required-scope: lan.manage
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResult'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      x-omnillm-allowed-transports:
+      - LOOPBACK
+  /omni/v1/diagnostics/exports:
+    post:
+      tags:
+      - Diagnostics
+      operationId: createDiagnosticExport
+      summary: createDiagnosticExport
+      x-omnillm-required-scope: diagnostics.export
+      responses:
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobInfo'
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                include_detail:
+                  type: boolean
+      x-omnillm-allowed-transports:
+      - LOOPBACK
+  /omni/v1/content-reports:
+    post:
+      tags:
+      - ContentReports
+      operationId: createContentReport
+      summary: createContentReport
+      x-omnillm-required-scope: content-reports.create
+      responses:
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentReportInfo'
+        '409': *id001
+        '503': *id001
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContentReportRequest'
+  /omni/v1/content-reports/{reportId}:
+    get:
+      tags:
+      - ContentReports
+      operationId: getContentReport
+      summary: getContentReport
+      x-omnillm-required-scope: content-reports.read-own
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentReportInfo'
+        '404': *id001
+        '400': *id001
+        '401': *id001
+        '403': *id001
+        '500': *id001
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/ReportIdPath'
+  /omni/v1/requests:
+    post:
+      tags:
+      - Requests
+      operationId: createAsyncInferenceRequest
+      summary: Create durable asynchronous inference request
+      description: Native OmniLLM profile. The caller supplies request_id and idempotency_key before the transaction, enabling
+        query/reconciliation after reply loss.
+      x-omnillm-required-scope: inference.create
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AsyncInferenceRequest'
+      responses:
+        '202':
+          description: Durably accepted or existing identical claim returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedRequest'
+        '400':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '401':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '403':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '409':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '413':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '429':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '503':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '500':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+  /omni/v1/tokens:
+    post:
+      tags:
+      - Tokens
+      operationId: issueLoopbackAdminToken
+      summary: Issue a loopback-only scoped token
+      x-omnillm-required-scope: tokens.manage
+      x-omnillm-allowed-transports:
+      - LOOPBACK
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenIssueRequest'
+      responses:
+        '201':
+          description: Token plaintext is returned only in the bounded issuance receipt window.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenIssueResult'
+        '400':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '401':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '403':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '409':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '500':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+    get:
+      tags:
+      - Tokens
+      operationId: listTokens
+      summary: List token metadata
+      x-omnillm-required-scope: tokens.manage
+      x-omnillm-allowed-transports:
+      - LOOPBACK
+      security:
+      - BearerToken: []
+      parameters:
+      - $ref: '#/components/parameters/PageToken'
+      responses:
+        '200':
+          description: Token metadata; plaintext never appears.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPage'
+        '400':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '401':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '403':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '500':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+  /omni/v1/tokens/{tokenId}/revoke:
+    post:
+      tags:
+      - Tokens
+      operationId: revokeToken
+      summary: Revoke a token and fence its active state
+      x-omnillm-required-scope: tokens.manage
+      x-omnillm-allowed-transports:
+      - LOOPBACK
+      security:
+      - BearerToken: []
+      parameters:
+      - name: tokenId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Revocation command result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResult'
+        '400':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '401':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '403':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '404':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '409':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '500':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+  /omni/v1/lan/pairing-challenges:
+    post:
+      tags:
+      - LAN
+      - Pairing
+      operationId: createLanPairingChallenge
+      summary: Create a locally approved LAN pairing challenge
+      x-omnillm-required-scope: lan.manage
+      x-omnillm-allowed-transports:
+      - LOOPBACK
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LanPairingChallengeCreateRequest'
+      responses:
+        '201':
+          description: Sensitive one-time challenge material for local display/QR only.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LanPairingChallengeSecret'
+        '400':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '401':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '403':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '409':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '500':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+  /omni/pairing/v1/exchanges:
+    post:
+      tags:
+      - Pairing
+      operationId: completeLanPairing
+      summary: Complete the channel-bound LAN pairing exchange
+      x-omnillm-required-scope: null
+      x-omnillm-allowed-transports:
+      - LAN_TLS13
+      security: []
+      description: Available only over the TLS 1.3 LAN listener. exchange_id makes the proof submission idempotent. An identical
+        replay during the short encrypted receipt window returns the same token; changed payload, expiry, attempt exhaustion,
+        SPKI/epoch mismatch or replay after receipt expiry fails closed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LanPairingExchangeRequest'
+      responses:
+        '201':
+          description: Scoped LAN token issued once, with a bounded encrypted reply-loss receipt window.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LanPairingExchangeResult'
+        '400':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '409':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '410':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '429':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+        '500':
+          description: Canonical error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OmniError'
+components:
+  securitySchemes:
+    BearerToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-256-bit
+  parameters:
+    RequestIdPath:
+      name: requestId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AssetIdPath:
+      name: assetId
+      in: path
+      required: true
+      schema:
+        type: string
+    JobIdPath:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ReportIdPath:
+      name: reportId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PageToken:
+      name: page_token
+      in: query
+      required: false
+      schema:
+        type: string
+        maxLength: 4096
+    OptionalRequestIdHeader:
+      name: X-OmniLLM-Request-Id
+      in: header
+      required: false
+      description: Optional client-generated UUID. When omitted, the server generates one; reply-loss recovery cannot rely
+        on an ID the client never received.
+      schema:
+        type: string
+        format: uuid
+    OptionalIdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Optional compatibility-profile idempotency key. Native asynchronous requests require this value in the
+        body.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  schemas:
+    OmniError:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - message
+      - retryable
+      properties:
+        code:
+          type: string
+          enum:
+          - INVALID_REQUEST
+          - UNAUTHORIZED
+          - FORBIDDEN
+          - NOT_FOUND
+          - IDEMPOTENCY_CONFLICT
+          - STATE_CONFLICT
+          - CONTEXT_LIMIT_EXCEEDED
+          - TRANSPORT_TOO_LARGE
+          - RATE_LIMITED
+          - CAPABILITY_UNSUPPORTED
+          - CAPABILITY_UNKNOWN
+          - ADMISSION_REJECTED
+          - MODEL_REVOKED
+          - TRUST_PLACEMENT_REQUIRED
+          - PAIRING_REQUIRED
+          - CURSOR_GONE
+          - ASSET_NOT_READY
+          - ASSET_EXPIRED
+          - DEADLINE_EXCEEDED
+          - CANCELLED
+          - WORKER_DIED
+          - ABORTED_UNCERTAIN
+          - STREAM_INTERRUPTED
+          - CONTENT_REPORT_UNAVAILABLE
+          - INTERNAL
+        message:
+          type: string
+          maxLength: 2048
+        retryable:
+          type: boolean
+        details:
+          type: object
+          additionalProperties: true
+    ChatMessage:
+      type: object
+      additionalProperties: false
+      required:
+      - role
+      - content
+      properties:
+        role:
+          type: string
+          enum:
+          - system
+          - user
+          - assistant
+          - tool
+        content:
+          type: string
+          maxLength: 1048576
+        asset_ids:
+          type: array
+          maxItems: 32
+          items:
+            type: string
+    Fallback:
+      type: object
+      additionalProperties: false
+      required:
+      - policy
+      properties:
+        policy:
+          type: string
+          enum:
+          - NONE
+          - SAME_REVISION_ONLY
+          - ALLOW_LIST
+        allowed_revision_ids:
+          type: array
+          maxItems: 32
+          items:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+    AcceptedRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - request_id
+      - state
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        state:
+          type: string
+        query_url:
+          type: string
+        events_url:
+          type: string
+    RequestState:
+      type: object
+      additionalProperties: false
+      required:
+      - request_id
+      - state
+      - resource_version
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+          - RECEIVED
+          - CLAIMED
+          - PLANNING
+          - QUEUED
+          - RESERVED
+          - COMMITTING
+          - PREPARED
+          - STARTING
+          - STREAMING
+          - TERMINATING
+          - RECONCILING
+          - COMPLETED
+          - FAILED
+          - CANCELLED
+          - ABORTED_UNCERTAIN
+        resource_version:
+          type: integer
+          minimum: 0
+        actual_model_revision_id:
+          type: string
+        engine_build_id:
+          type: string
+        backend:
+          type: string
+        terminal_error:
+          $ref: '#/components/schemas/OmniError'
+    ModelInfo:
+      type: object
+      additionalProperties: false
+      required:
+      - model_revision_id
+      - display_name
+      - capabilities
+      properties:
+        model_revision_id:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        display_name:
+          type: string
+        installation_state:
+          type: string
+          enum:
+          - DISCOVERED
+          - ACQUIRING
+          - QUARANTINED
+          - VERIFYING
+          - COMPATIBILITY_CHECK
+          - READY
+          - DRAINING
+          - REVOKED
+          - CORRUPT
+          - REJECTED
+          - DELETING
+          - DELETED
+        capabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/CapabilityEntry'
+    AssetCreateRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - purpose
+      - max_bytes
+      - ttl_seconds
+      properties:
+        purpose:
+          type: string
+          enum:
+          - MODEL_IMPORT
+          - IMAGE_INPUT
+          - AUDIO_INPUT
+          - DIAGNOSTIC_ATTACHMENT
+          - OTHER_BOUNDED
+        max_bytes:
+          type: integer
+          minimum: 1
+          maximum: 1099511627776
+        content_type_hint:
+          type: string
+          maxLength: 255
+        expected_sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 604800
+    AssetInfo:
+      type: object
+      additionalProperties: false
+      required:
+      - asset_id
+      - state
+      - expires_at
+      properties:
+        asset_id:
+          type: string
+        state:
+          type: string
+          enum:
+          - CREATED
+          - UPLOADING
+          - VERIFYING
+          - READY
+          - PINNED
+          - CONSUMED
+          - EXPIRED
+          - REJECTED
+          - DELETED
+        bytes:
+          type: integer
+          minimum: 0
+        sha256:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        upload_url:
+          type: string
+        error:
+          $ref: '#/components/schemas/OmniError'
+    JobSpec:
+      type: object
+      additionalProperties: false
+      required:
+      - job_id
+      - idempotency_key
+      - kind
+      - parameters
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+        kind:
+          type: string
+          enum:
+          - DOWNLOAD
+          - IMPORT
+          - BENCHMARK
+          - DELETE
+          - DIAGNOSTIC_EXPORT
+          - CONTENT_REPORT
+        parameters:
+          oneOf:
+          - $ref: '#/components/schemas/DownloadJobParameters'
+          - $ref: '#/components/schemas/ImportJobParameters'
+          - $ref: '#/components/schemas/BenchmarkJobParameters'
+          - $ref: '#/components/schemas/DeleteJobParameters'
+          - $ref: '#/components/schemas/DiagnosticExportJobParameters'
+          - $ref: '#/components/schemas/ContentReportJobParameters'
+      oneOf:
+      - properties:
+          kind:
+            const: DOWNLOAD
+          parameters:
+            $ref: '#/components/schemas/DownloadJobParameters'
+      - properties:
+          kind:
+            const: IMPORT
+          parameters:
+            $ref: '#/components/schemas/ImportJobParameters'
+      - properties:
+          kind:
+            const: BENCHMARK
+          parameters:
+            $ref: '#/components/schemas/BenchmarkJobParameters'
+      - properties:
+          kind:
+            const: DELETE
+          parameters:
+            $ref: '#/components/schemas/DeleteJobParameters'
+      - properties:
+          kind:
+            const: DIAGNOSTIC_EXPORT
+          parameters:
+            $ref: '#/components/schemas/DiagnosticExportJobParameters'
+      - properties:
+          kind:
+            const: CONTENT_REPORT
+          parameters:
+            $ref: '#/components/schemas/ContentReportJobParameters'
+    JobInfo:
+      type: object
+      additionalProperties: false
+      required:
+      - job_id
+      - state
+      - resource_version
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+          - QUEUED
+          - RUNNING
+          - PAUSED_WAITING_INPUT
+          - PAUSED_WAITING_NETWORK
+          - PAUSED_WAITING_FOREGROUND
+          - RECOVERING
+          - SUCCEEDED
+          - FAILED
+          - CANCELLED
+        resource_version:
+          type: integer
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+        error:
+          $ref: '#/components/schemas/OmniError'
+    SettingsPatch:
+      type: object
+      additionalProperties: false
+      required:
+      - command_id
+      - idempotency_key
+      - base_resource_version
+      - changes
+      properties:
+        command_id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+          maxLength: 128
+        base_resource_version:
+          type: integer
+          minimum: 0
+        changes:
+          type: object
+          minProperties: 1
+          additionalProperties:
+            $ref: '#/components/schemas/SettingValue'
+    CommandResult:
+      type: object
+      additionalProperties: false
+      required:
+      - command_id
+      - state
+      - resource_version
+      properties:
+        command_id:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+          - RECEIVED
+          - CLAIMED
+          - RUNNING
+          - RECONCILING
+          - SUCCEEDED
+          - FAILED
+          - CANCELLED
+          - UNCERTAIN
+        resource_version:
+          type: integer
+        result: {}
+        error:
+          $ref: '#/components/schemas/OmniError'
+    ContentReportRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - report_id
+      - idempotency_key
+      - category
+      - payload_preview_digest
+      - user_confirmed
+      properties:
+        report_id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+          maxLength: 128
+        category:
+          type: string
+          enum:
+          - OFFENSIVE
+          - DANGEROUS
+          - DECEPTIVE
+          - PRIVACY
+          - COPYRIGHT
+          - OTHER
+        description:
+          type: string
+          maxLength: 4096
+        include_prompt_excerpt:
+          type: boolean
+          default: false
+        prompt_excerpt:
+          type: string
+          maxLength: 4096
+        include_output_excerpt:
+          type: boolean
+          default: false
+        output_excerpt:
+          type: string
+          maxLength: 4096
+        payload_preview_digest:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        user_confirmed:
+          const: true
+    ContentReportInfo:
+      type: object
+      additionalProperties: false
+      required:
+      - report_id
+      - state
+      - expires_at
+      properties:
+        report_id:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+          - DRAFT
+          - CONSENTED
+          - QUEUED
+          - SUBMITTING
+          - FAILED_RETRYABLE
+          - SUBMITTED
+          - CANCELLED
+          - EXPIRED
+        expires_at:
+          type: string
+          format: date-time
+        receipt_id:
+          type: string
+        error:
+          $ref: '#/components/schemas/OmniError'
+    Health:
+      type: object
+      additionalProperties: false
+      required:
+      - runtime_state
+      - resource_version
+      properties:
+        runtime_state:
+          type: string
+        resource_version:
+          type: integer
+        degraded_reasons:
+          type: array
+          items:
+            type: string
+    OpenAIChatRequest:
+      type: object
+      additionalProperties: false
+      required: &id002
+      - model
+      - messages
+      properties:
+        model: &id003
+          type: string
+          minLength: 1
+        messages: &id004
+          type: array
+          minItems: 1
+          maxItems: 1024
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        stream:
+          type: boolean
+          default: false
+        max_tokens: &id005
+          type: integer
+          minimum: 1
+        temperature: &id006
+          type: number
+          minimum: 0
+          maximum: 2
+        top_p: &id007
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1
+        stop: &id008
+          oneOf:
+          - type: string
+            maxLength: 1024
+          - type: array
+            maxItems: 16
+            items:
+              type: string
+              maxLength: 1024
+        response_format: &id009
+          $ref: '#/components/schemas/ResponseFormat'
+        tools: &id010
+          type: array
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/ToolDefinition'
+        tool_choice: &id011
+          oneOf:
+          - type: string
+            enum:
+            - none
+            - auto
+            - required
+          - $ref: '#/components/schemas/NamedToolChoice'
+        user: &id012
+          type: string
+          maxLength: 256
+        omnillm_fallback: &id013
+          $ref: '#/components/schemas/Fallback'
+        omnillm_deadline_ms: &id014
+          type: integer
+          minimum: 1
+          maximum: 86400000
+    OpenAIEmbeddingRequest:
+      type: object
+      additionalProperties: false
+      required: &id015
+      - model
+      - input
+      properties:
+        model: &id016
+          type: string
+          minLength: 1
+        input: &id017
+          oneOf:
+          - type: string
+            maxLength: 1048576
+          - type: array
+            minItems: 1
+            maxItems: 2048
+            items:
+              type: string
+              maxLength: 1048576
+        encoding_format: &id018
+          type: string
+          enum:
+          - float
+          - base64
+          default: float
+        dimensions: &id019
+          type: integer
+          minimum: 1
+        user: &id020
+          type: string
+          maxLength: 256
+        omnillm_deadline_ms: &id021
+          type: integer
+          minimum: 1
+          maximum: 86400000
+    ResponseFormat:
+      type: object
+      additionalProperties: false
+      required:
+      - type
+      properties:
+        type:
+          type: string
+          enum:
+          - text
+          - json_object
+          - json_schema
+        json_schema:
+          $ref: '#/components/schemas/JsonSchemaResponseFormat'
+    JsonSchemaResponseFormat:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - schema
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        description:
+          type: string
+          maxLength: 2048
+        strict:
+          type: boolean
+          default: true
+        schema:
+          type: object
+          maxProperties: 4096
+          additionalProperties: true
+    ToolFunctionDefinition:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - parameters
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        description:
+          type: string
+          maxLength: 2048
+        parameters:
+          type: object
+          maxProperties: 4096
+          additionalProperties: true
+    ToolDefinition:
+      type: object
+      additionalProperties: false
+      required:
+      - type
+      - function
+      properties:
+        type:
+          const: function
+        function:
+          $ref: '#/components/schemas/ToolFunctionDefinition'
+    NamedToolChoice:
+      type: object
+      additionalProperties: false
+      required:
+      - type
+      - function
+      properties:
+        type:
+          const: function
+        function:
+          type: object
+          additionalProperties: false
+          required:
+          - name
+          properties:
+            name:
+              type: string
+              minLength: 1
+              maxLength: 128
+    ToolCall:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - type
+      - function
+      properties:
+        id:
+          type: string
+        type:
+          const: function
+        function:
+          type: object
+          additionalProperties: false
+          required:
+          - name
+          - arguments
+          properties:
+            name:
+              type: string
+            arguments:
+              type: string
+    AssistantMessage:
+      type: object
+      additionalProperties: false
+      required:
+      - role
+      properties:
+        role:
+          const: assistant
+        content:
+          type:
+          - string
+          - 'null'
+        tool_calls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolCall'
+    Usage:
+      type: object
+      additionalProperties: false
+      required:
+      - prompt_tokens
+      - completion_tokens
+      - total_tokens
+      properties:
+        prompt_tokens:
+          type: integer
+          minimum: 0
+        completion_tokens:
+          type: integer
+          minimum: 0
+        total_tokens:
+          type: integer
+          minimum: 0
+    OmniExecutionInfo:
+      type: object
+      additionalProperties: false
+      required:
+      - request_id
+      - actual_model_revision_id
+      - engine_build_id
+      - backend
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        actual_model_revision_id:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        engine_build_id:
+          type: string
+        backend:
+          type: string
+        degradations:
+          type: array
+          items:
+            type: string
+        evidence_label:
+          type: string
+          enum:
+          - MEASURED
+          - ESTIMATED
+          - REPORTED
+          - LAST_SAMPLED
+          - UNKNOWN
+    ChatCompletionResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - object
+      - created
+      - model
+      - choices
+      - usage
+      - omnillm
+      properties:
+        id:
+          type: string
+        object:
+          const: chat.completion
+        created:
+          type: integer
+          minimum: 0
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - index
+            - message
+            - finish_reason
+            properties:
+              index:
+                type: integer
+                minimum: 0
+              message:
+                $ref: '#/components/schemas/AssistantMessage'
+              finish_reason:
+                type:
+                - string
+                - 'null'
+                enum:
+                - stop
+                - length
+                - tool_calls
+                - content_filter
+                - cancelled
+                - error
+                - null
+        usage:
+          $ref: '#/components/schemas/Usage'
+        omnillm:
+          $ref: '#/components/schemas/OmniExecutionInfo'
+    EmbeddingResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - object
+      - data
+      - model
+      - usage
+      - omnillm
+      properties:
+        object:
+          const: list
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - object
+            - embedding
+            - index
+            properties:
+              object:
+                const: embedding
+              embedding:
+                oneOf:
+                - type: array
+                  items:
+                    type: number
+                - type: string
+              index:
+                type: integer
+                minimum: 0
+        model:
+          type: string
+        usage:
+          type: object
+          additionalProperties: false
+          required:
+          - prompt_tokens
+          - total_tokens
+          properties:
+            prompt_tokens:
+              type: integer
+              minimum: 0
+            total_tokens:
+              type: integer
+              minimum: 0
+        omnillm:
+          $ref: '#/components/schemas/OmniExecutionInfo'
+    AsyncInferenceRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - request_id
+      - idempotency_key
+      - operation
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+        operation:
+          type: string
+          enum:
+          - CHAT
+          - EMBEDDING
+        chat:
+          $ref: '#/components/schemas/NativeChatPayload'
+        embedding:
+          $ref: '#/components/schemas/NativeEmbeddingPayload'
+      oneOf:
+      - required:
+        - chat
+        properties:
+          operation:
+            const: CHAT
+        not:
+          required:
+          - embedding
+      - required:
+        - embedding
+        properties:
+          operation:
+            const: EMBEDDING
+        not:
+          required:
+          - chat
+    ModelPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - snapshot_version
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelInfo'
+        next_page_token:
+          type: string
+        snapshot_version:
+          type: integer
+          minimum: 0
+    JobPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - snapshot_version
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobInfo'
+        next_page_token:
+          type: string
+        snapshot_version:
+          type: integer
+          minimum: 0
+    ClientInfo:
+      type: object
+      additionalProperties: false
+      required:
+      - client_id
+      - display_name
+      - state
+      - scopes
+      - revocation_epoch
+      properties:
+        client_id:
+          type: string
+        display_name:
+          type: string
+        state:
+          type: string
+          enum:
+          - PENDING
+          - ACTIVE
+          - SUSPENDED
+          - REVOCATION_REQUESTED
+          - DRAINING
+          - REVOKED
+          - EXPIRED
+        scopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccessScope'
+        last_seen_at:
+          type: string
+          format: date-time
+        revocation_epoch:
+          type: integer
+          minimum: 0
+    ClientPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - snapshot_version
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClientInfo'
+        next_page_token:
+          type: string
+        snapshot_version:
+          type: integer
+          minimum: 0
+    MetricSample:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - value
+      - unit
+      - evidence_label
+      - sampled_at
+      properties:
+        name:
+          type: string
+        value:
+          type: number
+        unit:
+          type: string
+        evidence_label:
+          type: string
+          enum:
+          - MEASURED
+          - ESTIMATED
+          - REPORTED
+          - LAST_SAMPLED
+          - UNKNOWN
+        sampled_at:
+          type: string
+          format: date-time
+        dimensions:
+          type: object
+          additionalProperties:
+            type: string
+    MetricSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+      - snapshot_version
+      - samples
+      properties:
+        snapshot_version:
+          type: integer
+          minimum: 0
+        samples:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricSample'
+        next_page_token:
+          type: string
+    SettingValue:
+      oneOf:
+      - type: boolean
+      - type: integer
+      - type: number
+      - type: string
+        maxLength: 4096
+      - type: array
+        maxItems: 256
+        items:
+          type: string
+          maxLength: 1024
+    SettingsSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+      - resource_version
+      - values
+      properties:
+        resource_version:
+          type: integer
+          minimum: 0
+        values:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/SettingValue'
+    DownloadJobParameters:
+      type: object
+      additionalProperties: false
+      required:
+      - source_url
+      properties:
+        source_url:
+          type: string
+          format: uri
+        expected_sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        expected_bytes:
+          type: integer
+          minimum: 0
+        target_name:
+          type: string
+          maxLength: 255
+    ImportJobParameters:
+      type: object
+      additionalProperties: false
+      required:
+      - asset_id
+      properties:
+        asset_id:
+          type: string
+        expected_format:
+          type: string
+        expected_sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    BenchmarkJobParameters:
+      type: object
+      additionalProperties: false
+      required:
+      - model_revision_id
+      - engine_build_id
+      - backend
+      - measurement_profile_id
+      properties:
+        model_revision_id:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        engine_build_id:
+          type: string
+        backend:
+          type: string
+        measurement_profile_id:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        iterations:
+          type: integer
+          minimum: 1
+          maximum: 10000
+    DeleteJobParameters:
+      type: object
+      additionalProperties: false
+      required:
+      - resource_kind
+      - resource_id
+      - expected_resource_version
+      properties:
+        resource_kind:
+          type: string
+          enum:
+          - INSTALLATION
+          - MODEL_REVISION
+          - ASSET
+          - DIAGNOSTIC_EXPORT
+        resource_id:
+          type: string
+        expected_resource_version:
+          type: integer
+          minimum: 0
+        force_after_drain:
+          type: boolean
+          default: false
+    DiagnosticExportJobParameters:
+      type: object
+      additionalProperties: false
+      properties:
+        include_detail:
+          type: boolean
+          default: false
+        categories:
+          type: array
+          items:
+            type: string
+        ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 604800
+    ContentReportJobParameters:
+      type: object
+      additionalProperties: false
+      required:
+      - report_id
+      properties:
+        report_id:
+          type: string
+          format: uuid
+    NativeChatPayload:
+      type: object
+      additionalProperties: false
+      required: *id002
+      properties:
+        model: *id003
+        messages: *id004
+        max_tokens: *id005
+        temperature: *id006
+        top_p: *id007
+        stop: *id008
+        response_format: *id009
+        tools: *id010
+        tool_choice: *id011
+        user: *id012
+        omnillm_fallback: *id013
+        omnillm_deadline_ms: *id014
+      description: Native durable chat payload. Delivery is obtained from the request events endpoint; no synchronous stream
+        switch is present.
+    NativeEmbeddingPayload:
+      type: object
+      additionalProperties: false
+      required: *id015
+      properties:
+        model: *id016
+        input: *id017
+        encoding_format: *id018
+        dimensions: *id019
+        user: *id020
+        omnillm_deadline_ms: *id021
+      description: Native durable embedding payload.
+    TokenIssueRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - command_id
+      - idempotency_key
+      - client_id
+      - display_name
+      - scopes
+      - expires_in_seconds
+      properties:
+        command_id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+        client_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        scopes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/AccessScope'
+        expires_in_seconds:
+          type: integer
+          minimum: 60
+          maximum: 31536000
+    TokenIssueResult:
+      type: object
+      additionalProperties: false
+      required:
+      - token_id
+      - client_id
+      - token
+      - scopes
+      - expires_at
+      - revocation_epoch
+      properties:
+        token_id:
+          type: string
+          format: uuid
+        client_id:
+          type: string
+        token:
+          type: string
+          description: Plaintext bearer token, returned only in the bounded issuance/escrow window.
+        scopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccessScope'
+        expires_at:
+          type: string
+          format: date-time
+        revocation_epoch:
+          type: integer
+          minimum: 0
+        receipt_expires_at:
+          type: string
+          format: date-time
+    TokenInfo:
+      type: object
+      additionalProperties: false
+      required:
+      - token_id
+      - client_id
+      - state
+      - scopes
+      - expires_at
+      - revocation_epoch
+      properties:
+        token_id:
+          type: string
+          format: uuid
+        client_id:
+          type: string
+        state:
+          type: string
+          enum:
+          - ISSUING
+          - ACTIVE
+          - REVOCATION_REQUESTED
+          - DRAINING
+          - REVOKED
+          - EXPIRED
+          - FAILED
+        scopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccessScope'
+        issued_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        revocation_epoch:
+          type: integer
+          minimum: 0
+        last_seen_at:
+          type: string
+          format: date-time
+    TokenPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - snapshot_version
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TokenInfo'
+        next_page_token:
+          type: string
+        snapshot_version:
+          type: integer
+          minimum: 0
+    LanPairingChallengeCreateRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - challenge_id
+      - idempotency_key
+      - requested_scopes
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+        client_display_hint:
+          type: string
+          maxLength: 256
+        requested_scopes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/LanGrantableScope'
+        ttl_seconds:
+          type: integer
+          const: 300
+    LanPairingChallengeSecret:
+      type: object
+      additionalProperties: false
+      required:
+      - challenge_id
+      - protocol_label
+      - server_spki_sha256
+      - connection_epoch
+      - pairing_secret
+      - requested_scopes
+      - expires_at
+      - qr_payload
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        protocol_label:
+          const: OmniLLM-LAN-Pairing-1
+        server_spki_sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        connection_epoch:
+          type: integer
+          minimum: 0
+        pairing_secret:
+          type: string
+          pattern: ^[A-Za-z0-9_-]+$
+          description: 192-bit CSPRNG secret; shown only to the local admin and transferred through the QR/user-mediated channel.
+        requested_scopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/LanGrantableScope'
+        expires_at:
+          type: string
+          format: date-time
+        qr_payload:
+          type: string
+          maxLength: 8192
+    LanPairingExchangeRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - exchange_id
+      - challenge_id
+      - client_public_key
+      - requested_scopes
+      - proof_base64url
+      properties:
+        exchange_id:
+          type: string
+          format: uuid
+        challenge_id:
+          type: string
+          format: uuid
+        client_public_key:
+          type: string
+          minLength: 32
+          maxLength: 4096
+        requested_scopes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/LanGrantableScope'
+        proof_base64url:
+          type: string
+          pattern: ^[A-Za-z0-9_-]+$
+          minLength: 43
+          maxLength: 128
+    LanPairingExchangeResult:
+      type: object
+      additionalProperties: false
+      required:
+      - exchange_id
+      - state
+      - client_id
+      - token_id
+      - token
+      - scopes
+      - expires_at
+      - receipt_expires_at
+      - server_spki_sha256
+      properties:
+        exchange_id:
+          type: string
+          format: uuid
+        state:
+          const: SUCCEEDED
+        client_id:
+          type: string
+        token_id:
+          type: string
+          format: uuid
+        token:
+          type: string
+        scopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/LanGrantableScope'
+        expires_at:
+          type: string
+          format: date-time
+        receipt_expires_at:
+          type: string
+          format: date-time
+        server_spki_sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    AccessScope:
+      type: string
+      enum:
+      - assets.create
+      - assets.delete-own
+      - assets.read-own
+      - clients.manage
+      - clients.read
+      - content-reports.create
+      - content-reports.read-own
+      - diagnostics.export
+      - inference.cancel
+      - inference.create
+      - inference.read-own
+      - jobs.manage
+      - jobs.read-all
+      - jobs.read-own
+      - lan.manage
+      - metrics.read-detail
+      - metrics.read-summary
+      - models.manage
+      - models.read
+      - settings.read
+      - settings.write
+      - tokens.manage
+    LanGrantableScope:
+      type: string
+      enum:
+      - models.read
+      - inference.create
+      - inference.cancel
+      - inference.read-own
+      - assets.create
+      - assets.read-own
+      - assets.delete-own
+      - jobs.read-own
+      - content-reports.create
+      - content-reports.read-own
+    CapabilityId:
+      type: string
+      enum:
+      - DEVICE_DISCOVERY
+      - MODEL_ACQUISITION
+      - MODEL_IDENTITY
+      - COMPATIBILITY_EVALUATION
+      - RECOMMENDATION
+      - AUTOMATED_CONFIGURATION
+      - SAFE_INSTALLATION
+      - TEXT_GENERATION
+      - EMBEDDING
+      - VISION_INPUT
+      - AUDIO_INPUT
+      - STRUCTURED_OUTPUT
+      - TOOL_CALLING
+      - ENGINE_LIFECYCLE
+      - MODEL_LIFECYCLE
+      - SESSION_LIFECYCLE
+      - REQUEST_LIFECYCLE
+      - JOB_LIFECYCLE
+      - CAPABILITY_NEGOTIATION
+      - STREAMING
+      - CANCELLATION
+      - DEADLINE
+      - IDEMPOTENCY
+      - RECONNECT
+      - HTTP_INTERFACE
+      - AIDL_INTERFACE
+      - ADMIN_INTERFACE
+      - LOCAL_UI_INTERFACE
+      - LAN_INTERFACE
+      - MULTI_MODEL_ROUTING
+      - FALLBACK_POLICY
+      - SERVICE_HEALTH
+      - ENGINE_HEALTH
+      - MODEL_HEALTH
+      - REQUEST_TRACE
+      - JOB_PROGRESS
+      - RESOURCE_ACCOUNTING
+      - PERFORMANCE_MEASUREMENT
+      - DIAGNOSTIC_REASONING
+      - EVIDENCE_LABELING
+      - ASSET_LIFECYCLE
+      - JOB_RECOVERY
+      - CONTENT_REPORTING
+      - USABILITY_VALIDATION
+      - ACCESSIBILITY_VALIDATION
+    CapabilityEntry:
+      type: object
+      additionalProperties: false
+      required:
+      - capability_id
+      - state
+      - evidence_label
+      properties:
+        capability_id:
+          $ref: '#/components/schemas/CapabilityId'
+        state:
+          type: string
+          enum:
+          - SUPPORTED
+          - UNSUPPORTED
+          - CONDITIONAL
+          - UNKNOWN
+          - TEMPORARILY_UNAVAILABLE
+        evidence_label:
+          type: string
+          enum:
+          - MEASURED
+          - ESTIMATED
+          - REPORTED
+          - LAST_SAMPLED
+          - UNKNOWN
+        reason_code:
+          type: string
+          maxLength: 256

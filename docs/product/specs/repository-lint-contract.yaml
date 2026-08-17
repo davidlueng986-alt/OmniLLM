@@ -1,0 +1,40 @@
+schemaVersion: 1
+requiredChecks:
+- yaml-duplicate-key
+- yaml-json-parse
+- front-matter-schema
+- unique-document-id
+- local-link-resolution
+- authority-path-resolution
+- trace-authority-resolution
+- design-index-consistency
+- feature-capability-symmetry
+- capability-reference-resolution
+- state-machine-reachability
+- state-guard-action-resolution
+- canonical-token-consistency
+- access-scope-resolution
+- error-code-resolution
+- openapi-parse-and-scope-resolution
+- json-schema-parse
+- database-schema-executes
+- aidl-reference-resolution
+- repository-index-hash-size
+- manifest-hash
+- product-package-audit-separation
+- http-profile-separation
+- typed-page-and-job-schema
+- aidl-bootstrap-asset-report-coverage
+- aidl-no-untyped-core-json
+- exact-security-suite
+- signed-assertion-requirements
+- access-profile-operation-reachability
+- sensitive-operation-transport-allowlist
+passCondition: zero errors; warnings are permitted only when explicitly classified as implementation evidence NOT_EXECUTED
+artifactRequirements:
+- tool version or digest
+- command
+- timestamp
+- repository manifest digest
+- machine-readable result
+- human-readable summary

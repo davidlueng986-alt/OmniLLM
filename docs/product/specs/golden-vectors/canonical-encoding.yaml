@@ -1,0 +1,109 @@
+schemaVersion: 1
+profiles:
+  identity:
+    schemaVersion: 1
+    encoding: UTF-8 canonical JSON with sorted keys and no insignificant whitespace for this fixture; production canonicalization
+      follows the declared RFC 8785 profile
+    vectors:
+    - id: ID-001
+      rawBlobUtf8: 'OmniLLM golden blob
+
+        '
+      expectedBlobId: 0340d116cf3eeec6aff212fb49cedf59d25b8bef8a9cc806d50178d75507d90b
+    - id: ID-002
+      canonicalPackageJson: '{"files":[{"blobId":"0340d116cf3eeec6aff212fb49cedf59d25b8bef8a9cc806d50178d75507d90b","byteLength":20,"role":"WEIGHTS","shardIndex":0}],"schemaVersion":1}'
+      expectedArtifactPackageId: aa16996d1606c462b5374c4549b6be89ba88e38c15efdff1c9ce431f7a82751f
+    - id: ID-003
+      canonicalRevisionJson: '{"artifactPackageId":"aa16996d1606c462b5374c4549b6be89ba88e38c15efdff1c9ce431f7a82751f","formatProfile":"GGUF-v3","quantizationDescriptor":{"global":"Q4_K_M","schemaVersion":1},"semanticDescriptor":{"architecture":"llama"},"templateDigest":"1111111111111111111111111111111111111111111111111111111111111111","tokenizerDigest":"0000000000000000000000000000000000000000000000000000000000000000"}'
+      expectedModelRevisionId: 70c82fcbcde261995f7c95c5c41e3415f7c6b3a4e60b967d8a63d9ff9679f189
+    - id: ID-004
+      permutationRule: Reordering input files before total-order normalization produces the same ArtifactPackageId
+      expectedArtifactPackageId: aa16996d1606c462b5374c4549b6be89ba88e38c15efdff1c9ce431f7a82751f
+  stream:
+    schemaVersion: 1
+    semantics: half-open [seqFrom,seqTo)
+    vectors:
+    - id: SEQ-001
+      batches:
+      - from: 0
+        to: 3
+        data: abc
+      - from: 3
+        to: 5
+        data: de
+      - from: 5
+        to: 5
+        terminal: true
+      expectedData: abcde
+      finalAckToExclusive: 5
+    - id: SEQ-002
+      invalidBatches:
+      - from: 0
+        to: 3
+      - from: 2
+        to: 4
+      expectedError: STATE_CONFLICT
+    - id: SEQ-003
+      sseDisconnectWithoutApplicationAck: true
+      expectedSessionReusable: false
+      expectedError: STREAM_INTERRUPTED
+  configuration:
+    schemaVersion: 1
+    vectors:
+    - id: CFG-001
+      setting: inference.contextTokens
+      sources:
+        request-explicit: 8192
+        model-recommendation: 4096
+        product-default: 2048
+      constraints:
+        platform-safety: 16384
+        resource-hard-cap: 6144
+      expected: 6144
+      reason: request candidate selected then safely clamped by hard cap
+    - id: CFG-002
+      setting: runtime.fallbackPolicy
+      sources:
+        request-explicit: ALLOW_LIST
+        product-default: NONE
+      constraints:
+        security-trust:
+        - NONE
+        - SAME_REVISION_ONLY
+      expectedError: TRUST_PLACEMENT_REQUIRED
+      reason: exact enum cannot be silently changed
+    - id: CFG-003
+      setting: inference.temperature
+      sources:
+        principal-profile: 0.7
+        product-default: 1.0
+      constraints: {}
+      expected: 0.7
+      reason: highest allowed value source wins
+  errorProjection:
+    schemaVersion: 1
+    vectors:
+    - code: INVALID_REQUEST
+      http: 400
+      aidl: OmniError(code=INVALID_REQUEST)
+      retryable: false
+    - code: IDEMPOTENCY_CONFLICT
+      http: 409
+      aidl: OmniError(code=IDEMPOTENCY_CONFLICT)
+      retryable: false
+    - code: CONTEXT_LIMIT_EXCEEDED
+      http: 413
+      aidl: OmniError(code=CONTEXT_LIMIT_EXCEEDED)
+      retryable: false
+    - code: ADMISSION_REJECTED
+      http: 503
+      aidl: OmniError(code=ADMISSION_REJECTED)
+      retryable: true
+    - code: CURSOR_GONE
+      http: 410
+      aidl: OmniError(code=CURSOR_GONE)
+      retryable: false
+    - code: CONTENT_REPORT_UNAVAILABLE
+      http: 503
+      aidl: OmniError(code=CONTENT_REPORT_UNAVAILABLE)
+      retryable: true

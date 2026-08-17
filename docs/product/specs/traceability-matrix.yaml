@@ -1,0 +1,172 @@
+schemaVersion: 2
+invariants:
+- id: INV-001
+  authorities:
+  - ARCH-LOGICAL
+  - ANDROID-SERVICE
+  qualityScenarios:
+  - Q-014
+- id: INV-002
+  authorities:
+  - CORE-ENGINE
+  - CORE-RESOURCE
+  qualityScenarios:
+  - Q-001
+  - Q-002
+- id: INV-003
+  authorities:
+  - CORE-ENGINE
+  - CORE-SESSION
+  qualityScenarios:
+  - Q-002
+  - Q-003
+- id: INV-004
+  authorities:
+  - CORE-ENGINE
+  - REL-RECOVERY
+  qualityScenarios:
+  - Q-003
+- id: INV-005
+  authorities:
+  - CORE-RESOURCE
+  - CORE-SESSION
+  qualityScenarios:
+  - Q-004
+- id: INV-006
+  authorities:
+  - CORE-INTERFACE
+  - ANDROID-BINDER
+  qualityScenarios:
+  - Q-005
+  - Q-006
+- id: INV-007
+  authorities:
+  - CORE-SESSION
+  - REL-RECOVERY
+  qualityScenarios:
+  - Q-003
+  - Q-005
+- id: INV-008
+  authorities:
+  - SEC-PLACEMENT
+  - SEC-SUPPLY
+  qualityScenarios:
+  - Q-008
+  - Q-009
+- id: INV-009
+  authorities:
+  - SEC-EXTERNAL-SANDBOX
+  - SEC-PLACEMENT
+  qualityScenarios:
+  - Q-008
+- id: INV-010
+  authorities:
+  - SEC-SUPPLY
+  - CORE-MODEL
+  qualityScenarios:
+  - Q-009
+- id: INV-011
+  authorities:
+  - ANDROID-BINDER
+  - SEC-AUTH-NET
+  qualityScenarios:
+  - Q-014
+- id: INV-012
+  authorities:
+  - CORE-INTERFACE
+  - REL-RECOVERY
+  qualityScenarios:
+  - Q-003
+- id: INV-013
+  authorities:
+  - CORE-INTERFACE
+  - CORE-CAPABILITY
+  qualityScenarios:
+  - Q-006
+  - Q-017
+- id: INV-014
+  authorities:
+  - DATA-IDENTITY
+  - CORE-MODEL
+  qualityScenarios:
+  - Q-011
+- id: INV-015
+  authorities:
+  - DATA-IDENTITY
+  - specs/canonical-types.yaml
+  qualityScenarios:
+  - Q-011
+- id: INV-016
+  authorities:
+  - DATA-MEASUREMENT
+  - CORE-OBSERVABILITY
+  qualityScenarios:
+  - Q-013
+- id: INV-017
+  authorities:
+  - SEC-AUTH-NET
+  - SEC-PLACEMENT
+  qualityScenarios:
+  - Q-007
+- id: INV-018
+  authorities:
+  - CORE-CAPABILITY
+  - CORE-RESOURCE
+  qualityScenarios:
+  - Q-001
+  - Q-016
+- id: INV-019
+  authorities:
+  - CORE-ORCHESTRATOR
+  - FEAT-ROUTING
+  qualityScenarios:
+  - Q-016
+- id: INV-020
+  authorities:
+  - GOV-AUTHORITY
+  - GOV-DOC
+  qualityScenarios:
+  - Q-017
+- id: INV-021
+  authorities:
+  - CORE-RESOURCE
+  - specs/canonical-types.yaml
+  qualityScenarios:
+  - Q-004
+  - Q-018
+- id: INV-022
+  authorities:
+  - CORE-INTERFACE
+  - specs/access-control-catalog.yaml
+  - specs/error-catalog.yaml
+  qualityScenarios:
+  - Q-006
+  - Q-018
+- id: INV-023
+  authorities:
+  - FEAT-AI-REPORTING
+  - SEC-DATA-FLOW
+  - ANDROID-DIST
+  qualityScenarios:
+  - Q-019
+- id: INV-024
+  authorities:
+  - UX-VALIDATION
+  - UX-A11Y-I18N
+  qualityScenarios:
+  - Q-020
+- id: INV-025
+  authorities:
+  - SEC-PROFILE
+  - specs/security-profile.yaml
+  qualityScenarios:
+  - Q-008
+  - Q-010
+- id: INV-026
+  authorities:
+  - ANDROID-BASELINE
+  - ANDROID-DIST
+  - specs/source-claims.yaml
+  qualityScenarios:
+  - Q-012
+  - Q-015
