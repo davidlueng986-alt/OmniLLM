@@ -156,7 +156,7 @@ dependencies {
     // Base ONNX Runtime required by GenAI.init() → System.loadLibrary("onnxruntime")
     // (UPSTREAM.lock ortRuntime pin: com.microsoft.onnxruntime:onnxruntime-android:1.25.1,
     // sha256 08ccb60c…). ABIs beyond 64-bit are excluded in `packaging` above.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.25.1")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
 
     // Wave-A Feature Packs (admin, auto-setup, modelhub, playground, server, dashboard).
     implementation(project(":features:admin"))
