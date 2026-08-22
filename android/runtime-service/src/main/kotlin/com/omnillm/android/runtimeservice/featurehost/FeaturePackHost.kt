@@ -171,7 +171,7 @@ data class FeaturePackHost(
             val routingApi = RoutingFeatureModule.createApi(
                 RoutingFeaturePorts(
                     orchestrator = routingOrch,
-                    capabilities = HostRoutingCapabilityPort(),
+                    capabilities = HostRoutingCapabilityPort(orchestratorAttached = waveA != null),
                     clockMs = clockMs,
                 ),
             )
