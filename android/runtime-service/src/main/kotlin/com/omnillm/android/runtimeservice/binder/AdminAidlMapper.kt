@@ -220,7 +220,6 @@ object AdminAidlMapper {
                 entry.valueType = "number"
                 entry.doubleValue = value.value
                 entry.longValue = 0L
-                entry.doubleValue = 0.0
                 entry.boolValue = false
                 entry.stringValue = null
             }
