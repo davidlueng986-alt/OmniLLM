@@ -27,6 +27,10 @@ class FakeOmniAdmin(
         private set
 
     var startJobCalls: MutableList<OmniJobSpec> = CopyOnWriteArrayList()
+    var loadCalls: MutableList<String> = CopyOnWriteArrayList()
+    var unloadCalls: MutableList<String> = CopyOnWriteArrayList()
+    var pinCalls: MutableList<Pair<String, Boolean>> = CopyOnWriteArrayList()
+    var licenseCalls: MutableList<Pair<String, String>> = CopyOnWriteArrayList()
 
     fun setSnapshot(snapshot: OmniAdminSnapshot) {
         snapshotValue = snapshot
@@ -49,8 +53,10 @@ class FakeOmniAdmin(
         startJobCalls += spec ?: OmniJobSpec()
         val info = OmniJobInfo()
         info.jobId = spec?.jobId.orEmpty()
+        info.kind = spec?.kind.orEmpty()
         info.state = "QUEUED"
         info.resourceVersion = 1L
+        info.canonicalSpecDigest = spec?.command?.canonicalInputDigest
         return info
     }
 
@@ -164,7 +170,7 @@ class FakeOmniAdmin(
     override fun getInferenceCapabilityState(
         capabilityId: String?,
         modelRevisionId: String?,
-    ): String = "SUPPORTED"
+    ): String = "CONDITIONAL"
 
     override fun importLocalFile(
         contentFd: ParcelFileDescriptor?,
@@ -182,5 +188,66 @@ class FakeOmniAdmin(
         info.state = "QUEUED"
         info.resourceVersion = 1L
         return info
+    }
+
+    override fun loadInstalledModel(
+        installationId: String?,
+        command: OmniCommandRequest?,
+    ): CommandResult {
+        loadCalls += installationId.orEmpty()
+        return succeededModelLoad(command, installationId, state = "READY")
+    }
+
+    override fun unloadInstalledModel(
+        installationId: String?,
+        command: OmniCommandRequest?,
+    ): CommandResult {
+        unloadCalls += installationId.orEmpty()
+        return succeededModelLoad(command, installationId, state = "UNLOADED")
+    }
+
+    override fun setInstalledModelPinned(
+        installationId: String?,
+        pinned: Boolean,
+        command: OmniCommandRequest?,
+    ): CommandResult {
+        pinCalls += (installationId.orEmpty() to pinned)
+        val result = CommandResult()
+        result.commandId = command?.commandId.orEmpty()
+        result.state = "SUCCEEDED"
+        result.affectedResourceId = installationId
+        result.resultSchemaId = "ModelCard"
+        return result
+    }
+
+    override fun acceptInstalledModelLicense(
+        installationId: String?,
+        licenseDigest: String?,
+        sourceAssertion: String?,
+        command: OmniCommandRequest?,
+    ): CommandResult {
+        licenseCalls += (installationId.orEmpty() to licenseDigest.orEmpty())
+        val result = CommandResult()
+        result.commandId = command?.commandId.orEmpty()
+        result.state = "SUCCEEDED"
+        result.affectedResourceId = installationId
+        result.resultSchemaId = "ModelCard"
+        return result
+    }
+
+    private fun succeededModelLoad(
+        command: OmniCommandRequest?,
+        installationId: String?,
+        state: String,
+    ): CommandResult {
+        val id = installationId.orEmpty()
+        val result = CommandResult()
+        result.commandId = command?.commandId.orEmpty()
+        result.state = "SUCCEEDED"
+        result.affectedResourceId = id
+        result.resultSchemaId = "ModelLoadResult"
+        result.resultCanonicalJson =
+            """{"loadedModelId":"lm-1","installationId":"$id","state":"$state","engineBuildId":null,"placementClass":null}"""
+        return result
     }
 }
