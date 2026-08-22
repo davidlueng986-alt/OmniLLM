@@ -13,6 +13,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.omnillm.core.canonical.generated.CapabilityId
+import com.omnillm.features.autosetup.domain.UserSetupPreferences
 import com.omnillm.features.autosetup.viewmodel.AutoSetupUiState
 import com.omnillm.features.autosetup.viewmodel.AutoSetupViewModel
 import com.omnillm.ui.R
@@ -191,9 +193,18 @@ fun OnboardingScreen(
                                     scope.launch { viewModel.onDiscoverDevice() }
                                 },
                                 onRecommend = {
-                                    // Preferences dialog later; default path via API when wired.
+                                    scope.launch {
+                                        viewModel.onRecommend(
+                                            UserSetupPreferences(
+                                                targetOperation = CapabilityId.TEXT_GENERATION,
+                                            ),
+                                        )
+                                    }
                                 },
                                 onReset = { viewModel.onReset() },
+                                onCancel = {
+                                    scope.launch { viewModel.onCancel() }
+                                },
                                 onOpenPlayground = {
                                     onSetupCompleted()
                                     onOpenPlayground()
@@ -218,6 +229,7 @@ private fun SetupActions(
     onDiscover: () -> Unit,
     onRecommend: () -> Unit,
     onReset: () -> Unit,
+    onCancel: () -> Unit,
     onOpenPlayground: () -> Unit,
     onOpenDashboard: () -> Unit,
     onOpenModelHub: () -> Unit,
@@ -240,6 +252,13 @@ private fun SetupActions(
             )
             "open-playground" -> PrimaryActionButton(
                 label = stringResource(R.string.action_open_playground),
+                onClick = onOpenPlayground,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+            )
+            "submit-first-inference" -> PrimaryActionButton(
+                label = stringResource(R.string.onboarding_first_inference),
                 onClick = onOpenPlayground,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -268,7 +287,7 @@ private fun SetupActions(
             )
             "cancel" -> SecondaryActionButton(
                 label = stringResource(R.string.action_cancel),
-                onClick = { /* cancel via VM */ },
+                onClick = onCancel,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 4.dp),
