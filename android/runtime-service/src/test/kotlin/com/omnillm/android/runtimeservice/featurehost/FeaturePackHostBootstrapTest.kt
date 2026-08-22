@@ -2,6 +2,7 @@ package com.omnillm.android.runtimeservice.featurehost
 
 import com.omnillm.core.canonical.generated.FallbackPolicy
 import com.omnillm.core.canonical.generated.OmniResult
+import com.omnillm.core.errors.generated.OmniErrorCode
 import com.omnillm.features.benchmark.BenchmarkFeatureModule
 import com.omnillm.features.contentreport.ContentReportModule
 import com.omnillm.features.contentreport.domain.ContentReportPolicy
@@ -124,7 +125,14 @@ class FeaturePackHostBootstrapTest {
         val principal = LocalUiPrincipal.ID
 
         val negotiation = host.routingApi.negotiate(principal)
-        assertTrue(negotiation is OmniResult.Ok)
+        // CODE-05: wave-B bootstrap has no Orchestrator attached, so the host
+        // must never claim SUPPORTED — negotiation fails closed with
+        // CAPABILITY_UNSUPPORTED instead of inventing an operable routing cell.
+        assertTrue(negotiation is OmniResult.Err)
+        assertEquals(
+            OmniErrorCode.CAPABILITY_UNSUPPORTED,
+            (negotiation as OmniResult.Err).error.code,
+        )
 
         val minPlacement = PlacementClassLabels.PRIVILEGED_TRUSTED
 

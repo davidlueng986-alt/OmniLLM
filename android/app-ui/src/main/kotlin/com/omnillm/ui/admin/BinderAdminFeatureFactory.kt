@@ -35,6 +35,7 @@ import com.omnillm.interfaces.admin.AdminJobSpec
 import com.omnillm.interfaces.admin.AdminSettingsView
 import com.omnillm.interfaces.admin.AdminSnapshotView
 import com.omnillm.interfaces.admin.LocalUiPrincipal
+import com.omnillm.runtime.job.DeleteResourceKind
 import com.omnillm.runtime.job.JobIdentity
 import com.omnillm.runtime.job.JobKind
 import com.omnillm.runtime.job.JobParameters
@@ -427,22 +428,44 @@ class BinderAdminPorts(
     /**
      * Minimal JobRecord projection from AIDL OmniJobInfo for Admin home / list.
      * Full parameter bodies stay on the control plane; UI never invents acquisition semantics.
+     * CODE-03: the AIDL `kind` drives the projection; unknown kinds are dropped
+     * (fail closed) instead of rewriting every row as DIAGNOSTIC_EXPORT.
      */
     private fun aidlToJobRecord(info: ai.omnillm.api.OmniJobInfo?): JobRecord? {
         if (info == null || info.jobId.isNullOrBlank()) return null
+        val kind = JobKind.fromCatalogName(info.kind.orEmpty().uppercase()) ?: return null
         return try {
             val now = System.currentTimeMillis()
             val total = if (info.progress in 0.0..1.0 && info.progress > 0.0) 100L else null
             val done = total?.let { (info.progress * it).toLong() } ?: 0L
+            val digest = info.canonicalSpecDigest
+                ?.takeIf { it.matches(Regex("^[0-9a-f]{64}$")) }
+                ?: "b".repeat(64)
             JobRecord(
                 identity = JobIdentity(
                     jobId = JobId(info.jobId),
                     principalId = LocalUiPrincipal.ID,
-                    kind = JobKind.DIAGNOSTIC_EXPORT,
+                    kind = kind,
                     idempotencyKey = IdempotencyKey.parse("binder-${info.jobId}".take(128)),
-                    canonicalSpecDigest = "b".repeat(64),
+                    canonicalSpecDigest = digest,
                 ),
-                parameters = JobParameters.DiagnosticExport(),
+                parameters = when (kind) {
+                    JobKind.DOWNLOAD -> JobParameters.Download(sourceUrl = "binder://${info.jobId}")
+                    JobKind.IMPORT -> JobParameters.Import(assetId = "binder-${info.jobId}")
+                    JobKind.DELETE -> JobParameters.Delete(
+                        resourceKind = DeleteResourceKind.INSTALLATION,
+                        resourceId = "binder-${info.jobId}",
+                        expectedResourceVersion = 0L,
+                    )
+                    JobKind.BENCHMARK -> JobParameters.Benchmark(
+                        modelRevisionId = "0".repeat(64),
+                        engineBuildId = "binder-${info.jobId}",
+                        backend = "binder-${info.jobId}",
+                        measurementProfileId = "0".repeat(64),
+                    )
+                    JobKind.DIAGNOSTIC_EXPORT -> JobParameters.DiagnosticExport()
+                    JobKind.CONTENT_REPORT -> JobParameters.ContentReport(reportId = "binder-${info.jobId}")
+                },
                 state = info.state.orEmpty().ifBlank { "QUEUED" },
                 resourceVersion = info.resourceVersion,
                 currentAttemptNo = 1,

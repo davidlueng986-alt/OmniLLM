@@ -37,7 +37,7 @@ class AdminProjectedModelHubApiTest {
             modelRevisionId = revisionHex
             displayName = "Imported GGUF"
             installationState = "READY"
-            this.installationId = installationId
+            this.installationId = this@AdminProjectedModelHubApiTest.installationId
             artifactPackageId = "d".repeat(64)
             licenseStatus = "ACCEPTED"
             pinned = false

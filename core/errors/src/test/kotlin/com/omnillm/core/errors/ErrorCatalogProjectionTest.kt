@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Parameterized projection test over **all 25 codes** of
+ * Parameterized projection test over **all 26 codes** of
  * `specs/error-catalog.yaml` (schemaVersion 2): httpStatus, category,
  * retryable, requiredClientAction, plus the HTTP projection carried by the
  * generated sealed [OmniError] hierarchy and the [ErrorMapping] boundary
@@ -31,10 +31,11 @@ class ErrorCatalogProjectionTest {
     /**
      * Transcribed 1:1 from specs/error-catalog.yaml `errors:` (order = yaml).
      * Adding or removing a code here must mirror the yaml; the count guard
-     * below (25) fails the suite on drift in either direction.
+     * below (26) fails the suite on drift in either direction.
      */
     private fun catalog(): List<CatalogEntry> = listOf(
         CatalogEntry(OmniErrorCode.INVALID_REQUEST, 400, ErrorCategory.SEMANTIC, false, "correct-request"),
+        CatalogEntry(OmniErrorCode.MODEL_FORMAT_INVALID, 400, ErrorCategory.SEMANTIC, false, "correct-request"),
         CatalogEntry(OmniErrorCode.UNAUTHORIZED, 401, ErrorCategory.SEMANTIC, false, "reauthenticate"),
         CatalogEntry(OmniErrorCode.FORBIDDEN, 403, ErrorCategory.SEMANTIC, false, "request-scope-or-complete-local-approval"),
         CatalogEntry(OmniErrorCode.NOT_FOUND, 404, ErrorCategory.SEMANTIC, false, "refresh-resource"),
@@ -78,9 +79,9 @@ class ErrorCatalogProjectionTest {
     )
 
     @Test
-    fun catalog_hasExactly25Codes_andTableCoversAll() {
-        assertEquals("specs/error-catalog.yaml defines exactly 25 codes", 25, catalog().size)
-        assertEquals(25, OmniErrorCode.entries.size)
+    fun catalog_hasExactly26Codes_andTableCoversAll() {
+        assertEquals("specs/error-catalog.yaml defines exactly 26 codes", 26, catalog().size)
+        assertEquals(26, OmniErrorCode.entries.size)
         val tableCodes = catalog().map { it.code }.toSet()
         for (code in OmniErrorCode.entries) {
             assertTrue("catalog table missing ${code.code}", code in tableCodes)
@@ -141,7 +142,7 @@ class ErrorCatalogProjectionTest {
             assertEquals(entry.code, ErrorMapping.fromCode(entry.code.code).code)
             assertEquals(entry.code, ErrorMapping.fromCode(entry.code).code)
         }
-        assertEquals(25, ErrorMapping.allCodes().size)
+        assertEquals(26, ErrorMapping.allCodes().size)
     }
 
     @Test

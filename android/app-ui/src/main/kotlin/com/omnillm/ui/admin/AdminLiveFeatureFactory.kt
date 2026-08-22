@@ -24,7 +24,7 @@ import com.omnillm.features.autosetup.AutoSetupModule
 import com.omnillm.features.autosetup.catalog.FixtureCatalogCandidates
 import com.omnillm.features.autosetup.domain.DeviceDiscoverySnapshot
 import com.omnillm.features.autosetup.ports.AutoSetupJobPort
-import com.omnillm.features.autosetup.ports.AutoSetupModelPort
+import com.omnillm.features.autosetup.ports.FailClosedAutoSetupModelPort
 import com.omnillm.features.autosetup.ports.AutoSetupOrchestratorPort
 import com.omnillm.features.autosetup.ports.AutoSetupRuntimePorts
 import com.omnillm.features.autosetup.ports.DeviceProbePort
@@ -72,7 +72,6 @@ import com.omnillm.runtime.job.JobKind
 import com.omnillm.runtime.job.JobParameters
 import com.omnillm.runtime.job.JobProgress
 import com.omnillm.runtime.job.JobRecord
-import com.omnillm.runtime.modelmanager.domain.InstallationSnapshot
 import com.omnillm.runtime.orchestrator.ClaimKind
 import com.omnillm.runtime.orchestrator.OrchestrationRequest
 import com.omnillm.runtime.orchestrator.PlanningResult
@@ -100,7 +99,11 @@ object AdminLiveFeatureFactory {
             deviceProbe = AndroidUiDeviceProbe(),
             catalog = FixtureCatalogCandidates(),
             jobs = AdminAutoSetupJobPort(admin),
-            models = AdminAutoSetupModelPort(admin),
+            // Model rows stay honest-fail-closed on the UI side: InstallationSnapshot
+            // lives in :runtime:model-manager, which must not reach app-ui
+            // (INV-001 / module dependency gate). Live installation state is
+            // projected by the ModelHub VM via Admin AIDL instead.
+            models = FailClosedAutoSetupModelPort,
             orchestrator = AdminAutoSetupOrchestratorPort(admin),
         )
         return AutoSetupModule.createViewModel(AutoSetupModule.createApi(ports))
@@ -516,7 +519,7 @@ class AdminProjectedModelHubApi(
 
     private fun jsonFieldLocal(json: String, key: String): String? {
         if (json.isBlank()) return null
-        val quoted = Regex("""\"$key\"\\s*:\\s*\"([^\"\\\\]*(?:\\.[^\"\\\\]*)*)\"""")
+        val quoted = Regex("""\"$key\"\s*:\s*\"([^\"\\]*(?:\.[^\"\\]*)*)\"""")
         quoted.find(json)?.groupValues?.getOrNull(1)?.let { raw ->
             return raw.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\")
         }
@@ -661,60 +664,6 @@ private class AdminAutoSetupJobPort(private val admin: IOmniAdmin) : AutoSetupJo
         } catch (e: RemoteException) {
             OmniResult.err(OmniError.INTERNAL(message = e.message ?: "cancel job remote failure"))
         }
-    }
-}
-
-/**
- * CODE-04: AutoSetup model port over Admin snapshot (INV-001).
- * Reads live installation rows; does not invent DISCOVERED mutations.
- */
-private class AdminAutoSetupModelPort(private val admin: IOmniAdmin) : AutoSetupModelPort {
-    override suspend fun getInstallation(installationId: InstallationId): InstallationSnapshot? {
-        val snap = try {
-            admin.snapshot
-        } catch (_: RemoteException) {
-            return null
-        }
-        val m = snap.models.orEmpty().firstOrNull { it?.installationId == installationId.value }
-            ?: return null
-        return toSnapshot(m)
-    }
-
-    override suspend fun discoverInstallation(
-        installationId: InstallationId,
-        modelRevisionId: ModelRevisionId,
-        artifactPackageId: ArtifactPackageId,
-    ): OmniResult<InstallationSnapshot> {
-        getInstallation(installationId)?.let { return OmniResult.ok(it) }
-        return OmniResult.err(
-            OmniError.CAPABILITY_UNSUPPORTED(
-                message = "installation discover is control-plane only; import via ModelHub then refresh",
-            ),
-        )
-    }
-
-    private fun toSnapshot(m: ai.omnillm.api.OmniModelInfo): InstallationSnapshot? {
-        val inst = m.installationId?.takeIf { it.isNotBlank() } ?: return null
-        val rev = m.modelRevisionId?.lowercase()?.takeIf { it.matches(HEX64) } ?: return null
-        val pkg = m.artifactPackageId?.lowercase()?.takeIf { it.matches(HEX64) } ?: "0".repeat(64)
-        val state = m.installationState?.takeIf { it.isNotBlank() } ?: "DISCOVERED"
-        return try {
-            InstallationSnapshot(
-                aggregate = ModelInstallationAggregate(
-                    installationId = InstallationId(inst),
-                    state = state,
-                ),
-                modelRevisionId = ModelRevisionId.parse(rev),
-                artifactPackageId = ArtifactPackageId.parse(pkg),
-                pinned = m.pinned,
-            )
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    companion object {
-        private val HEX64 = Regex("^[0-9a-f]{64}$")
     }
 }
 
