@@ -8,4 +8,6 @@ parcelable OmniJobInfo {
   long resourceVersion;
   double progress;
   @nullable OmniError error;
+  String kind;
+  @nullable String canonicalSpecDigest;
 }

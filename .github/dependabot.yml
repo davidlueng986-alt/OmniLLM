@@ -1,6 +1,7 @@
 # Dependabot — keep Gradle catalog / wrapper and GitHub Actions current.
 # Version bumps still require human review against the toolchain lock
 # (gradle/libs.versions.toml: JDK 17, AGP 9.3.x, compile/target 36, NDK r28+).
+# Engine coordinates are pinned in UPSTREAM.lock — do not auto-bump them.
 
 version: 2
 updates:
@@ -10,9 +11,6 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
-    labels:
-      - dependencies
-      - gradle
     groups:
       android-agp-kotlin:
         patterns:
@@ -23,6 +21,9 @@ updates:
         patterns:
           - "io.ktor*"
           - "org.jetbrains.kotlinx:kotlinx-coroutines*"
+    ignore:
+      - dependency-name: "com.google.ai.edge.litertlm*"
+      - dependency-name: "com.microsoft.onnxruntime*"
 
   - package-ecosystem: github-actions
     directory: "/"
@@ -30,6 +31,3 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - github-actions
