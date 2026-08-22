@@ -10,8 +10,8 @@
 
 [versions]
 # --- Toolchain lock (do not drift app modules to hard-coded SDK numbers) ---
-agp = "9.3.0"
-kotlin = "2.2.0"
+agp = "9.3.1"
+kotlin = "2.4.10"
 gradleWrapper = "9.5.0"
 jdk = "17"
 ndk = "28.2.13676358"
@@ -31,18 +31,18 @@ companionVersionName = "0.2.0"
 
 # --- Libraries (skeleton placeholders; pin further at feature implementation) ---
 coroutines = "1.10.2"
-serialization = "1.8.1"
-androidxCore = "1.16.0"
-androidxAppcompat = "1.7.1"
-androidxActivity = "1.10.1"
-composeBom = "2025.07.00"
+serialization = "1.11.0"
+androidxCore = "1.19.0"
+androidxAppcompat = "1.8.0"
+androidxActivity = "1.13.0"
+composeBom = "2026.08.00"
 lifecycle = "2.9.1"
 sqldelight = "2.0.2"
 ktor = "3.1.3"
 okhttp = "4.12.0"
 litertlm = "0.15.0"
 junit = "4.13.2"
-androidxJunit = "1.2.1"
+androidxJunit = "1.3.0"
 
 [libraries]
 kotlin-stdlib = { group = "org.jetbrains.kotlin", name = "kotlin-stdlib", version.ref = "kotlin" }
@@ -83,7 +83,7 @@ litertlm-jvm = { group = "com.google.ai.edge.litertlm", name = "litertlm-jvm", v
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxJunit" }
-androidx-test-runner = { group = "androidx.test", name = "runner", version = "1.6.2" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version = "1.7.0" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
