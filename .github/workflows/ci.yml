@@ -84,8 +84,16 @@ jobs:
       - name: Install Android SDK packages (API 36 / build-tools / NDK r28)
         run: |
           set -euo pipefail
-          # Licenses: fail closed if sdkmanager cannot accept required licenses.
-          yes | sdkmanager --licenses
+          # Licenses: `yes` exits 141 (SIGPIPE) once sdkmanager closes stdin.
+          # That is not a license failure — only non-141 failures fail closed.
+          set +o pipefail
+          yes | sdkmanager --licenses >/dev/null
+          license_status=${PIPESTATUS[1]:-0}
+          set -o pipefail
+          if [ "$license_status" -ne 0 ] && [ "$license_status" -ne 141 ]; then
+            echo "sdkmanager --licenses failed with status $license_status" >&2
+            exit "$license_status"
+          fi
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-${ANDROID_COMPILE_SDK}" \
@@ -371,7 +379,15 @@ jobs:
       - name: Install Android SDK packages (API 36 / build-tools / NDK r28)
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses
+          # SIGPIPE (141) from `yes` after sdkmanager exits is expected.
+          set +o pipefail
+          yes | sdkmanager --licenses >/dev/null
+          license_status=${PIPESTATUS[1]:-0}
+          set -o pipefail
+          if [ "$license_status" -ne 0 ] && [ "$license_status" -ne 141 ]; then
+            echo "sdkmanager --licenses failed with status $license_status" >&2
+            exit "$license_status"
+          fi
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-${ANDROID_COMPILE_SDK}" \

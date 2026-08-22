@@ -46,20 +46,28 @@ object FailClosedRoutingOrchestrator : RoutingOrchestratorPort {
 
 /**
  * Platform capability cells for FEAT-ROUTING required set.
- * Marks catalog feature-required capabilities SUPPORTED (not engine QUALIFIED cells).
- * Unknown capabilities remain UNKNOWN (fail closed — INV-018).
+ *
+ * CODE-05: never invents SUPPORTED. Catalog feature-required cells are
+ * CONDITIONAL only when the plane Orchestrator is attached (operable but
+ * unqualified). Unknown capabilities remain UNKNOWN (fail closed — INV-018).
  */
 class HostRoutingCapabilityPort(
-    private val supported: Set<CapabilityId> = setOf(
+    private val orchestratorAttached: Boolean = false,
+) : RoutingCapabilityPort {
+    private val catalog: Set<CapabilityId> = setOf(
         CapabilityId.MULTI_MODEL_ROUTING,
         CapabilityId.FALLBACK_POLICY,
         CapabilityId.CAPABILITY_NEGOTIATION,
         CapabilityId.REQUEST_LIFECYCLE,
         CapabilityId.RESOURCE_ACCOUNTING,
-    ),
-) : RoutingCapabilityPort {
+    )
+
     override fun state(capability: CapabilityId): CapabilityState =
-        if (capability in supported) CapabilityState.SUPPORTED else CapabilityState.UNKNOWN
+        when {
+            capability !in catalog -> CapabilityState.UNKNOWN
+            orchestratorAttached -> CapabilityState.CONDITIONAL
+            else -> CapabilityState.UNKNOWN
+        }
 }
 
 /**

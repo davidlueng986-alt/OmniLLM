@@ -23,6 +23,7 @@ import com.omnillm.features.contentreport.api.ContentReportCommandIdentity
 import com.omnillm.features.contentreport.api.GrantConsentSpec
 import com.omnillm.features.contentreport.api.SubmitReportSpec
 import com.omnillm.features.contentreport.domain.ContentReportPolicy
+import com.omnillm.interfaces.admin.AdminCommandRequest
 import com.omnillm.interfaces.admin.AdminCommandResult
 import com.omnillm.interfaces.admin.AdminJobEventBatch
 import com.omnillm.interfaces.admin.AdminJobEventSink
@@ -831,6 +832,204 @@ class OmniAdminFacade(
             }
         }
     }
+
+    // ------------------------------------------------------------------
+    // LOCAL_UI ModelHub load/unload/pin/license (M4/M5, CODE-01)
+    // ------------------------------------------------------------------
+
+    override fun loadInstalledModel(
+        installationId: String?,
+        command: OmniCommandRequest?,
+    ): CommandResult = withAdmission {
+        val principal = assertLocalUi()
+        ensureRuntimeAccepting()
+        val domainCommand = AdminAidlMapper.toDomainCommand(command)
+            ?: return failed(
+                command?.commandId,
+                OmniError.INVALID_REQUEST(message = "invalid OmniCommandRequest on loadInstalledModel"),
+            )
+        val installId = installationId?.takeIf { it.isNotBlank() }
+            ?: return failed(
+                domainCommand.commandId,
+                OmniError.INVALID_REQUEST(message = "installationId required"),
+            )
+        val plane = RuntimeControlPlane.get()
+            ?: throw RemoteException(BinderErrors.internal("control plane not attached").message)
+        return runBlocking {
+            when (
+                val result = plane.modelHubApi.startLoad(
+                    principal = principal,
+                    spec = com.omnillm.features.modelhub.api.StartLoadSpec(
+                        installationId = installId,
+                        command = toModelHubCommand(domainCommand),
+                    ),
+                )
+            ) {
+                is OmniResult.Ok -> AdminAidlMapper.toAidlCommandResult(
+                    AdminCommandResult.succeeded(
+                        commandId = domainCommand.commandId,
+                        resourceVersion = 0L,
+                        affectedResourceId = installId,
+                        resultSchemaId = "ModelLoadResult",
+                        resultCanonicalJson = AdminResultJson.modelLoad(result.value),
+                    ),
+                )
+                is OmniResult.Err -> failed(domainCommand.commandId, result.error)
+            }
+        }
+    }
+
+    override fun unloadInstalledModel(
+        installationId: String?,
+        command: OmniCommandRequest?,
+    ): CommandResult = withAdmission {
+        val principal = assertLocalUi()
+        ensureRuntimeAccepting()
+        val domainCommand = AdminAidlMapper.toDomainCommand(command)
+            ?: return failed(
+                command?.commandId,
+                OmniError.INVALID_REQUEST(message = "invalid OmniCommandRequest on unloadInstalledModel"),
+            )
+        val installId = installationId?.takeIf { it.isNotBlank() }
+            ?: return failed(
+                domainCommand.commandId,
+                OmniError.INVALID_REQUEST(message = "installationId required"),
+            )
+        val plane = RuntimeControlPlane.get()
+            ?: throw RemoteException(BinderErrors.internal("control plane not attached").message)
+        return runBlocking {
+            when (
+                val result = plane.modelHubApi.startUnload(
+                    principal = principal,
+                    spec = com.omnillm.features.modelhub.api.StartUnloadSpec(
+                        installationId = installId,
+                        command = toModelHubCommand(domainCommand),
+                    ),
+                )
+            ) {
+                is OmniResult.Ok -> AdminAidlMapper.toAidlCommandResult(
+                    AdminCommandResult.succeeded(
+                        commandId = domainCommand.commandId,
+                        resourceVersion = 0L,
+                        affectedResourceId = installId,
+                        resultSchemaId = "ModelLoadResult",
+                        resultCanonicalJson = AdminResultJson.modelLoad(result.value),
+                    ),
+                )
+                is OmniResult.Err -> failed(domainCommand.commandId, result.error)
+            }
+        }
+    }
+
+    override fun setInstalledModelPinned(
+        installationId: String?,
+        pinned: Boolean,
+        command: OmniCommandRequest?,
+    ): CommandResult = withAdmission {
+        val principal = assertLocalUi()
+        ensureRuntimeAccepting()
+        val domainCommand = AdminAidlMapper.toDomainCommand(command)
+            ?: return failed(
+                command?.commandId,
+                OmniError.INVALID_REQUEST(message = "invalid OmniCommandRequest on setInstalledModelPinned"),
+            )
+        val installId = installationId?.takeIf { it.isNotBlank() }
+            ?: return failed(
+                domainCommand.commandId,
+                OmniError.INVALID_REQUEST(message = "installationId required"),
+            )
+        val plane = RuntimeControlPlane.get()
+            ?: throw RemoteException(BinderErrors.internal("control plane not attached").message)
+        return runBlocking {
+            when (
+                val result = plane.modelHubApi.setPinned(
+                    principal = principal,
+                    spec = com.omnillm.features.modelhub.api.SetPinSpec(
+                        installationId = installId,
+                        pinned = pinned,
+                        command = toModelHubCommand(domainCommand),
+                    ),
+                )
+            ) {
+                is OmniResult.Ok -> AdminAidlMapper.toAidlCommandResult(
+                    succeededModelCard(domainCommand.commandId, installId),
+                )
+                is OmniResult.Err -> failed(domainCommand.commandId, result.error)
+            }
+        }
+    }
+
+    override fun acceptInstalledModelLicense(
+        installationId: String?,
+        licenseDigest: String?,
+        sourceAssertion: String?,
+        command: OmniCommandRequest?,
+    ): CommandResult = withAdmission {
+        val principal = assertLocalUi()
+        ensureRuntimeAccepting()
+        val domainCommand = AdminAidlMapper.toDomainCommand(command)
+            ?: return failed(
+                command?.commandId,
+                OmniError.INVALID_REQUEST(message = "invalid OmniCommandRequest on acceptInstalledModelLicense"),
+            )
+        val installId = installationId?.takeIf { it.isNotBlank() }
+            ?: return failed(
+                domainCommand.commandId,
+                OmniError.INVALID_REQUEST(message = "installationId required"),
+            )
+        val digest = licenseDigest?.lowercase()?.trim().orEmpty()
+        if (!digest.matches(Regex("^[0-9a-f]{64}$"))) {
+            return failed(
+                domainCommand.commandId,
+                OmniError.INVALID_REQUEST(message = "licenseDigest must be 64-char hex SHA-256"),
+            )
+        }
+        val source = sourceAssertion?.trim().orEmpty()
+        if (source.isBlank()) {
+            return failed(
+                domainCommand.commandId,
+                OmniError.INVALID_REQUEST(message = "sourceAssertion required"),
+            )
+        }
+        val plane = RuntimeControlPlane.get()
+            ?: throw RemoteException(BinderErrors.internal("control plane not attached").message)
+        return runBlocking {
+            when (
+                val result = plane.modelHubApi.acceptLicense(
+                    principal = principal,
+                    spec = com.omnillm.features.modelhub.api.AcceptLicenseSpec(
+                        installationId = installId,
+                        licenseDigest = digest,
+                        sourceAssertion = source,
+                        command = toModelHubCommand(domainCommand),
+                    ),
+                )
+            ) {
+                is OmniResult.Ok -> AdminAidlMapper.toAidlCommandResult(
+                    succeededModelCard(domainCommand.commandId, installId),
+                )
+                is OmniResult.Err -> failed(domainCommand.commandId, result.error)
+            }
+        }
+    }
+
+    private fun toModelHubCommand(
+        domainCommand: AdminCommandRequest,
+    ): com.omnillm.features.modelhub.api.ModelHubCommandIdentity =
+        com.omnillm.features.modelhub.api.ModelHubCommandIdentity(
+            commandId = domainCommand.commandId,
+            idempotencyKey = domainCommand.idempotencyKey,
+            canonicalInputDigest = domainCommand.canonicalInputDigest,
+            expectedVersion = domainCommand.expectedVersion,
+        )
+
+    private fun succeededModelCard(commandId: String, installationId: String): AdminCommandResult =
+        AdminCommandResult.succeeded(
+            commandId = commandId,
+            resourceVersion = 0L,
+            affectedResourceId = installationId,
+            resultSchemaId = "ModelCard",
+        )
 
     /**
      * Catalog pin download: full software E2E via [AcquisitionPipeline]

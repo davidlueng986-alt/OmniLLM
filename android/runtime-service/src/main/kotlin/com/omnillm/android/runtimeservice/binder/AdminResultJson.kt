@@ -74,6 +74,30 @@ object AdminResultJson {
             ),
         )
 
+    /** `ModelLoadResult` canonical JSON for load/unload. */
+    fun modelLoad(result: com.omnillm.features.modelhub.api.ModelLoadResult): String =
+        HttpJson.codec.encodeToString(
+            JsonElement.serializer(),
+            JsonObject(
+                buildMap {
+                    put(
+                        "loadedModelId",
+                        result.loadedModelId?.let { JsonPrimitive(it) } ?: JsonNull,
+                    )
+                    put("installationId", JsonPrimitive(result.installationId))
+                    put("state", JsonPrimitive(result.state))
+                    put(
+                        "engineBuildId",
+                        result.engineBuildId?.let { JsonPrimitive(it) } ?: JsonNull,
+                    )
+                    put(
+                        "placementClass",
+                        result.placementClass?.let { JsonPrimitive(it) } ?: JsonNull,
+                    )
+                },
+            ),
+        )
+
     /** `PlaygroundCancelResult` canonical JSON. */
     fun playgroundCancel(
         requestId: String,

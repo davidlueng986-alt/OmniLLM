@@ -58,4 +58,20 @@ interface IOmniAdmin {
       String expectedSha256, long expectedBytes, String modelRevisionId,
       String artifactPackageId, String installationId, String jobId,
       in OmniCommandRequest command);
+  /**
+   * LOCAL_UI ModelHub load (M4). Forwards to plane.modelHubApi.startLoad.
+   * Never invents QUALIFIED/SUPPORTED. Result JSON in resultCanonicalJson
+   * (schema ModelLoadResult).
+   */
+  CommandResult loadInstalledModel(String installationId, in OmniCommandRequest command);
+  /** LOCAL_UI ModelHub unload (M4). */
+  CommandResult unloadInstalledModel(String installationId, in OmniCommandRequest command);
+  /** LOCAL_UI pin/unpin (eviction fence only). */
+  CommandResult setInstalledModelPinned(String installationId, boolean pinned,
+      in OmniCommandRequest command);
+  /**
+   * LOCAL_UI license acceptance (M5). Append-only; does not elevate authenticity.
+   */
+  CommandResult acceptInstalledModelLicense(String installationId, String licenseDigest,
+      String sourceAssertion, in OmniCommandRequest command);
 }

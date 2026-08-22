@@ -84,6 +84,8 @@ object AdminAidlMapper {
         info.resourceVersion = record.resourceVersion
         info.progress = record.progress.ratioOrNull() ?: 0.0
         info.error = record.error?.let { toAidlError(it) }
+        info.kind = record.identity.kind.name
+        info.canonicalSpecDigest = record.identity.canonicalSpecDigest
         return info
     }
 
@@ -114,12 +116,84 @@ object AdminAidlMapper {
         modelRevisionId: String,
         displayName: String,
         installationState: String?,
+    ): ai.omnillm.api.OmniModelInfo =
+        toAidlModelInfo(
+            modelRevisionId = modelRevisionId,
+            displayName = displayName,
+            installationState = installationState,
+            installationId = null,
+            artifactPackageId = null,
+            licenseStatus = null,
+            licenseDigest = null,
+            pinned = false,
+            loadedModelState = null,
+            allowedActions = emptyList(),
+            liveReferenceCount = 0,
+            compatibilityStatus = null,
+            authenticityOk = null,
+            acquisitionChannel = null,
+            resourceVersion = null,
+        )
+
+    fun toAidlModelInfo(card: com.omnillm.features.modelhub.api.ModelCard): ai.omnillm.api.OmniModelInfo =
+        toAidlModelInfo(
+            modelRevisionId = card.modelRevisionId,
+            displayName = card.displayName,
+            installationState = card.installationState,
+            installationId = card.installationId,
+            artifactPackageId = card.artifactPackageId,
+            licenseStatus = card.licenseStatus,
+            licenseDigest = card.licenseDigest,
+            pinned = card.pinned,
+            loadedModelState = card.loadedModelState,
+            allowedActions = card.allowedActions,
+            liveReferenceCount = card.liveReferenceCount,
+            compatibilityStatus = card.compatibilityStatus,
+            authenticityOk = card.authenticityOk,
+            acquisitionChannel = card.acquisitionChannel,
+            resourceVersion = card.resourceVersion,
+        )
+
+    fun toAidlModelInfo(
+        modelRevisionId: String,
+        displayName: String,
+        installationState: String?,
+        installationId: String?,
+        artifactPackageId: String?,
+        licenseStatus: String?,
+        licenseDigest: String?,
+        pinned: Boolean,
+        loadedModelState: String?,
+        allowedActions: List<String>,
+        liveReferenceCount: Int,
+        compatibilityStatus: String?,
+        authenticityOk: Boolean?,
+        acquisitionChannel: String?,
+        resourceVersion: Long?,
     ): ai.omnillm.api.OmniModelInfo {
         val info = ai.omnillm.api.OmniModelInfo()
         info.modelRevisionId = modelRevisionId
         info.displayName = displayName
         info.installationState = installationState
         info.capabilities = emptyArray()
+        info.installationId = installationId
+        info.artifactPackageId = artifactPackageId
+        info.licenseStatus = licenseStatus
+        info.licenseDigest = licenseDigest
+        info.pinned = pinned
+        info.loadedModelState = loadedModelState
+        info.allowedActions = allowedActions.toTypedArray()
+        info.liveReferenceCount = liveReferenceCount
+        info.compatibilityStatus = compatibilityStatus
+        if (authenticityOk != null) {
+            info.hasAuthenticityOk = true
+            info.authenticityOk = authenticityOk
+        }
+        info.acquisitionChannel = acquisitionChannel
+        if (resourceVersion != null) {
+            info.hasResourceVersion = true
+            info.resourceVersion = resourceVersion
+        }
         return info
     }
 

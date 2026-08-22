@@ -155,7 +155,6 @@
     <string name="playground_embedding_result">Embeddings: %1$d vectors, %2$d dims</string>
     <string name="playground_conversation_empty">Start a conversation when a model is ready</string>
     <string name="playground_cancel_phase">Cancel: %1$s</string>
-    <!-- PLAY-AI-REPORTING / FEAT-AI-CONTENT-REPORT: in-app only, not external web -->
     <string name="playground_report_content">Report content</string>
     <string name="playground_report_content_cd">Report this AI-generated content in the app</string>
 
@@ -293,6 +292,7 @@
     <string name="onboarding_subtitle">Use this device for local inference without learning server or backend details first</string>
     <string name="onboarding_discover">Discover device</string>
     <string name="onboarding_recommend">Recommend models</string>
+    <string name="onboarding_first_inference">Run first inference in Playground</string>
     <string name="onboarding_select">Select recommendation</string>
     <string name="onboarding_device_summary">Device summary</string>
     <string name="onboarding_phase">Phase: %1$s</string>

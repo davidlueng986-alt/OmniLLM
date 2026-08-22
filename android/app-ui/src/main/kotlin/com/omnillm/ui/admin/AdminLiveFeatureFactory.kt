@@ -1,22 +1,33 @@
 package com.omnillm.ui.admin
 
+import ai.omnillm.api.CommandResult
 import ai.omnillm.api.IOmniAdmin
 import ai.omnillm.api.OmniCommandRequest
+import ai.omnillm.api.OmniDeleteJobParameters
 import ai.omnillm.api.OmniDownloadJobParameters
 import ai.omnillm.api.OmniImportJobParameters
 import ai.omnillm.api.OmniJobSpec
 import android.os.RemoteException
+import com.omnillm.core.canonical.generated.ArtifactPackageId
+import com.omnillm.core.canonical.generated.CapabilityId
+import com.omnillm.core.canonical.generated.EvidenceLabel
+import com.omnillm.core.canonical.generated.ModelRevisionId
 import com.omnillm.core.canonical.generated.OmniResult
+import com.omnillm.core.contracts.DeviceExecutionFingerprint
 import com.omnillm.core.contracts.PrincipalId
+import com.omnillm.core.contracts.RequestId
 import com.omnillm.core.errors.generated.OmniError
+import com.omnillm.core.state.domain.InstallationId
+import com.omnillm.core.state.domain.JobId
+import com.omnillm.core.state.domain.ModelInstallationAggregate
 import com.omnillm.features.autosetup.AutoSetupModule
 import com.omnillm.features.autosetup.catalog.FixtureCatalogCandidates
 import com.omnillm.features.autosetup.domain.DeviceDiscoverySnapshot
 import com.omnillm.features.autosetup.ports.AutoSetupJobPort
+import com.omnillm.features.autosetup.ports.FailClosedAutoSetupModelPort
+import com.omnillm.features.autosetup.ports.AutoSetupOrchestratorPort
 import com.omnillm.features.autosetup.ports.AutoSetupRuntimePorts
 import com.omnillm.features.autosetup.ports.DeviceProbePort
-import com.omnillm.features.autosetup.ports.FailClosedAutoSetupModelPort
-import com.omnillm.features.autosetup.ports.FailClosedAutoSetupOrchestratorPort
 import com.omnillm.features.autosetup.viewmodel.AutoSetupViewModel
 import com.omnillm.features.benchmark.BenchmarkFeatureModule
 import com.omnillm.features.benchmark.viewmodel.BenchmarkViewModel
@@ -36,6 +47,7 @@ import com.omnillm.features.modelhub.api.AcquisitionProgressUpdate
 import com.omnillm.features.modelhub.api.CancelAcquisitionSpec
 import com.omnillm.features.modelhub.api.ModelCard
 import com.omnillm.features.modelhub.api.ModelHubApi
+import com.omnillm.features.modelhub.api.ModelHubCommandIdentity
 import com.omnillm.features.modelhub.api.ModelHubJobHandle
 import com.omnillm.features.modelhub.api.ModelHubSnapshot
 import com.omnillm.features.modelhub.api.ModelLoadResult
@@ -60,10 +72,11 @@ import com.omnillm.runtime.job.JobKind
 import com.omnillm.runtime.job.JobParameters
 import com.omnillm.runtime.job.JobProgress
 import com.omnillm.runtime.job.JobRecord
-import com.omnillm.core.contracts.DeviceExecutionFingerprint
-import com.omnillm.core.canonical.generated.EvidenceLabel
+import com.omnillm.runtime.orchestrator.ClaimKind
+import com.omnillm.runtime.orchestrator.OrchestrationRequest
+import com.omnillm.runtime.orchestrator.PlanningResult
+import com.omnillm.runtime.orchestrator.SubmitResult
 import com.omnillm.core.contracts.IdempotencyKey
-import com.omnillm.core.state.domain.JobId
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
@@ -86,8 +99,12 @@ object AdminLiveFeatureFactory {
             deviceProbe = AndroidUiDeviceProbe(),
             catalog = FixtureCatalogCandidates(),
             jobs = AdminAutoSetupJobPort(admin),
+            // Model rows stay honest-fail-closed on the UI side: InstallationSnapshot
+            // lives in :runtime:model-manager, which must not reach app-ui
+            // (INV-001 / module dependency gate). Live installation state is
+            // projected by the ModelHub VM via Admin AIDL instead.
             models = FailClosedAutoSetupModelPort,
-            orchestrator = FailClosedAutoSetupOrchestratorPort,
+            orchestrator = AdminAutoSetupOrchestratorPort(admin),
         )
         return AutoSetupModule.createViewModel(AutoSetupModule.createApi(ports))
     }
@@ -145,26 +162,39 @@ class AdminProjectedModelHubApi(
             val installed = snap.models.orEmpty().mapNotNull { m ->
                 if (m == null || m.modelRevisionId.isNullOrBlank()) return@mapNotNull null
                 val entry = catalog.findByRevision(m.modelRevisionId)
+                val channel = m.acquisitionChannel?.takeIf { it.isNotBlank() }
+                    ?: entry?.acquisitionChannel
+                    ?: AcquisitionChannel.LOCAL_IMPORT
+                val license = m.licenseStatus?.takeIf { it.isNotBlank() }
+                    ?: com.omnillm.features.modelhub.api.LicenseStatus.UNKNOWN
+                val compatibility = m.compatibilityStatus?.takeIf { it.isNotBlank() }
+                    ?: com.omnillm.features.modelhub.api.CompatibilityStatus.NOT_CHECKED
+                val actions = m.allowedActions?.toList()?.filter { it.isNotBlank() }.orEmpty()
                 ModelCard(
                     modelRevisionId = m.modelRevisionId,
-                    artifactPackageId = entry?.artifactPackageId ?: FixtureArtifact.packageIdHex(),
-                    installationId = null,
-                    displayName = m.displayName.orEmpty().ifBlank { entry?.displayName ?: m.modelRevisionId.take(12) },
+                    artifactPackageId = m.artifactPackageId?.takeIf { it.isNotBlank() }
+                        ?: entry?.artifactPackageId
+                        ?: FixtureArtifact.packageIdHex(),
+                    installationId = m.installationId?.takeIf { it.isNotBlank() },
+                    displayName = m.displayName.orEmpty().ifBlank {
+                        entry?.displayName ?: m.modelRevisionId.take(12)
+                    },
                     installationState = m.installationState,
-                    loadedModelState = null,
-                    acquisitionChannel = entry?.acquisitionChannel ?: AcquisitionChannel.PINNED_DOWNLOAD,
+                    loadedModelState = m.loadedModelState?.takeIf { it.isNotBlank() },
+                    acquisitionChannel = channel,
                     byteLength = entry?.byteLength,
-                    licenseStatus = com.omnillm.features.modelhub.api.LicenseStatus.ACCEPTANCE_REQUIRED,
-                    authenticityOk = null,
-                    compatibilityStatus = com.omnillm.features.modelhub.api.CompatibilityStatus.NOT_CHECKED,
+                    licenseStatus = license,
+                    licenseDigest = m.licenseDigest?.takeIf { it.isNotBlank() } ?: entry?.licenseDigest,
+                    authenticityOk = if (m.hasAuthenticityOk) m.authenticityOk else null,
+                    compatibilityStatus = compatibility,
                     placementClass = null,
                     performanceRecorded = false,
-                    pinned = false,
-                    liveReferenceCount = 0,
-                    allowedActions = listOf(
-                        com.omnillm.features.modelhub.api.ModelHubAction.VIEW_EVIDENCE,
-                        com.omnillm.features.modelhub.api.ModelHubAction.DELETE,
-                    ),
+                    pinned = m.pinned,
+                    liveReferenceCount = m.liveReferenceCount.coerceAtLeast(0),
+                    resourceVersion = if (m.hasResourceVersion) m.resourceVersion else null,
+                    allowedActions = actions.ifEmpty {
+                        listOf(com.omnillm.features.modelhub.api.ModelHubAction.VIEW_EVIDENCE)
+                    },
                 )
             }
             val installedRevs = installed.map { it.modelRevisionId }.toSet()
@@ -173,9 +203,10 @@ class AdminProjectedModelHubApi(
                 .map { ModelCardProjector.fromCatalog(it) }
             val jobs = snap.activeJobs.orEmpty().mapNotNull { j ->
                 if (j == null || j.jobId.isNullOrBlank()) return@mapNotNull null
+                val kind = j.kind.orEmpty().ifBlank { "DOWNLOAD" }
                 AcquisitionJobView(
                     jobId = j.jobId,
-                    kind = "DOWNLOAD",
+                    kind = kind,
                     state = j.state.orEmpty(),
                     resourceVersion = j.resourceVersion,
                     progress = JobProgress(),
@@ -209,6 +240,9 @@ class AdminProjectedModelHubApi(
         val snap = getSnapshot(principal)
         if (snap is OmniResult.Err) return snap
         val s = (snap as OmniResult.Ok).value
+        if (!installationId.isNullOrBlank()) {
+            s.installed.firstOrNull { it.installationId == installationId }?.let { return OmniResult.ok(it) }
+        }
         if (modelRevisionId != null) {
             s.installed.firstOrNull { it.modelRevisionId == modelRevisionId }?.let { return OmniResult.ok(it) }
             s.suggested.firstOrNull { it.modelRevisionId == modelRevisionId }?.let { return OmniResult.ok(it) }
@@ -322,13 +356,34 @@ class AdminProjectedModelHubApi(
     override suspend fun startDelete(
         principal: PrincipalId,
         spec: StartDeleteSpec,
-    ): OmniResult<ModelHubJobHandle> =
-        OmniResult.err(
-            OmniError.CAPABILITY_UNSUPPORTED(
-                message = "model delete requires the control-plane ModelHubService drain path " +
-                    "(DELETE jobs are not executed by the runtime worker pipeline yet)",
-            ),
-        )
+    ): OmniResult<ModelHubJobHandle> {
+        requireLocalUi(principal)
+        return try {
+            val aidl = OmniJobSpec()
+            aidl.jobId = spec.jobId
+            aidl.kind = "DELETE"
+            aidl.command = toAidlCommand(spec.command)
+            aidl.deleteSpec = OmniDeleteJobParameters().apply {
+                resourceKind = "INSTALLATION"
+                resourceId = spec.installationId
+                expectedResourceVersion = spec.expectedResourceVersion
+                forceAfterDrain = spec.forceAfterDrain
+            }
+            val info = admin.startJob(aidl)
+            OmniResult.ok(
+                ModelHubJobHandle(
+                    jobId = info.jobId.orEmpty().ifBlank { spec.jobId },
+                    kind = info.kind.orEmpty().ifBlank { "DELETE" },
+                    state = info.state.orEmpty(),
+                    resourceVersion = info.resourceVersion,
+                    createdNew = true,
+                    installationId = spec.installationId,
+                ),
+            )
+        } catch (e: RemoteException) {
+            OmniResult.err(OmniError.INTERNAL(message = e.message ?: "startDelete remote failure"))
+        }
+    }
 
     override suspend fun cancelAcquisition(
         principal: PrincipalId,
@@ -366,38 +421,114 @@ class AdminProjectedModelHubApi(
         }
     }
 
-    override suspend fun setPinned(principal: PrincipalId, spec: SetPinSpec): OmniResult<ModelCard> =
-        OmniResult.err(OmniError.CAPABILITY_UNSUPPORTED(message = "pin requires ModelHub control-plane API"))
+    override suspend fun setPinned(principal: PrincipalId, spec: SetPinSpec): OmniResult<ModelCard> {
+        requireLocalUi(principal)
+        return try {
+            val result = admin.setInstalledModelPinned(
+                spec.installationId,
+                spec.pinned,
+                toAidlCommand(spec.command),
+            )
+            commandError(result)?.let { return OmniResult.err(it) }
+            getModelCard(principal, installationId = spec.installationId)
+        } catch (e: RemoteException) {
+            OmniResult.err(OmniError.INTERNAL(message = e.message ?: "setPinned remote failure"))
+        }
+    }
 
     override suspend fun startLoad(
         principal: PrincipalId,
         spec: StartLoadSpec,
-    ): OmniResult<ModelLoadResult> =
-        OmniResult.err(
-            OmniError.CAPABILITY_UNSUPPORTED(
-                message = "load requires ModelHub control-plane API (binder path)",
-            ),
-        )
+    ): OmniResult<ModelLoadResult> {
+        requireLocalUi(principal)
+        return try {
+            val result = admin.loadInstalledModel(spec.installationId, toAidlCommand(spec.command))
+            parseModelLoadResult(result, spec.installationId)
+        } catch (e: RemoteException) {
+            OmniResult.err(OmniError.INTERNAL(message = e.message ?: "startLoad remote failure"))
+        }
+    }
 
     override suspend fun startUnload(
         principal: PrincipalId,
         spec: StartUnloadSpec,
-    ): OmniResult<ModelLoadResult> =
-        OmniResult.err(
-            OmniError.CAPABILITY_UNSUPPORTED(
-                message = "unload requires ModelHub control-plane API (binder path)",
-            ),
-        )
+    ): OmniResult<ModelLoadResult> {
+        requireLocalUi(principal)
+        return try {
+            val result = admin.unloadInstalledModel(spec.installationId, toAidlCommand(spec.command))
+            parseModelLoadResult(result, spec.installationId)
+        } catch (e: RemoteException) {
+            OmniResult.err(OmniError.INTERNAL(message = e.message ?: "startUnload remote failure"))
+        }
+    }
 
     override suspend fun acceptLicense(
         principal: PrincipalId,
         spec: AcceptLicenseSpec,
-    ): OmniResult<ModelCard> =
-        OmniResult.err(
-            OmniError.CAPABILITY_UNSUPPORTED(
-                message = "license acceptance requires ModelHub control-plane API (binder path)",
+    ): OmniResult<ModelCard> {
+        requireLocalUi(principal)
+        return try {
+            val result = admin.acceptInstalledModelLicense(
+                spec.installationId,
+                spec.licenseDigest,
+                spec.sourceAssertion,
+                toAidlCommand(spec.command),
+            )
+            commandError(result)?.let { return OmniResult.err(it) }
+            getModelCard(principal, installationId = spec.installationId)
+        } catch (e: RemoteException) {
+            OmniResult.err(OmniError.INTERNAL(message = e.message ?: "acceptLicense remote failure"))
+        }
+    }
+
+    private fun toAidlCommand(command: ModelHubCommandIdentity): OmniCommandRequest =
+        OmniCommandRequest().apply {
+            commandId = command.commandId
+            idempotencyKey = command.idempotencyKey
+            canonicalInputDigest = command.canonicalInputDigest
+            if (command.expectedVersion != null) {
+                hasExpectedVersion = true
+                expectedVersion = command.expectedVersion!!
+            }
+        }
+
+    private fun commandError(result: CommandResult): OmniError? {
+        val err = result.error ?: return null
+        return OmniError.ofCode(
+            err.code.orEmpty().ifBlank { "INTERNAL" },
+            message = err.message,
+        )
+    }
+
+    private fun parseModelLoadResult(
+        result: CommandResult,
+        installationId: String,
+    ): OmniResult<ModelLoadResult> {
+        commandError(result)?.let { return OmniResult.err(it) }
+        val json = result.resultCanonicalJson.orEmpty()
+        return OmniResult.ok(
+            ModelLoadResult(
+                loadedModelId = jsonFieldLocal(json, "loadedModelId"),
+                installationId = jsonFieldLocal(json, "installationId") ?: installationId,
+                state = jsonFieldLocal(json, "state").orEmpty().ifBlank { result.state.orEmpty() },
+                engineBuildId = jsonFieldLocal(json, "engineBuildId"),
+                placementClass = jsonFieldLocal(json, "placementClass"),
             ),
         )
+    }
+
+    private fun jsonFieldLocal(json: String, key: String): String? {
+        if (json.isBlank()) return null
+        val quoted = Regex("""\"$key\"\s*:\s*\"([^\"\\]*(?:\.[^\"\\]*)*)\"""")
+        quoted.find(json)?.groupValues?.getOrNull(1)?.let { raw ->
+            return raw.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\")
+        }
+        val bare = Regex("""\"$key\"\\s*:\\s*(null|true|false|-?\\d+(?:\\.\\d+)?)""")
+        bare.find(json)?.groupValues?.getOrNull(1)?.let { v ->
+            return if (v == "null") null else v
+        }
+        return null
+    }
 
     override suspend fun beginAcquisitionAttempt(
         jobId: String,
@@ -533,6 +664,121 @@ private class AdminAutoSetupJobPort(private val admin: IOmniAdmin) : AutoSetupJo
         } catch (e: RemoteException) {
             OmniResult.err(OmniError.INTERNAL(message = e.message ?: "cancel job remote failure"))
         }
+    }
+}
+
+/**
+ * CODE-04: first-inference over Admin playground AIDL (INV-001).
+ * Plan is a capability gate only — candidate expansion stays on the plane.
+ * Submit/query/cancel reuse executePlaygroundChat / query / cancel.
+ */
+private class AdminAutoSetupOrchestratorPort(
+    private val admin: IOmniAdmin,
+) : AutoSetupOrchestratorPort {
+    override suspend fun plan(request: OrchestrationRequest): OmniResult<PlanningResult> {
+        val rev = request.requestedRevisionId.hex
+        val raw = try {
+            admin.getInferenceCapabilityState(CapabilityId.TEXT_GENERATION.id, rev)
+        } catch (e: RemoteException) {
+            return OmniResult.err(
+                OmniError.INTERNAL(message = e.message ?: "capability probe remote failure"),
+            )
+        }
+        return when (raw?.uppercase()) {
+            "CONDITIONAL", "SUPPORTED" ->
+                OmniResult.ok(PlanningResult(viable = emptyList(), rejections = emptyList()))
+            else ->
+                OmniResult.err(
+                    OmniError.CAPABILITY_UNSUPPORTED(
+                        message = "TEXT_GENERATION not operable for first inference (state=${raw ?: "UNKNOWN"})",
+                    ),
+                )
+        }
+    }
+
+    override suspend fun submit(request: OrchestrationRequest): OmniResult<SubmitResult> {
+        return try {
+            val cmd = OmniCommandRequest().apply {
+                commandId = UUID.randomUUID().toString()
+                idempotencyKey = request.idempotencyKey.value
+                canonicalInputDigest = request.canonicalRequestDigest.hex
+            }
+            val result = admin.executePlaygroundChat(
+                request.requestedRevisionId.hex,
+                FIRST_INFERENCE_PROBE,
+                request.requestId.value,
+                request.idempotencyKey.value,
+                cmd,
+            )
+            val err = result.error
+            if (err != null) {
+                return OmniResult.err(
+                    OmniError.ofCode(
+                        err.code.orEmpty().ifBlank { "INTERNAL" },
+                        message = err.message,
+                    ),
+                )
+            }
+            OmniResult.ok(
+                SubmitResult(
+                    requestId = request.requestId,
+                    claim = ClaimKind.NEW,
+                    state = result.state.orEmpty().ifBlank { "SUCCEEDED" },
+                    earliestStart = null,
+                    planning = null,
+                    actualRouting = null,
+                ),
+            )
+        } catch (e: RemoteException) {
+            OmniResult.err(OmniError.INTERNAL(message = e.message ?: "first-inference remote failure"))
+        }
+    }
+
+    override suspend fun cancel(requestId: RequestId): OmniResult<Unit> {
+        return try {
+            val cmd = OmniCommandRequest().apply {
+                commandId = UUID.randomUUID().toString()
+                idempotencyKey = "autosetup-cancel-${requestId.value}"
+                canonicalInputDigest = "e".repeat(64)
+            }
+            val result = admin.cancelPlaygroundRequest(requestId.value, cmd)
+            val err = result.error
+            if (err != null) {
+                OmniResult.err(
+                    OmniError.ofCode(
+                        err.code.orEmpty().ifBlank { "INTERNAL" },
+                        message = err.message,
+                    ),
+                )
+            } else {
+                OmniResult.ok(Unit)
+            }
+        } catch (e: RemoteException) {
+            OmniResult.err(OmniError.INTERNAL(message = e.message ?: "first-inference cancel remote failure"))
+        }
+    }
+
+    override suspend fun queryRequestState(requestId: RequestId): OmniResult<String> {
+        return try {
+            val result = admin.queryPlaygroundRequest(requestId.value)
+            val err = result.error
+            if (err != null) {
+                OmniResult.err(
+                    OmniError.ofCode(
+                        err.code.orEmpty().ifBlank { "INTERNAL" },
+                        message = err.message,
+                    ),
+                )
+            } else {
+                OmniResult.ok(result.state.orEmpty().ifBlank { "UNKNOWN" })
+            }
+        } catch (e: RemoteException) {
+            OmniResult.err(OmniError.INTERNAL(message = e.message ?: "first-inference query remote failure"))
+        }
+    }
+
+    companion object {
+        private const val FIRST_INFERENCE_PROBE = "auto-setup first inference probe"
     }
 }
 
