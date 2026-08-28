@@ -125,8 +125,14 @@ jobs:
       - name: Unit tests (JVM + Android host; fail closed)
         run: ./gradlew test --no-daemon --stacktrace
 
-      - name: Root check (drift + 16 KB + dep edges)
-        run: ./gradlew check --no-daemon --stacktrace
+      - name: Root hermetic check (drift + dep edges; no artifact gates)
+        run: |
+          set -euo pipefail
+          # CI-03: root `check` is hermetic (contract/AIDL drift + dependency/
+          # module edges only). Artifact gates (llama digest, native .so proof,
+          # 16 KB, APK clean, SBOM) run via `checkReleaseArtifacts` AFTER
+          # assemble below — never before artifacts exist.
+          ./gradlew check --no-daemon --stacktrace
 
       - name: Decode release keystore (fail closed on tag push)
         id: keystore
@@ -181,6 +187,17 @@ jobs:
             :android:companion-sandbox:assembleRelease \
             --no-daemon --stacktrace
 
+      # ------------------------------------------------------------------
+      # Release ARTIFACT gates — AFTER assemble (CI-03; not part of the
+      # hermetic root `check` which ran pre-assemble). Aggregates:
+      #   checkLlamaArtifactDigest + checkNative16kb + checkApkClean
+      #   + checkSbomVsApk + :android:native:verifyNativeLibsPresent
+      # ------------------------------------------------------------------
+      - name: Release artifact gates (llama digest + native proof + 16 KB + APK clean + SBOM)
+        run: |
+          set -euo pipefail
+          ./gradlew checkReleaseArtifacts --no-daemon --stacktrace
+
       - name: Verify APK signatures (apksigner, fail closed)
         if: steps.keystore.outputs.signing == 'true'
         run: |
@@ -221,6 +238,8 @@ jobs:
       - name: Native 16 KB gates
         run: |
           set -euo pipefail
+          # ELF scan + native proof already ran inside checkReleaseArtifacts
+          # above; this step re-asserts the scan and adds per-APK zip-align.
           ./gradlew checkNative16kb --no-daemon --stacktrace
           python tools/ci/check_elf_16kb_alignment.py --min-align 16384
           shopt -s nullglob

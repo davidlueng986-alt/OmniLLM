@@ -7,10 +7,17 @@
 #   4. Optional generate + git clean check (belt-and-suspenders)
 #   5. Module dependency rules + dep edges (INV-001 / ADR-010 / ADR-007)
 #   6. Unit tests (JVM + Android host) - fail closed
-#   7. Root check (drift + 16 KB + dep edges + module rules) + Android lint
+#   7. HERMETIC root check (contract/AIDL drift + dep edges + module rules
+#      only — no assemble inputs, no .so, no APK) + Android lint
 #   8. assembleDebug + assembleRelease (unsigned; no secrets on PR CI)
-#   9. Native 16 KB ELF + APK zip-align gates
+#   9. Release ARTIFACT gates AFTER assemble: checkReleaseArtifacts
+#      (llama digest + native .so proof + 16 KB ELF + APK clean + SBOM)
+#      + per-APK zip-align
 #  10. Upload APK artifacts
+#
+# Real llama / GGUF is MANUAL/LOCAL, not a required CI gate: the connected
+# tests job runs model-free smoke only (RealLlamaUpstreamInstrumentedTest
+# Assume-skips when no GGUF fixture is pushed; no ~300 MB download/push).
 #
 # Hard rules: do not invent types/states/errors; never put signing secrets in the
 # repo; no Play Console upload automation; never elevate engine QUALIFIED/SUPPORTED.
@@ -204,13 +211,16 @@ jobs:
         # Note: --continue surfaces all module failures, but step still fails if any failed.
 
       # ------------------------------------------------------------------
-      # Root verification + lint (detekt not configured — intentionally skipped)
+      # HERMETIC root verification (CI-03) — runs BEFORE assemble.
+      # Root `check` now aggregates ONLY: checkContractDrift + checkAidlDrift
+      # + checkDependencyEdges + checkModuleDependencyRules. Artifact-dependent
+      # gates (llama digest, native .so proof, 16 KB, APK clean, SBOM) live in
+      # `checkReleaseArtifacts` and run AFTER assemble below. This step must
+      # pass on a fresh checkout with no assembled artifacts.
       # ------------------------------------------------------------------
-      - name: Root check (contract drift + native 16 KB + dependency rules)
+      - name: Root hermetic check (contract/AIDL drift + dependency rules)
         run: |
           set -euo pipefail
-          # Aggregates: checkContractDrift + checkNative16kb + checkDependencyEdges
-          # + checkModuleDependencyRules
           ./gradlew check --no-daemon --stacktrace
 
       - name: Android lint (app modules)
@@ -247,22 +257,25 @@ jobs:
             --no-daemon --stacktrace
 
       # ------------------------------------------------------------------
-      # Native 16 KB packaging gates (ANDROID-16KB) — fail closed
+      # Release ARTIFACT gates — AFTER assemble (CI-03; not part of the
+      # hermetic root `check` which already ran pre-assemble).
+      # checkReleaseArtifacts aggregates:
+      #   checkLlamaArtifactDigest (BLD-D2 stripped llama.cpp digest lock)
+      #   + checkNative16kb (ANDROID-16KB ELF scan, fails closed on no .so)
+      #   + checkApkClean (D10 junk-free + C-07 natives)
+      #   + checkSbomVsApk (D9 packaged set, both directions)
+      #   + :android:native:verifyNativeLibsPresent (BLD-13 native proof)
       # ------------------------------------------------------------------
-      - name: Native verification (libomnillm_llama.so for prod ABIs)
+      - name: Release artifact gates (llama digest + native proof + 16 KB + APK clean + SBOM)
         run: |
           set -euo pipefail
-          # BLD-05: native packaging proof was never exercised in CI. This runs
-          # the same gate root `check` now aggregates (BLD-13).
-          ./gradlew :android:native:verifyNativeLibsPresent --no-daemon --stacktrace
+          ./gradlew checkReleaseArtifacts --no-daemon --stacktrace
 
       - name: Native 16 KB ELF alignment (*.so scan)
         run: |
           set -euo pipefail
-          # Fail closed (BLD-05/BLD-13): no .so at all is a build break, and
-          # misaligned .so also fail. check_elf_16kb_alignment.py exits 1 when
-          # no .so are found; guard here as belt-and-suspenders.
-          ./gradlew checkNative16kb --no-daemon --stacktrace
+          # Belt-and-suspenders raw scan next to the Gradle aggregate: no .so
+          # at all is a build break, and misaligned .so also fail.
           python tools/ci/check_elf_16kb_alignment.py --min-align 16384
           if ! find android/native -name '*.so' | grep -q .; then
             echo "::error::No .so files found — native verification produced no shared libraries (fail closed)." >&2
@@ -339,10 +352,15 @@ jobs:
   # Instrumented / connected tests on an emulator (BLD-05).
   # Was never run in CI; runs fail-closed (continue-on-error: false) but in a
   # separate job so a flaky emulator env cannot block artifact + unit gates.
-  # NOTE: :android:runtime-service:RealLlamaUpstreamInstrumentedTest loads the
-  # real libomnillm_llama.so, so this job builds the native lib (NDK) first.
-  # Needs network on the runner for SDK + emulator system image downloads
-  # (github-hosted ubuntu-latest provides hardware acceleration).
+  # MODEL-FREE SMOKE ONLY (product decision): CI never downloads or adb-pushes
+  # a ~300 MB GGUF. RuntimeServiceInstrumentedSmokeTest and peers that need no
+  # model run here; RealLlamaUpstreamInstrumentedTest Assume-skips when the
+  # GGUF fixture is absent. Real llama / GGUF runs are MANUAL/LOCAL only —
+  # not a required CI gate.
+  # NOTE: this job still builds the native lib (NDK) so the smoke tests can
+  # exercise the packaged libomnillm_llama.so. Needs network on the runner for
+  # SDK + emulator system image downloads (github-hosted ubuntu-latest provides
+  # hardware acceleration).
   # --------------------------------------------------------------------------
   connected-tests:
     name: Instrumented tests (emulator API 34 x86_64)

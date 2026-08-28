@@ -129,6 +129,10 @@ tasks.register("toolsCodegen") {
 // "stripped-packaged"). Also re-asserts the D1 build-info pin (upstream
 // commit embedded). APK source: app-ui release APK, or the AGP
 // stripped_native_libs intermediates when no APK is assembled yet.
+//
+// ARTIFACT GATE (not hermetic): requires assembled release artifacts or AGP
+// stripped-native intermediates. Runs only via `checkReleaseArtifacts`
+// (after assemble) — never inside the hermetic root `check`.
 // ---------------------------------------------------------------------------
 val checkLlamaArtifactDigest by tasks.registering(Exec::class) {
     group = "verification"
@@ -151,6 +155,8 @@ val checkLlamaArtifactDigest by tasks.registering(Exec::class) {
 // Native 16 KB packaging gates (ANDROID-NATIVE / ANDROID-16KB)
 // Fail closed: no .so at all is a build break (missing packaged natives), and
 // misaligned .so also fail (see tools/ci/check_elf_16kb_alignment.py).
+// ARTIFACT GATE (not hermetic): scans packaged/prebuilt .so, so it needs the
+// native build outputs — runs only via `checkReleaseArtifacts` after assemble.
 // ---------------------------------------------------------------------------
 val checkNative16kb by tasks.registering(Exec::class) {
     group = "verification"
@@ -191,7 +197,8 @@ val checkDependencyEdges by tasks.registering(Exec::class) {
 // D10: packaged-APK cleanliness gate (GA-GAPS FIX)
 // Fail closed on the RELEASE app-ui APK (junk-free + C-07 natives present).
 // The task resolves the APK at execution time and skips with a warning when it
-// is absent, so pure-JVM / config-only `check` runs do not hard-fail.
+// is absent, so pre-assemble runs do not hard-fail. ARTIFACT GATE: only
+// meaningful after assembleRelease — runs via `checkReleaseArtifacts`.
 // ---------------------------------------------------------------------------
 
 val checkApkClean by tasks.registering(Exec::class) {
@@ -254,23 +261,40 @@ val checkSbomVsApk by tasks.registering(Exec::class) {
     outputs.upToDateWhen { false } // path resolved at execution time
 }
 
+// ---------------------------------------------------------------------------
+// Hermetic root `check` (CI-03): drift + dependency/module edges ONLY.
+// No assemble inputs, no native .so, no APK — must pass on a fresh checkout
+// without building artifacts. Unit tests stay on the separate root `test`
+// task; artifact-dependent gates moved to `checkReleaseArtifacts` below.
+// ---------------------------------------------------------------------------
 tasks.register("check") {
     group = "verification"
     description =
-        "Root verification (contract drift + AIDL drift + native 16 KB + packaged .so + dep edges)"
+        "Hermetic verification (contract drift + AIDL drift + dependency/module edges); artifact gates live in checkReleaseArtifacts"
     dependsOn(checkContractDrift)
     dependsOn(checkAidlDrift)
-    dependsOn(checkNative16kb)
     dependsOn(checkDependencyEdges)
-    // BLD-13: aggregate the native packaging proof (libomnillm_llama.so for
-    // arm64-v8a + x86_64) so root `check` fails closed when natives are missing.
-    dependsOn(":android:native:verifyNativeLibsPresent")
+}
+
+// ---------------------------------------------------------------------------
+// Release artifact aggregate (CI-03): depends on assembled artifacts, so it
+// MUST run AFTER assembleDebug/assembleRelease (CI runs it post-assemble;
+// never inside the hermetic pre-assemble `check`).
+// ---------------------------------------------------------------------------
+tasks.register("checkReleaseArtifacts") {
+    group = "verification"
+    description =
+        "Artifact gates after assemble: llama digest + native .so proof + 16 KB ELF + APK clean (D10) + SBOM vs APK (D9)"
     // BLD-D2: stripped-packaged llama.cpp digest lock gate.
     dependsOn(checkLlamaArtifactDigest)
+    // ANDROID-16KB: monorepo *.so ELF 16 KB scan (fails closed when no .so).
+    dependsOn(checkNative16kb)
     // D10/D9: packaged-APK cleanliness + SBOM-vs-APK gates (skip-warn when the
     // release APK or the out-of-repo SBOM is absent; fail closed when present).
     dependsOn(checkApkClean)
     dependsOn(checkSbomVsApk)
+    // BLD-13: packaged native proof (libomnillm_llama.so for arm64-v8a + x86_64).
+    dependsOn(":android:native:verifyNativeLibsPresent")
 }
 
 // ---------------------------------------------------------------------------

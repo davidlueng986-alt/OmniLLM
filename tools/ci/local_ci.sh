@@ -61,10 +61,10 @@ fi
 echo "==> [local_ci] repo: $ROOT"
 echo "==> [local_ci] python: $PYTHON ($("$PYTHON" --version 2>&1))"
 
-echo "==> [0/11] Dependency edges (INV-001 / engines→data)"
+echo "==> [0/15] Dependency edges (INV-001 / engines→data)"
 "$PYTHON" tools/ci/check_dependency_edges.py
 
-echo "==> [1/11] Specs authority present"
+echo "==> [1/15] Specs authority present"
 for f in \
   specs/canonical-types.yaml \
   specs/error-catalog.yaml \
@@ -81,13 +81,13 @@ do
   test -f "$f" || { echo "MISSING: $f" >&2; exit 1; }
 done
 
-echo "==> [2/11] Install codegen deps (idempotent)"
+echo "==> [2/15] Install codegen deps (idempotent)"
 "$PYTHON" -m pip install -q -r tools/codegen/requirements.txt
 
-echo "==> [3/11] Contract drift gate (BEFORE regenerate)"
+echo "==> [3/15] Contract drift gate (BEFORE regenerate)"
 "${GW[@]}" checkContractDrift -Pomnillm.python="$PYTHON" --stacktrace
 
-echo "==> [4/11] generateContracts + clean generated tree"
+echo "==> [4/15] generateContracts + clean generated tree"
 "${GW[@]}" generateContracts -Pomnillm.python="$PYTHON" --stacktrace
 if ! git diff --quiet -- \
   'core/canonical/src/main/kotlin/com/omnillm/core/canonical/generated' \
@@ -102,33 +102,33 @@ then
   exit 1
 fi
 
-echo "==> [5/12] AIDL drift gate (API-20)"
+echo "==> [5/15] AIDL drift gate (API-20)"
 "${GW[@]}" checkAidlDrift -Pomnillm.python="$PYTHON" --stacktrace
 
-echo "==> [6/12] Module dependency boundary gate (INV-001 / ADR-010)"
+echo "==> [6/15] Module dependency boundary gate (INV-001 / ADR-010)"
 "${GW[@]}" checkModuleDependencyRules -Pomnillm.python="$PYTHON" --stacktrace
 
-echo "==> [7/12] Dependency edges (Gradle task + script)"
+echo "==> [7/15] Dependency edges (Gradle task + script)"
 "${GW[@]}" checkDependencyEdges -Pomnillm.python="$PYTHON" --stacktrace
 
-echo "==> [8/12] Unit tests (JVM + Android testDebugUnitTest) - fail closed"
+echo "==> [8/15] Unit tests (JVM + Android testDebugUnitTest) - fail closed"
 "${GW[@]}" test -Pomnillm.python="$PYTHON" --stacktrace --continue
 
-echo "==> [9/12] Root check (drift + native 16 KB + dependency rules)"
+echo "==> [9/15] Hermetic root check (contract/AIDL drift + dependency rules; NO artifact gates)"
 "${GW[@]}" check -Pomnillm.python="$PYTHON" --stacktrace
 
 if [[ "$SKIP_LINT" -eq 0 ]]; then
-  echo "==> [10/12] Android lint (app modules); detekt intentionally skipped"
+  echo "==> [10/15] Android lint (app modules); detekt intentionally skipped"
   "${GW[@]}" \
     :android:app-ui:lintDebug \
     :android:companion-sandbox:lintDebug \
     -Pomnillm.python="$PYTHON" --stacktrace
 else
-  echo "==> [10/12] Android lint SKIPPED (--skip-lint)"
+  echo "==> [10/15] Android lint SKIPPED (--skip-lint)"
 fi
 
 if [[ "$SKIP_ASSEMBLE" -eq 0 ]]; then
-  echo "==> [11/12] assembleDebug (+ release unless --skip-release)"
+  echo "==> [11/15] assembleDebug (+ release unless --skip-release)"
   "${GW[@]}" \
     :android:app-ui:assembleDebug \
     :android:companion-sandbox:assembleDebug \
@@ -140,7 +140,7 @@ if [[ "$SKIP_ASSEMBLE" -eq 0 ]]; then
       -Pomnillm.python="$PYTHON" --stacktrace
   fi
 
-  echo "==> [12/12] Native 16 KB APK zip-align"
+  echo "==> [12/15] Native 16 KB ELF scan + APK zip-align"
   "$PYTHON" tools/ci/check_elf_16kb_alignment.py --min-align 16384
   shopt -s nullglob
   apks=(
@@ -157,9 +157,18 @@ if [[ "$SKIP_ASSEMBLE" -eq 0 ]]; then
     echo "  zip-align: $apk"
     "$PYTHON" tools/ci/check_apk_16kb_zipalign.py "$apk"
   done
+
+  if [[ "$SKIP_RELEASE" -eq 0 ]]; then
+    # CI-03: artifact gates run AFTER assemble, never inside hermetic check.
+    # Aggregates llama digest (BLD-D2) + 16 KB + native proof (BLD-13)
+    # + D10 APK clean + D9 SBOM-vs-APK.
+    echo "==> [13/15] Release artifact gates AFTER assemble (checkReleaseArtifacts)"
+    "${GW[@]}" checkReleaseArtifacts -Pomnillm.python="$PYTHON" --stacktrace
+  else
+    echo "==> [13/15] release artifact gates SKIPPED (--skip-release: llama digest / D10 / D9 need release artifacts)"
+  fi
 else
-  echo "==> [10-11/12] assemble + APK 16 KB SKIPPED (--skip-assemble)"
-  "$PYTHON" tools/ci/check_elf_16kb_alignment.py --min-align 16384
+  echo "==> [11-13/15] assemble + release artifact gates SKIPPED (--skip-assemble; hermetic check only)"
 fi
 
 echo ""
