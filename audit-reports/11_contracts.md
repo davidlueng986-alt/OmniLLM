@@ -1,5 +1,7 @@
 # 11 — Contract Drift Audit
 
+> Historical; CI policy as of `fix/ci-hermetic-gates`: hermetic root `check` has no digest/16kb/apk/sbom gates — artifact gates run post-assemble.
+
 | Field | Value |
 |---|---|
 | Audit ID | `11_contracts` |

@@ -64,7 +64,7 @@ Status: `OPEN` | `PARTIAL` | `DONE`.
 |---|---|---|---|
 | SW-BUILD-01 | Keep `:android:app-ui:assembleRelease` green on CI/local | **DONE** (re-verify each PR) | `./gradlew :android:app-ui:assembleRelease`; log `assemble-run-latest2.txt` |
 | SW-BUILD-02 | Keep `./gradlew test` green | **DONE** (re-verify) | `GAP_CLOSEOUT.md` §A; `tools/ci/local_ci.ps1` |
-| SW-BUILD-03 | Root `check` + 16 KB gates on packaged `.so` | **DONE** tooling; re-run when natives change | `./gradlew checkNative16kb`; `tools/ci/check_elf_16kb_alignment.py`; `check_apk_16kb_zipalign.py` |
+| SW-BUILD-03 | Root `check` (hermetic) + 16 KB gates on packaged `.so` (post-assemble) | **DONE** tooling; re-run when natives change | Hermetic `check` = contract/AIDL drift + unit tests (via `test`) + dep edges — missing `.so`/APK must NOT make it red; `./gradlew checkNative16kb`; `tools/ci/check_elf_16kb_alignment.py`; `check_apk_16kb_zipalign.py` run after assemble |
 | SW-BUILD-04 | Refresh stale root `README.md` “skeleton only” blurb → point at `BUILD_STATUS.md` | **DONE** | `README.md` points at `BUILD_STATUS.md`, `PRODUCT_READINESS_CHECKLIST.md`, `AGENTS.md` |
 | SW-BUILD-05 | Optional: enable R8 minify only after smoke checklist | **OPEN** (default minify off is correct) | `android/app-ui/build.gradle.kts`; `gradle/RELEASE_CHECKLIST.md` §H; JNI/AIDL keep rules present |
 | SW-BUILD-06 | Coherent versionName/versionCode main + companion | **DONE** | `gradle/libs.versions.toml` `appVersion*` / `companionVersion*` → `0.2.0` / `2` (`a19d535`) |

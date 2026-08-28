@@ -4,6 +4,13 @@ All notable changes to this monorepo. Format inspired by Keep a Changelog;
 findings referenced by their launch-readiness IDs (BLD-*, COR-*, API-*, SEC-*,
 TST-*, FTR-*). Honest statuses only — no invented device evidence.
 
+> **Historical; CI policy as of `fix/ci-hermetic-gates`:** entries below record what each commit
+> did at the time. Current policy: root `check` is hermetic (contract/AIDL drift + unit tests via
+> `test` + dependency/module edges only — missing `.so`/APK must NOT make it red); artifact gates
+> (digest / 16 KB ELF / APK clean / SBOM) run after `assemble`; connected/instrumented llama is
+> model-free smoke in CI (missing GGUF skips — skip/manual, never a required CI fail; real llama =
+> manual/local; no ~300 MB GGUF download in Actions).
+
 ## [Unreleased / 0.2.0-rc2] — GA-hardening wave (C-01..C-15 + D fixes)
 
 Launch-readiness fix wave (Stage 4 of 7, branch `fix/launch-readiness`).

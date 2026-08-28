@@ -1,5 +1,7 @@
 # 12 — Test & CI Readiness Audit
 
+> Historical; CI policy as of `fix/ci-hermetic-gates`: missing GGUF skips (model-free connected smoke; real llama = manual/local; no ~300 MB GGUF download in Actions), artifact gates post-assemble, hermetic `check` has no digest/16kb/apk/sbom. The CI-01 recommendation below has been adopted via skip.
+
 | Field | Value |
 |---|---|
 | **Auditor role** | Senior independent auditor (Test & CI readiness) |
