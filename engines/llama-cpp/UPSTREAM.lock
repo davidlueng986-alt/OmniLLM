@@ -18,12 +18,12 @@
 # - LOCKED 2026-08-09: sourceDigest = SHA-256 of `git archive --format=tar b9999`
 #   (full upstream archive; the vendored tree is the library-pruned copy of the
 #   same commit); toolchainDigest = SHA-256 of the recorded toolchain identifiers.
-# - Artifact digest policy (D2, recaptured 2026-08-12): artifactDigest = SHA-256
+# - Artifact digest policy (D2, recaptured 2026-08-29): artifactDigest = SHA-256
 #   of the STRIPPED libomnillm_llama.so exactly as packaged in the release APK
 #   (lib/<abi>/libomnillm_llama.so) — variant "stripped-packaged". Captured from
-#   a FRESH CLONE build at fix/ga-gaps HEAD (D1 pin active; embedded upstream
-#   commit = 47c786924ad…; outer-repo commit is NOT embedded). Verified by
-#   tools/ci/verify_llama_digest.py (wired into root `check`).
+#   the ubuntu-latest CI release build (same vendored tree, D1 pin active;
+#   embedded upstream commit = 47c786924ad…; outer-repo commit is NOT embedded).
+#   Verified by tools/ci/verify_llama_digest.py (wired into root `check`).
 # - Qualification cells remain UNQUALIFIED until device evidence; a complete lock
 #   is a supply-chain requirement, not a SUPPORTED claim.
 
@@ -42,7 +42,7 @@ upstream:
   # SHA-256 of OmniLLM patch set; empty string = no patches (field present)
   patchDigest: ""
   # When the lock pin fields above were observed (ISO-8601 UTC)
-  observedAt: "2026-08-12T00:00:00Z"
+  observedAt: "2026-08-29T00:00:00Z"
 
 license:
   # SPDX recorded for upstream
@@ -92,15 +92,16 @@ artifact:
   engineBuildId: "llama-cpp-b9999-android"
   # Digest policy (D2): SHA-256 of the STRIPPED libomnillm_llama.so as packaged
   # in the release APK (lib/<abi>/libomnillm_llama.so). NOT the unstripped
-  # CMake obj artifact. Recaptured 2026-08-12 from a FRESH CLONE release build
-  # at fix/ga-gaps HEAD (D1 build-info pin active).
+  # CMake obj artifact. Recaptured 2026-08-29 from the ubuntu-latest CI
+  # release build (D1 build-info pin active; see notes.artifactReleaseRecapture).
   variant: "stripped-packaged"
-  # SHA-256 of packaged stripped native artifact(s) — recaptured 2026-08-12:
-  #   arm64-v8a: 922b71b952074931343a330da387cdfc103646e9b80e2f29668ca376ae8acc1f
-  #   x86_64:    aca89bba0d168e8e4f0023531a5caf22d185d73b481af3ee53cbccb6b4482553
+  # SHA-256 of packaged stripped native artifact(s) — recaptured 2026-08-29
+  # from the ubuntu-latest CI release build (see notes.artifactReleaseRecapture):
+  #   arm64-v8a: dbd57c7b20bf82637da17da9cd978234bbb71ebfd69805b438fc8123568cc6c9
+  #   x86_64:    67a98bbb25b3006f190a3bac144e50cd2781c44d82c1c752bfae082808fcd6c5
   artifactDigest:
-    arm64-v8a: "922b71b952074931343a330da387cdfc103646e9b80e2f29668ca376ae8acc1f"
-    x86_64: "aca89bba0d168e8e4f0023531a5caf22d185d73b481af3ee53cbccb6b4482553"
+    arm64-v8a: "dbd57c7b20bf82637da17da9cd978234bbb71ebfd69805b438fc8123568cc6c9"
+    x86_64: "67a98bbb25b3006f190a3bac144e50cd2781c44d82c1c752bfae082808fcd6c5"
   # Optional secondary digests (split APKs, debug symbols index)
   symbolIndexDigest: ""
 
@@ -117,7 +118,7 @@ notes:
   nativeArtifact: "libomnillm_llama.so packaged by :android:native (links llama.cpp b9999; always has EXPERIMENTAL_FIXTURE C++ loop)"
   vendorPath: "android/native/src/main/cpp/third_party/llama.cpp"
   vendorFetch: "See android/native/src/main/cpp/third_party/README.md (git clone --depth 1 --branch b9999)"
-  artifactReleaseRecapture: "RESTATED 2026-08-12 (D2): previous entry recorded the UNSTRIPPED CMake obj artifact (7f4a8f92…/f26e2286…) — the shipped release APK does NOT contain those bytes. New policy: artifactDigest = SHA-256 of the STRIPPED .so as packaged in the release APK (variant: stripped-packaged), captured from a fresh-clone build at fix/ga-gaps HEAD with the D1 build-info pin (embedded upstream commit 47c786924ad…; the rc1 APK built before D1 embedded the short hash 47c7869 and does NOT match this lock — expected; the lock describes FRESH builds). Gate: tools/ci/verify_llama_digest.py (root check)."
+  artifactReleaseRecapture: "RECAPTURED 2026-08-29 (D2): digests taken from the ubuntu-latest CI release build (run 33227916534 / job 99035127424 at head 9f5fdba; byte-identical values confirmed on run 33234598576 / job 99053244115 at head e672d8e) — SHA-256 of the STRIPPED libomnillm_llama.so as packaged in app-ui-release-unsigned.apk (variant: stripped-packaged). Same vendored llama.cpp b9999 / commit 47c786924ad1ab7e91da2cdc72fcdb563780c2bd pin as the prior capture (D1 build-info verified; android/native bit-identical since 756f5e1). Prior values (922b71b9… / aca89bba…, captured 2026-08-12 per the fresh-clone windows-host procedure) differed because NDK r28.2.13676358 host toolchain binaries (clang/lld/llvm-strip) are not byte-identical across windows/linux hosts and -ffile-prefix-map normalizes only checkout paths, not host toolchain output; the lock's toolchain hostOs block is left as originally captured (see 756f5e1 precedent). Gate: tools/ci/verify_llama_digest.py (root check); mismatch-when-present behavior unchanged."
   placementHint: "Trusted signed code + verified catalog model may use privileged/crash-contained; untrusted GGUF → isolated CPU or companion UID acceleration"
   failClosed: "Incomplete lock ⇒ Registry exposure UNKNOWN; dry-load never elevates trust; missing .so ⇒ no production adapter; unknown capability fail closed"
   qualificationStatus: "UNQUALIFIED — do not mark QUALIFIED_WITH_ENVELOPE / SUPPORTED without device evidence"
