@@ -115,7 +115,7 @@ echo "==> [8/15] Unit tests (JVM + Android testDebugUnitTest) - fail closed"
 "${GW[@]}" test -Pomnillm.python="$PYTHON" --stacktrace --continue
 
 echo "==> [9/15] Hermetic root check (contract/AIDL drift + dependency rules; NO artifact gates)"
-"${GW[@]}" check -Pomnillm.python="$PYTHON" --stacktrace
+"${GW[@]}" checkContractDrift checkAidlDrift checkDependencyEdges checkModuleDependencyRules -Pomnillm.python="$PYTHON" --stacktrace
 
 if [[ "$SKIP_LINT" -eq 0 ]]; then
   echo "==> [10/15] Android lint (app modules); detekt intentionally skipped"

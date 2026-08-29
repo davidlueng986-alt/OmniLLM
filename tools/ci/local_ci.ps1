@@ -130,7 +130,7 @@ Write-Host "==> [8/15] Unit tests (JVM + Android testDebugUnitTest) - fail close
 Invoke-Gradlew test "-Pomnillm.python=$Python" --stacktrace --continue
 
 Write-Host "==> [9/15] Hermetic root check (contract/AIDL drift + dependency rules; NO artifact gates)"
-Invoke-Gradlew check "-Pomnillm.python=$Python" --stacktrace
+Invoke-Gradlew checkContractDrift checkAidlDrift checkDependencyEdges checkModuleDependencyRules "-Pomnillm.python=$Python" --stacktrace
 
 if (-not $SkipLint) {
     Write-Host "==> [10/15] Android lint (app modules); detekt intentionally skipped"
