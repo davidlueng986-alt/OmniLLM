@@ -387,7 +387,7 @@ jobs:
           PY
 
       - name: Upload release APK / AAB artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: omnillm-release-${{ github.ref_name }}-${{ github.sha }}
           path: |
@@ -399,7 +399,7 @@ jobs:
           retention-days: 30
 
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: omnillm-sbom-${{ github.ref_name }}-${{ github.sha }}
           path: sbom/
