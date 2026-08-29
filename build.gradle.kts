@@ -266,6 +266,9 @@ val checkSbomVsApk by tasks.registering(Exec::class) {
 // No assemble inputs, no native .so, no APK — must pass on a fresh checkout
 // without building artifacts. Unit tests stay on the separate root `test`
 // task; artifact-dependent gates moved to `checkReleaseArtifacts` below.
+// NOTE: unqualified `./gradlew check` also fans out to every subproject
+// `check` (AGP modules pull in lint / release-variant compilation). CI
+// therefore invokes these four gates explicitly (see .github/workflows/ci.yml).
 // ---------------------------------------------------------------------------
 tasks.register("check") {
     group = "verification"

@@ -212,16 +212,25 @@ jobs:
 
       # ------------------------------------------------------------------
       # HERMETIC root verification (CI-03) — runs BEFORE assemble.
-      # Root `check` now aggregates ONLY: checkContractDrift + checkAidlDrift
-      # + checkDependencyEdges + checkModuleDependencyRules. Artifact-dependent
-      # gates (llama digest, native .so proof, 16 KB, APK clean, SBOM) live in
-      # `checkReleaseArtifacts` and run AFTER assemble below. This step must
-      # pass on a fresh checkout with no assembled artifacts.
+      # Invokes the four hermetic gates EXPLICITLY: checkContractDrift +
+      # checkAidlDrift + checkDependencyEdges + checkModuleDependencyRules.
+      # Unqualified `./gradlew check` fans out to every subproject `check`
+      # (AGP modules pull in lint / release-variant compilation), which is
+      # NOT hermetic. Artifact-dependent gates (llama digest, native .so
+      # proof, 16 KB, APK clean, SBOM) live in `checkReleaseArtifacts` and
+      # run AFTER assemble below; unit tests already ran in the dedicated
+      # step above. This step must pass on a fresh checkout with no
+      # assembled artifacts.
       # ------------------------------------------------------------------
       - name: Root hermetic check (contract/AIDL drift + dependency rules)
         run: |
           set -euo pipefail
-          ./gradlew check --no-daemon --stacktrace
+          ./gradlew \
+            checkContractDrift \
+            checkAidlDrift \
+            checkDependencyEdges \
+            checkModuleDependencyRules \
+            --no-daemon --stacktrace
 
       - name: Android lint (app modules)
         run: |
