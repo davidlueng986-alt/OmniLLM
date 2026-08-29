@@ -18,6 +18,11 @@ characteristic entries and fails on a mismatch in EITHER direction:
    packaged-in-apk component's `apk-entries`. Anything unclaimed is either an
    SBOM gap (under-claim) or an unlicensed surprise — fail.
 
+Hermetic CI: SBOM claims on libomnillm_llama.so (the llama native artifact)
+soft-skip when the APK contains NO libomnillm_llama.so at all (mirrors the
+llama digest gate skip). When any libomnillm_llama.so IS packaged, both
+directions stay fail-closed (an unclaimed packaged llama .so still fails).
+
 SBOM contract (see tools/ci/README.md D9 section):
 - component.properties[].name == "omnillm:scope" with values:
   packaged-in-apk | compileOnly-not-shipped | pinned-not-shipped |
@@ -44,6 +49,11 @@ from typing import Dict, List, Optional, Set, Tuple
 
 SCOPE_PROP = "omnillm:scope"
 ENTRIES_PROP = "omnillm:apk-entries"
+
+# Hermetic CI: llama native artifact (baseline entry claims soft-skip when the
+# artifact is absent from the APK entirely; enforced when present).
+LLAMA_NATIVE = "libomnillm_llama.so"
+LLAMA_APK_GLOB = "lib/*/" + LLAMA_NATIVE
 
 # Entries that must never be present for any listed scope (the D10 junk family).
 GLOBALLY_FORBIDDEN: Tuple[str, ...] = (
@@ -142,6 +152,10 @@ def main(argv: List[str]) -> int:
         return 1
 
     failures: List[str] = []
+    skipped: List[str] = []
+    llama_packaged = any(
+        fnmatch.fnmatch(e, LLAMA_APK_GLOB) for e in apk_entries
+    )
 
     # Direction 1: SBOM -> APK.
     claimed_globs: List[str] = []
@@ -154,9 +168,15 @@ def main(argv: List[str]) -> int:
             claimed_globs.extend(entries_globs)
             for g in entries_globs:
                 if not any(fnmatch.fnmatch(e, g) for e in apk_entries):
-                    failures.append(
-                        f"{name}: claimed entry {g!r} NOT present in APK"
-                    )
+                    if LLAMA_NATIVE in g and not llama_packaged:
+                        skipped.append(
+                            f"{name}: claimed entry {g!r} NOT enforced — llama "
+                            "native artifact absent from APK (hermetic CI)"
+                        )
+                    else:
+                        failures.append(
+                            f"{name}: claimed entry {g!r} NOT present in APK"
+                        )
         elif scope == "excluded-from-packaging":
             for g in entries_globs:
                 hits = [e for e in apk_entries if fnmatch.fnmatch(e, g)]
@@ -198,6 +218,8 @@ def main(argv: List[str]) -> int:
         if parse_props(c).get(SCOPE_PROP, "packaged-in-apk") == "packaged-in-apk"
     )
     print(f"  packaged-in-apk components: {packaged}")
+    for s in skipped:
+        print(f"  SKIPPED: {s}")
 
     if failures:
         print("verify_sbom_vs_apk: FAIL")

@@ -1,5 +1,7 @@
 # OmniLLM 深度獨立審計總報告（Deep Audit）
 
+> Historical; CI policy as of `fix/ci-hermetic-gates`: missing GGUF skips (model-free connected smoke; real llama = manual/local; no ~300 MB GGUF download in Actions), artifact gates post-assemble, hermetic `check` has no digest/16kb/apk/sbom.
+
 | 欄位 | 值 |
 |------|-----|
 | **產物** | `DEEP_AUDIT_REPORT.md` + `DEEP_AUDIT_SCORECARD.json` |

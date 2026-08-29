@@ -29,8 +29,8 @@ class UpstreamLockTest {
             "bcd8ec749126d45cb06737d0690295d73df4b6e7e194205bcf91190368f27285",
             lock.licenseDigest,
         )
-        // Supply-chain lock complete (2026-08-09): source/toolchain/artifact digests
-        // captured from the pinned b9999 archive + NDK debug build.
+        // Supply-chain lock complete (2026-08-29): source/toolchain/artifact digests
+        // captured from the ubuntu-latest recaptured lock (pinned b9999 + NDK build).
         assertEquals(UpstreamLock.LOCK_STATE_LOCKED, lock.lockState)
         assertTrue(
             "sourceDigest must be captured",
@@ -47,17 +47,17 @@ class UpstreamLockTest {
         // D2 "stripped-packaged": per-ABI map recorded in the lock.
         assertEquals(
             mapOf(
-                "arm64-v8a" to "922b71b952074931343a330da387cdfc103646e9b80e2f29668ca376ae8acc1f",
-                "x86_64" to "aca89bba0d168e8e4f0023531a5caf22d185d73b481af3ee53cbccb6b4482553",
+                "arm64-v8a" to "dbd57c7b20bf82637da17da9cd978234bbb71ebfd69805b438fc8123568cc6c9",
+                "x86_64" to "67a98bbb25b3006f190a3bac144e50cd2781c44d82c1c752bfae082808fcd6c5",
             ),
             lock.artifactDigestByAbi,
         )
         assertEquals(
-            "922b71b952074931343a330da387cdfc103646e9b80e2f29668ca376ae8acc1f",
+            "dbd57c7b20bf82637da17da9cd978234bbb71ebfd69805b438fc8123568cc6c9",
             lock.artifactDigestFor("arm64-v8a"),
         )
         assertEquals(
-            "aca89bba0d168e8e4f0023531a5caf22d185d73b481af3ee53cbccb6b4482553",
+            "67a98bbb25b3006f190a3bac144e50cd2781c44d82c1c752bfae082808fcd6c5",
             lock.artifactDigestFor("x86_64"),
         )
         assertNull("unknown ABI must fail closed", lock.artifactDigestFor("unknown-abi"))

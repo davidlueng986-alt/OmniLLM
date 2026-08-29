@@ -89,8 +89,16 @@ def write_file(path: Path, content: str) -> None:
 
 
 def file_fingerprint(path: Path) -> str:
+    """SHA-256 over LF-normalized bytes.
+
+    Windows checkouts smudge YAML authorities to CRLF; normalizing CR before
+    hashing keeps fingerprints identical across LF (Linux CI) and CRLF
+    (Windows) working trees. The index always stores LF, so this never masks
+    real content drift.
+    """
     data = path.read_bytes()
-    return hashlib.sha256(data).hexdigest()
+    normalized = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(normalized).hexdigest()
 
 
 # ---------------------------------------------------------------------------

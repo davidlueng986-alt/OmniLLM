@@ -75,10 +75,10 @@ function Invoke-Python {
 Write-Host "==> [local_ci] repo: $Root"
 Write-Host "==> [local_ci] python: $Python"
 
-Write-Host "==> [0/11] Dependency edges (INV-001 / engines→data)"
+Write-Host "==> [0/15] Dependency edges (INV-001 / engines→data)"
 Invoke-Python @("tools/ci/check_dependency_edges.py")
 
-Write-Host "==> [1/11] Specs authority present"
+Write-Host "==> [1/15] Specs authority present"
 $required = @(
     "specs/canonical-types.yaml",
     "specs/error-catalog.yaml",
@@ -96,13 +96,13 @@ foreach ($f in $required) {
     if (-not (Test-Path $f)) { throw "MISSING: $f" }
 }
 
-Write-Host "==> [2/11] Install codegen deps (idempotent)"
+Write-Host "==> [2/15] Install codegen deps (idempotent)"
 Invoke-Python -Arguments @("-m", "pip", "install", "-q", "-r", "tools/codegen/requirements.txt")
 
-Write-Host "==> [3/11] Contract drift gate (BEFORE regenerate)"
+Write-Host "==> [3/15] Contract drift gate (BEFORE regenerate)"
 Invoke-Gradlew checkContractDrift "-Pomnillm.python=$Python" --stacktrace
 
-Write-Host "==> [4/11] generateContracts + clean generated tree"
+Write-Host "==> [4/15] generateContracts + clean generated tree"
 Invoke-Gradlew generateContracts "-Pomnillm.python=$Python" --stacktrace
 
 $genPaths = @(
@@ -117,33 +117,33 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Write-Host "==> [5/12] AIDL drift gate (API-20)"
+Write-Host "==> [5/15] AIDL drift gate (API-20)"
 Invoke-Gradlew checkAidlDrift "-Pomnillm.python=$Python" --stacktrace
 
-Write-Host "==> [6/12] Module dependency boundary gate (INV-001 / ADR-010)"
+Write-Host "==> [6/15] Module dependency boundary gate (INV-001 / ADR-010)"
 Invoke-Gradlew checkModuleDependencyRules "-Pomnillm.python=$Python" --stacktrace
 
-Write-Host "==> [7/12] Dependency edges (Gradle task + script)"
+Write-Host "==> [7/15] Dependency edges (Gradle task + script)"
 Invoke-Gradlew checkDependencyEdges "-Pomnillm.python=$Python" --stacktrace
 
-Write-Host "==> [8/12] Unit tests (JVM + Android testDebugUnitTest) - fail closed"
+Write-Host "==> [8/15] Unit tests (JVM + Android testDebugUnitTest) - fail closed"
 Invoke-Gradlew test "-Pomnillm.python=$Python" --stacktrace --continue
 
-Write-Host "==> [9/12] Root check (drift + native 16 KB + dependency rules)"
-Invoke-Gradlew check "-Pomnillm.python=$Python" --stacktrace
+Write-Host "==> [9/15] Hermetic root check (contract/AIDL drift + dependency rules; NO artifact gates)"
+Invoke-Gradlew checkContractDrift checkAidlDrift checkDependencyEdges checkModuleDependencyRules "-Pomnillm.python=$Python" --stacktrace
 
 if (-not $SkipLint) {
-    Write-Host "==> [10/12] Android lint (app modules); detekt intentionally skipped"
+    Write-Host "==> [10/15] Android lint (app modules); detekt intentionally skipped"
     Invoke-Gradlew `
         :android:app-ui:lintDebug `
         :android:companion-sandbox:lintDebug `
         "-Pomnillm.python=$Python" --stacktrace
 } else {
-    Write-Host "==> [10/12] Android lint SKIPPED (-SkipLint)"
+    Write-Host "==> [10/15] Android lint SKIPPED (-SkipLint)"
 }
 
 if (-not $SkipAssemble) {
-    Write-Host "==> [11/12] assembleDebug (+ release unless -SkipRelease)"
+    Write-Host "==> [11/15] assembleDebug (+ release unless -SkipRelease)"
     Invoke-Gradlew `
         :android:app-ui:assembleDebug `
         :android:companion-sandbox:assembleDebug `
@@ -155,7 +155,7 @@ if (-not $SkipAssemble) {
             "-Pomnillm.python=$Python" --stacktrace
     }
 
-    Write-Host "==> [12/12] Native 16 KB APK zip-align"
+    Write-Host "==> [12/15] Native 16 KB ELF scan + APK zip-align"
     Invoke-Python -Arguments @("tools/ci/check_elf_16kb_alignment.py", "--min-align", "16384")
 
     $apkGlobs = @(
@@ -176,31 +176,40 @@ if (-not $SkipAssemble) {
         Invoke-Python -Arguments @("tools/ci/check_apk_16kb_zipalign.py", $apk.FullName)
     }
 
-    Write-Host "==> [13/14] D10 packaged-APK cleanliness (jansi/sqlite-jdbc junk + C-07 natives)"
-    $relApks = @(Get-Item "android/app-ui/build/outputs/apk/release/*.apk" -ErrorAction SilentlyContinue)
-    if ($relApks.Count -eq 0) {
-        throw "FAIL: no app-ui release APK for verify_apk_clean"
-    }
-    foreach ($apk in $relApks) {
-        Invoke-Python -Arguments @("tools/ci/verify_apk_clean.py", $apk.FullName)
-    }
+    if (-not $SkipRelease) {
+        # CI-03: artifact gates run AFTER assemble, never inside hermetic check.
+        # Aggregates llama digest (BLD-D2) + 16 KB + native proof (BLD-13)
+        # + D10 APK clean + D9 SBOM-vs-APK.
+        Write-Host "==> [13/15] Release artifact gates AFTER assemble (checkReleaseArtifacts)"
+        Invoke-Gradlew checkReleaseArtifacts "-Pomnillm.python=$Python" --stacktrace
 
-    Write-Host "==> [14/14] D9 SBOM vs APK (packaged set, both directions)"
-    $Sbom = $env:OMNILLM_SBOM
-    if (-not $Sbom) {
-        $Sbom = "C:\Users\daive\Downloads\OmniLLM_Release\SBOM-0.2.0-rc2.json"
+        Write-Host "==> [14/15] D10 packaged-APK cleanliness (jansi/sqlite-jdbc junk + C-07 natives)"
+        $relApks = @(Get-Item "android/app-ui/build/outputs/apk/release/*.apk" -ErrorAction SilentlyContinue)
+        if ($relApks.Count -eq 0) {
+            throw "FAIL: no app-ui release APK for verify_apk_clean"
+        }
+        foreach ($apk in $relApks) {
+            Invoke-Python -Arguments @("tools/ci/verify_apk_clean.py", $apk.FullName)
+        }
+
+        Write-Host "==> [15/15] D9 SBOM vs APK (packaged set, both directions)"
+        $Sbom = $env:OMNILLM_SBOM
+        if (-not $Sbom) {
+            $Sbom = "C:\Users\daive\Downloads\OmniLLM_Release\SBOM-0.2.0-rc2.json"
+        }
+        if (-not (Test-Path $Sbom)) {
+            throw "FAIL: SBOM not found at $Sbom (set OMNILLM_SBOM)"
+        }
+        Invoke-Python -Arguments @(
+            "tools/ci/verify_sbom_vs_apk.py",
+            "--sbom", $Sbom,
+            "--apk", $relApks[0].FullName
+        )
+    } else {
+        Write-Host "==> [13-15/15] release artifact gates SKIPPED (-SkipRelease: llama digest / D10 / D9 need release artifacts)"
     }
-    if (-not (Test-Path $Sbom)) {
-        throw "FAIL: SBOM not found at $Sbom (set OMNILLM_SBOM)"
-    }
-    Invoke-Python -Arguments @(
-        "tools/ci/verify_sbom_vs_apk.py",
-        "--sbom", $Sbom,
-        "--apk", $relApks[0].FullName
-    )
 } else {
-    Write-Host "==> [10-14/14] assemble + APK gates SKIPPED (-SkipAssemble)"
-    Invoke-Python -Arguments @("tools/ci/check_elf_16kb_alignment.py", "--min-align", "16384")
+    Write-Host "==> [11-15/15] assemble + release artifact gates SKIPPED (-SkipAssemble; hermetic check only)"
 }
 
 Write-Host ""

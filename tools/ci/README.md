@@ -27,20 +27,32 @@ Order matches product codegen guidance: **drift gate before in-tree regenerate**
 5. **`./gradlew checkModuleDependencyRules`** - AGENTS.md / INV-001 / ADR-010 / ADR-007 edge gate (**fail closed**)
 6. **`./gradlew checkDependencyEdges`** - INV-001 UI isolation / engines↛data (**fail closed**; also in root `check`)
 7. **`./gradlew test`** - all `org.jetbrains.kotlin.jvm` unit tests **and** Android `testDebugUnitTest` (**fail closed**)
-8. **`./gradlew check`** - root verification (drift + module rules + dep edges + monorepo `*.so` 16 KB ELF scan)
+8. **`./gradlew check`** - **HERMETIC** root verification (contract/AIDL drift + dependency/module edges **only**; no assemble inputs, no `.so`, no APK — passes on a fresh checkout)
 9. **Lint** - `:android:app-ui:lintDebug` + `:android:companion-sandbox:lintDebug`
 10. **Assemble** - `assembleDebug` + **`assembleRelease`** for app-ui + companion (unsigned on PR CI; signing optional on `release.yml`)
-11. **Native 16 KB** - ELF scan + per-APK zip-align (`ANDROID-16KB`)
+11. **Release artifact gates AFTER assemble** - `./gradlew checkReleaseArtifacts` aggregates `checkLlamaArtifactDigest` (BLD-D2; skips when no packaged llama artifact exists — hermetic CI) + `checkNative16kb` (16 KB ELF; skips when no `.so` — artifact absent, fail-closed on misalignment) + `checkApkClean` (D10; llama baseline soft-skips when the llama artifact is absent from the APK) + `checkSbomVsApk` (D9) + `:android:native:verifyNativeLibsPresent` (BLD-13 native proof; skips when the llama native artifact is absent entirely), plus the raw ELF scan + per-APK zip-align (`ANDROID-16KB`)
 12. **Assert APK artifacts** - fail closed if debug/release APKs missing for app-ui + companion
 13. **Upload** APK (and AAB on release workflow) artifacts (`if-no-files-found: error`)
 
 Any non-zero exit fails the job. Test failures are never ignored.
 
+**Hermetic vs artifact gates (CI-03):** the pre-assemble root `check` is
+hermetic — it must pass on a clean checkout without building anything.
+Artifact-dependent gates (llama digest, native `.so` proof, 16 KB ELF/APK
+scan, D10, D9) live in `checkReleaseArtifacts` and run only **after**
+`assembleDebug`/`assembleRelease`. Never add assemble-dependent tasks to root
+`check`.
+
+Real llama / GGUF is **manual/local**, not a required CI gate: CI connected
+tests are model-free smoke only (`RealLlamaUpstreamInstrumentedTest`
+Assume-skips when no GGUF fixture is pushed; CI never downloads or pushes the
+~300 MB model).
+
 ### D10: packaged-APK cleanliness gate
 
 ```bash
 python tools/ci/verify_apk_clean.py android/app-ui/build/outputs/apk/release/app-ui-release-unsigned.apk
-./gradlew checkApkClean          # aggregated in root `check`
+./gradlew checkReleaseArtifacts   # artifact gate AFTER assemble (D10 inside; NOT in hermetic root `check`)
 ```
 
 Fail-closed, both directions:
@@ -66,7 +78,7 @@ Fail-closed, both directions:
 python tools/ci/verify_sbom_vs_apk.py \
   --sbom C:\Users\daive\Downloads\OmniLLM_Release\SBOM-0.2.0-rc2.json \
   --apk android/app-ui/build/outputs/apk/release/app-ui-release-unsigned.apk
-./gradlew checkSbomVsApk -Pomnillm.sbom=...   # aggregated in root `check`
+./gradlew checkReleaseArtifacts -Pomnillm.sbom=...   # artifact gate AFTER assemble (D9 inside; NOT in hermetic root `check`)
 ```
 
 The canonical SBOM (`SBOM-0.2.0-rc2.json`, CycloneDX 1.5) lives **outside the
@@ -156,7 +168,10 @@ See [tools/codegen/README.md](../codegen/README.md) for full details.
 ## Native 16 KB packaging (ANDROID-NATIVE / ANDROID-16KB)
 
 ```bash
-# ELF PT_LOAD alignment for any *.so under the monorepo (pass if none yet)
+# ELF PT_LOAD alignment for any *.so under the monorepo.
+# ARTIFACT GATE (CI-03): runs via `checkReleaseArtifacts` AFTER assemble
+# (skips when no .so — artifact absent; fails closed on any misalignment) —
+# it is NOT part of the hermetic root `check`.
 ./gradlew checkNative16kb
 # or:
 python tools/ci/check_elf_16kb_alignment.py
@@ -235,10 +250,11 @@ Toolchain bumps (AGP, Kotlin, compileSdk, NDK) must be reviewed against `gradle/
 3. `./gradlew checkModuleDependencyRules`
 4. `./gradlew checkDependencyEdges`
 5. `./gradlew test`
-6. `./gradlew checkNative16kb`
+6. `./gradlew check` (hermetic: drift + dependency/module edges only)
 7. `./gradlew :android:app-ui:assembleDebug :android:companion-sandbox:assembleDebug`
 8. `./gradlew :android:app-ui:assembleRelease :android:companion-sandbox:assembleRelease`
-9. `python tools/ci/check_apk_16kb_zipalign.py android/app-ui/build/outputs/apk/release/*.apk`
+9. `./gradlew checkReleaseArtifacts` (artifact gates AFTER assemble: llama digest + native proof + 16 KB + D10 + D9)
+10. `python tools/ci/check_apk_16kb_zipalign.py android/app-ui/build/outputs/apk/release/*.apk`
 
 Or simply: `bash tools/ci/local_ci.sh` / `.\tools\ci\local_ci.ps1`.
 

@@ -262,8 +262,8 @@ From `gradle/libs.versions.toml` / `README.md`:
 ./gradlew jvmTest
 ./gradlew androidUnitTest
 
-# Root verification bundle
-./gradlew check                        # drift + 16 KB ELF scan + dep edges
+# Root verification bundle (hermetic)
+./gradlew check                        # hermetic: drift + dep edges + unit tests (via test); no 16 KB/digest/APK/SBOM gates
 ./gradlew checkNative16kb
 
 # Assemble
@@ -301,11 +301,18 @@ Pipeline order (authoritative in `tools/ci/README.md` / `.github/workflows/ci.ym
 3. Optional generate + clean tree check  
 4. Module dependency rules (**fail closed**)  
 5. `./gradlew test` (JVM + Android host unit tests)  
-6. Root `check` (drift + 16 KB + edges)  
+6. Root `check` (hermetic: drift + unit tests + edges — missing `.so`/APK must NOT make it red)  
 7. Lint (`app-ui`, `companion-sandbox`)  
 8. `assembleDebug` / unsigned `assembleRelease`  
 9. ELF 16 KB + APK zip-align checks  
 10. Upload APK artifacts  
+
+**CI policy (hermetic check + model-free smoke):** root `check` is hermetic — contract/AIDL drift
++ unit tests (via `test`) + dependency/module edges only; missing `.so` / missing APK must NOT make
+hermetic `check` red. Artifact gates (digest / 16 KB ELF / APK clean / SBOM) run **after `assemble`**.
+Connected/instrumented llama tests run as **model-free smoke only** in CI: smoke can be green without
+a model; a missing GGUF is skip/manual — never a required CI fail (real llama = manual/local; no
+~300 MB GGUF download in Actions).
 
 Release signing: GitHub secrets only (`SIGNING_KEYSTORE_BASE64`, store/key passwords, alias). Missing secrets → unsigned release with warning. Never commit keystores.
 

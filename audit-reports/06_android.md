@@ -1,5 +1,7 @@
 # 06 — Android Platform Audit
 
+> Historical; CI policy as of `fix/ci-hermetic-gates`: hermetic root `check` has no digest/16kb/apk/sbom gates — 16 KB / digest / APK / SBOM gates run post-assemble.
+
 | Field | Value |
 |-------|--------|
 | **Artifact** | `06_android.md` |

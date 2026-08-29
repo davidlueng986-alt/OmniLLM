@@ -1,0 +1,9 @@
+# Keep the Gradle wrapper executable on POSIX (CI-01): exec bit + LF endings.
+gradlew text eol=lf
+# Windows batch launcher stays CRLF (never mark it executable / LF).
+gradlew.bat text eol=crlf
+# YAML authority catalogs + workflow definitions: LF everywhere so content
+# fingerprints and drift checks are stable across Windows/Linux checkouts.
+*.yaml text eol=lf
+*.yml text eol=lf
+*.kt text eol=lf

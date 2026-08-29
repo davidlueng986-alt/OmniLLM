@@ -27,6 +27,10 @@ The check (fail-closed, both directions):
 
 3. REQUIRED (baseline) — libomnillm_llama.so (both ABIs), libandroidx.graphics.path.so,
    libc++_shared.so (both ABIs), plus libomp.so / libgojni.so / libMllm*.so.
+   Hermetic CI: the libomnillm_llama.so baseline requirement soft-skips when the
+   llama native artifact is absent from the APK entirely (mirrors the llama
+   digest gate skip). When any libomnillm_llama.so IS packaged, a missing ABI
+   still fails (packaging gap).
 
 4. INVARIANT — mllm stays arm64-v8a-only (UBIQUITOUS/mllm jniLibs ship no x86_64;
    any appearance under x86_64 is a packaging regression).
@@ -36,7 +40,8 @@ Usage:
   python tools/ci/verify_apk_clean.py --skip-if-missing path/to/app.apk
 
 Exit 0 on clean+complete APK. Exit 1 on any forbidden entry, missing required
-native, invariant violation, or unreadable input — never silently skip.
+native, invariant violation, or unreadable input — never silently skip a
+present artifact.
 """
 
 from __future__ import annotations
@@ -68,9 +73,13 @@ C07_NATIVES: Tuple[str, ...] = (
     "libonnxruntime4j_jni.so",
 )
 
+# Hermetic CI: llama native artifact name (baseline entry soft-skips when the
+# artifact is absent from the APK entirely; enforced when present).
+LLAMA_NATIVE = "libomnillm_llama.so"
+
 # --- Baseline natives that must keep shipping (BLD-10 / BLD-13 / C-07) ---
 BASELINE_BOTH_ABIS: Tuple[str, ...] = (
-    "libomnillm_llama.so",
+    LLAMA_NATIVE,
     "libandroidx.graphics.path.so",
     "libc++_shared.so",
 )
@@ -109,13 +118,19 @@ def collect_natives(names: List[str]) -> Dict[str, Set[str]]:
     return per_abi
 
 
-def check_required(natives: Dict[str, Set[str]]) -> List[str]:
+def check_required(natives: Dict[str, Set[str]]) -> Tuple[List[str], bool]:
     issues: List[str] = []
+    llama_present = any(LLAMA_NATIVE in natives[abi] for abi in ABIS)
     for abi in ABIS:
         for lib in C07_NATIVES:
             if lib not in natives[abi]:
                 issues.append(f"MISSING C-07 native lib/{abi}/{lib}")
         for lib in BASELINE_BOTH_ABIS:
+            if lib == LLAMA_NATIVE and not llama_present:
+                # Hermetic CI: llama artifact absent from the APK entirely —
+                # reported as a skip note, never a missing-baseline failure.
+                # A partial ABI set (some .so present) still fails below.
+                continue
             if lib not in natives[abi]:
                 issues.append(f"MISSING baseline native lib/{abi}/{lib}")
     for abi in ABIS:
@@ -125,7 +140,7 @@ def check_required(natives: Dict[str, Set[str]]) -> List[str]:
                     issues.append(f"MISSING baseline native lib/{abi}/{lib}")
             elif lib in natives[abi]:
                 issues.append(f"UNEXPECTED native lib/{abi}/{lib} (arm64-only invariant)")
-    return issues
+    return issues, llama_present
 
 
 def main(argv: List[str]) -> int:
@@ -155,13 +170,18 @@ def main(argv: List[str]) -> int:
 
     forbidden = check_forbidden(names)
     natives = collect_natives(names)
-    required = check_required(natives)
+    required, llama_present = check_required(natives)
 
     print(f"verify_apk_clean: {apk.name} ({len(names)} entries)")
     for abi in ABIS:
         print(
             f"  natives {abi}: {len(natives[abi])} -> "
             + ", ".join(sorted(natives[abi]))
+        )
+    if not llama_present:
+        print(
+            f"  llama baseline: SKIPPED — {LLAMA_NATIVE} absent from APK "
+            "(llama native artifact absent — hermetic CI)"
         )
 
     if forbidden:

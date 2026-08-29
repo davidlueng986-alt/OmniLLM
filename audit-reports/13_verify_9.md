@@ -1,5 +1,7 @@
 # Adversarial verify — Claim #9
 
+> Historical; CI policy as of `fix/ci-hermetic-gates`: artifact gates (16 KB ELF etc.) run post-assemble, not inside hermetic root `check`; missing `.so` must not make hermetic `check` red.
+
 **Claim:** Android target/compile SDK 36 and 16KB native packaging hooks exist
 
 | Field | Value |

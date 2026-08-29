@@ -68,15 +68,24 @@ It does **not** run Android instrumentation (`androidTest`) or full APK assemble
 ```bash
 ./gradlew checkContractDrift          # specs vs generated Kotlin drift
 ./gradlew checkModuleDependencyRules  # INV-001 / ADR-010 / ADR-007 module edges
-./gradlew checkNative16kb             # ELF 16 KB LOAD alignment scan
-./gradlew check                       # root check (drift + deps + 16kb)
+./gradlew checkNative16kb             # ELF 16 KB LOAD alignment scan (post-assemble artifact gate)
+./gradlew check                       # hermetic root check: contract/AIDL drift + unit tests (via test) + dependency/module edges
 ./gradlew generateContracts           # regenerate from specs/
 ```
+
+Root `check` is **hermetic**: contract/AIDL drift + unit tests (via `test`) +
+dependency/module edges only. Missing `.so` / missing APK must NOT make
+hermetic `check` red. Artifact gates (digest / 16 KB ELF / APK clean / SBOM)
+run **after `assemble`**, not inside `check`.
 
 ### Automated CI parity
 
 GitHub Actions [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs the full gate
-(contract drift, `./gradlew test`, lint, assemble, 16 KB). For the same sequence locally:
+(contract drift, `./gradlew test`, lint, assemble, artifact gates, 16 KB). Connected/instrumented
+llama tests are **model-free smoke only in CI**: smoke can be green without a model, and a missing
+GGUF is skip/manual — never a required CI fail (real llama runs are manual/local; no ~300 MB GGUF
+download in Actions). Artifact gates (digest / 16 KB ELF / APK clean / SBOM) run after `assemble`.
+For the same sequence locally:
 
 ```bash
 bash tools/ci/local_ci.sh              # Unix / WSL / Git Bash

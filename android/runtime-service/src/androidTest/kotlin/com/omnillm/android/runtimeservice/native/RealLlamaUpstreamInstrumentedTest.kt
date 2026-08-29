@@ -9,6 +9,7 @@ import com.omnillm.engines.llamacpp.native.NativeResult
 import com.omnillm.engines.llamacpp.native.NativeSessionRequest
 import com.omnillm.engines.llamacpp.native.NativeStreamKind
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -23,6 +24,10 @@ import java.io.File
  * Verifies the packaged `libomnillm_llama.so` links vendored llama.cpp (b9999),
  * loads a real GGUF, tokenizes, and generates >= 1 completion token.
  * Qualification cells stay UNQUALIFIED — this is engineering evidence only.
+ *
+ * CI policy: when the GGUF fixture is ABSENT the test SKIPS via
+ * [org.junit.Assume] (never AssertionError) — CI is model-free smoke only and
+ * never downloads/pushes a ~300 MB GGUF. Real llama runs are manual/local.
  */
 @RunWith(AndroidJUnit4::class)
 class RealLlamaUpstreamInstrumentedTest {
@@ -32,7 +37,8 @@ class RealLlamaUpstreamInstrumentedTest {
         const val GGUF_RELATIVE = "e2e/gemma-3-270m-Q8_0.gguf"
     }
 
-    private fun ggufPath(): File {
+    /** Null when the GGUF fixture is missing (caller must Assume-skip). */
+    private fun ggufPathOrNull(): File? {
         val candidates = listOf(
             File("/data/user/0/com.omnillm.android.runtimeservice.test/files", GGUF_RELATIVE),
             File("/sdcard/Android/data/com.omnillm.android.runtimeservice.test/files", GGUF_RELATIVE),
@@ -40,11 +46,17 @@ class RealLlamaUpstreamInstrumentedTest {
             File("/data/user/0/com.omnillm.debug/files", GGUF_RELATIVE),
         )
         return candidates.firstOrNull { it.isFile }
-            ?: throw AssertionError("GGUF not found; tried ${candidates.joinToString { it.absolutePath }}")
     }
 
     @Test
     fun loadRealGgufAndGenerateTokens() {
+        val ggufOrNull = ggufPathOrNull()
+        // Skip (AssumptionViolatedException), not fail, when no GGUF is pushed.
+        assumeTrue(
+            "GGUF fixture missing ($GGUF_RELATIVE) — real llama is manual/local; CI is model-free smoke only",
+            ggufOrNull != null,
+        )
+        val gguf = requireNotNull(ggufOrNull) { "GGUF fixture missing: $GGUF_RELATIVE" }
         val backend = JniNativeBackend.createOrNull()
             ?: throw AssertionError("libomnillm_llama not loadable in this APK")
         Log.i(
@@ -53,7 +65,6 @@ class RealLlamaUpstreamInstrumentedTest {
         )
         assertTrue("must link vendored llama.cpp", backend.isUpstreamLinked())
 
-        val gguf = ggufPath()
         Log.i(TAG, "GGUF ${gguf.absolutePath} size=${gguf.length()}")
 
         val load = backend.loadModel(
