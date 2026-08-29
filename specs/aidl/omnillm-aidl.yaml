@@ -97,6 +97,22 @@ declarations:
           String expectedSha256, long expectedBytes, String modelRevisionId,
           String artifactPackageId, String installationId, String jobId,
           in OmniCommandRequest command);
+      /**
+       * LOCAL_UI ModelHub load (M4). Forwards to plane.modelHubApi.startLoad.
+       * Never invents QUALIFIED/SUPPORTED. Result JSON in resultCanonicalJson
+       * (schema ModelLoadResult).
+       */
+      CommandResult loadInstalledModel(String installationId, in OmniCommandRequest command);
+      /** LOCAL_UI ModelHub unload (M4). */
+      CommandResult unloadInstalledModel(String installationId, in OmniCommandRequest command);
+      /** LOCAL_UI pin/unpin (eviction fence only). */
+      CommandResult setInstalledModelPinned(String installationId, boolean pinned,
+          in OmniCommandRequest command);
+      /**
+       * LOCAL_UI license acceptance (M5). Append-only; does not elevate authenticity.
+       */
+      CommandResult acceptInstalledModelLicense(String installationId, String licenseDigest,
+          String sourceAssertion, in OmniCommandRequest command);
     }
 - name: IOmniBinding
   kind: interface
@@ -393,8 +409,20 @@ declarations:
 - name: OmniJobInfo
   kind: parcelable
   package: ai.omnillm.api
-  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniError;\n@JavaDerive(toString=true)\nparcelable OmniJobInfo\
-    \ {\n  String jobId;\n  String state;\n  long resourceVersion;\n  double progress;\n  @nullable OmniError error;\n}"
+  source: |
+    package ai.omnillm.api;
+
+    import ai.omnillm.api.OmniError;
+    @JavaDerive(toString=true)
+    parcelable OmniJobInfo {
+      String jobId;
+      String state;
+      long resourceVersion;
+      double progress;
+      @nullable OmniError error;
+      String kind;
+      @nullable String canonicalSpecDigest;
+    }
 - name: OmniJobSpec
   kind: parcelable
   package: ai.omnillm.api
@@ -423,9 +451,31 @@ declarations:
 - name: OmniModelInfo
   kind: parcelable
   package: ai.omnillm.api
-  source: "package ai.omnillm.api;\n\nimport ai.omnillm.api.OmniCapabilityEntry;\n@JavaDerive(toString=true)\nparcelable OmniModelInfo\
-    \ {\n  String modelRevisionId;\n  String displayName;\n  String installationState;\n  OmniCapabilityEntry[] capabilities;\n\
-    }"
+  source: |
+    package ai.omnillm.api;
+
+    import ai.omnillm.api.OmniCapabilityEntry;
+    @JavaDerive(toString=true)
+    parcelable OmniModelInfo {
+      String modelRevisionId;
+      String displayName;
+      String installationState;
+      OmniCapabilityEntry[] capabilities;
+      @nullable String installationId;
+      @nullable String artifactPackageId;
+      @nullable String licenseStatus;
+      @nullable String licenseDigest;
+      boolean pinned;
+      @nullable String loadedModelState;
+      String[] allowedActions;
+      int liveReferenceCount;
+      @nullable String compatibilityStatus;
+      boolean hasAuthenticityOk;
+      boolean authenticityOk;
+      @nullable String acquisitionChannel;
+      boolean hasResourceVersion;
+      long resourceVersion;
+    }
 - name: OmniModelPage
   kind: parcelable
   package: ai.omnillm.api
