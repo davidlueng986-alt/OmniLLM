@@ -30,7 +30,7 @@ Order matches product codegen guidance: **drift gate before in-tree regenerate**
 8. **`./gradlew check`** - **HERMETIC** root verification (contract/AIDL drift + dependency/module edges **only**; no assemble inputs, no `.so`, no APK — passes on a fresh checkout)
 9. **Lint** - `:android:app-ui:lintDebug` + `:android:companion-sandbox:lintDebug`
 10. **Assemble** - `assembleDebug` + **`assembleRelease`** for app-ui + companion (unsigned on PR CI; signing optional on `release.yml`)
-11. **Release artifact gates AFTER assemble** - `./gradlew checkReleaseArtifacts` aggregates `checkLlamaArtifactDigest` (BLD-D2) + `checkNative16kb` (16 KB ELF, fails closed on no `.so`) + `checkApkClean` (D10) + `checkSbomVsApk` (D9) + `:android:native:verifyNativeLibsPresent` (BLD-13 native proof), plus the raw ELF scan + per-APK zip-align (`ANDROID-16KB`)
+11. **Release artifact gates AFTER assemble** - `./gradlew checkReleaseArtifacts` aggregates `checkLlamaArtifactDigest` (BLD-D2; skips when no packaged llama artifact exists — hermetic CI) + `checkNative16kb` (16 KB ELF; skips when no `.so` — artifact absent, fail-closed on misalignment) + `checkApkClean` (D10; llama baseline soft-skips when the llama artifact is absent from the APK) + `checkSbomVsApk` (D9) + `:android:native:verifyNativeLibsPresent` (BLD-13 native proof; skips when the llama native artifact is absent entirely), plus the raw ELF scan + per-APK zip-align (`ANDROID-16KB`)
 12. **Assert APK artifacts** - fail closed if debug/release APKs missing for app-ui + companion
 13. **Upload** APK (and AAB on release workflow) artifacts (`if-no-files-found: error`)
 
@@ -170,7 +170,8 @@ See [tools/codegen/README.md](../codegen/README.md) for full details.
 ```bash
 # ELF PT_LOAD alignment for any *.so under the monorepo.
 # ARTIFACT GATE (CI-03): runs via `checkReleaseArtifacts` AFTER assemble
-# (fails closed when no .so) — it is NOT part of the hermetic root `check`.
+# (skips when no .so — artifact absent; fails closed on any misalignment) —
+# it is NOT part of the hermetic root `check`.
 ./gradlew checkNative16kb
 # or:
 python tools/ci/check_elf_16kb_alignment.py

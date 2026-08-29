@@ -131,8 +131,10 @@ tasks.register("toolsCodegen") {
 // stripped_native_libs intermediates when no APK is assembled yet.
 //
 // ARTIFACT GATE (not hermetic): requires assembled release artifacts or AGP
-// stripped-native intermediates. Runs only via `checkReleaseArtifacts`
-// (after assemble) — never inside the hermetic root `check`.
+// stripped-native intermediates. Hermetic CI: when NO packaged artifact exists
+// at all, the gate soft-skips (see tools/ci/verify_llama_digest.py). Runs only
+// via `checkReleaseArtifacts` (after assemble) — never inside the hermetic
+// root `check`.
 // ---------------------------------------------------------------------------
 val checkLlamaArtifactDigest by tasks.registering(Exec::class) {
     group = "verification"
@@ -153,15 +155,16 @@ val checkLlamaArtifactDigest by tasks.registering(Exec::class) {
 
 // ---------------------------------------------------------------------------
 // Native 16 KB packaging gates (ANDROID-NATIVE / ANDROID-16KB)
-// Fail closed: no .so at all is a build break (missing packaged natives), and
-// misaligned .so also fail (see tools/ci/check_elf_16kb_alignment.py).
+// Fail closed on present artifacts: misaligned .so fail (see
+// tools/ci/check_elf_16kb_alignment.py). Hermetic CI: when NO .so exists at
+// all (llama native artifact absent), the scan soft-skips instead of failing.
 // ARTIFACT GATE (not hermetic): scans packaged/prebuilt .so, so it needs the
 // native build outputs — runs only via `checkReleaseArtifacts` after assemble.
 // ---------------------------------------------------------------------------
 val checkNative16kb by tasks.registering(Exec::class) {
     group = "verification"
     description =
-        "Scan monorepo *.so for ELF 16 KB LOAD alignment (ANDROID-NATIVE; fails when no .so found)"
+        "Scan monorepo *.so for ELF 16 KB LOAD alignment (ANDROID-NATIVE; skips when no .so found — artifact absent)"
     workingDir = rootDir
     commandLine(
         pythonExecutable(),
@@ -290,13 +293,15 @@ tasks.register("checkReleaseArtifacts") {
         "Artifact gates after assemble: llama digest + native .so proof + 16 KB ELF + APK clean (D10) + SBOM vs APK (D9)"
     // BLD-D2: stripped-packaged llama.cpp digest lock gate.
     dependsOn(checkLlamaArtifactDigest)
-    // ANDROID-16KB: monorepo *.so ELF 16 KB scan (fails closed when no .so).
+    // ANDROID-16KB: monorepo *.so ELF 16 KB scan (skips when no .so — artifact
+    // absent; fails closed on any misalignment).
     dependsOn(checkNative16kb)
     // D10/D9: packaged-APK cleanliness + SBOM-vs-APK gates (skip-warn when the
     // release APK or the out-of-repo SBOM is absent; fail closed when present).
     dependsOn(checkApkClean)
     dependsOn(checkSbomVsApk)
-    // BLD-13: packaged native proof (libomnillm_llama.so for arm64-v8a + x86_64).
+    // BLD-13: packaged native proof (libomnillm_llama.so for arm64-v8a + x86_64;
+    // skips with a warning when the llama native artifact is absent entirely).
     dependsOn(":android:native:verifyNativeLibsPresent")
 }
 
