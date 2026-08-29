@@ -128,11 +128,19 @@ jobs:
       - name: Root hermetic check (drift + dep edges; no artifact gates)
         run: |
           set -euo pipefail
-          # CI-03: root `check` is hermetic (contract/AIDL drift + dependency/
-          # module edges only). Artifact gates (llama digest, native .so proof,
-          # 16 KB, APK clean, SBOM) run via `checkReleaseArtifacts` AFTER
-          # assemble below — never before artifacts exist.
-          ./gradlew check --no-daemon --stacktrace
+          # CI-03: invoke the four hermetic gates EXPLICITLY (contract/AIDL
+          # drift + dependency/module edges). Unqualified `./gradlew check`
+          # fans out to every subproject `check` (AGP modules pull in lint /
+          # release-variant compilation), which is NOT hermetic. Artifact
+          # gates (llama digest, native .so proof, 16 KB, APK clean, SBOM)
+          # run via `checkReleaseArtifacts` AFTER assemble below — never
+          # before artifacts exist.
+          ./gradlew \
+            checkContractDrift \
+            checkAidlDrift \
+            checkDependencyEdges \
+            checkModuleDependencyRules \
+            --no-daemon --stacktrace
 
       - name: Decode release keystore (fail closed on tag push)
         id: keystore
