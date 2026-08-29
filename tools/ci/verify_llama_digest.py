@@ -9,7 +9,7 @@ of the STRIPPED libomnillm_llama.so exactly as packaged in the release APK
 (lib/<abi>/libomnillm_llama.so). The unstripped CMake `obj` artifacts (tens of
 MB) are NOT the shipped bytes and must never be recorded in the lock.
 
-This script (fail-closed):
+This script (fail-closed on present artifacts):
 1. Locates the release APK
    (<repo>/android/app-ui/build/outputs/apk/release/*.apk, or --apk override).
    Fallback (CI without assembled APK): the AGP strip task output
@@ -23,12 +23,19 @@ This script (fail-closed):
    of upstream.commit) is embedded in the extracted arm64-v8a .so, proving the
    build-info pin (vendored tree has no .git -> git walk-up would embed the
    wrong commit otherwise).
+5. Hermetic CI: when NO packaged artifact exists at all (no release APK and
+   no stripped intermediates — the GGUF/model artifact is absent), soft-skip
+   instead of failing. Enforcement resumes as soon as the artifact is present
+   (a missing ABI while other ABIs are present still fails: packaging gap).
 
 Usage:
   python tools/ci/verify_llama_digest.py [--repo-root PATH] [--apk PATH]
 
-Exit 0 when every ABI matches. Exit 1 on any mismatch, missing artifact,
-unsupported lock shape, or unreadable input — never silently skip.
+Exit 0 when every ABI matches. Exit 0 (soft-skip, "GGUF not present — digest
+gate skipped (hermetic CI)") when no packaged artifact exists at all. Exit 1
+on any mismatch, a missing ABI while other ABIs are present, an explicit
+--apk that is absent or unreadable, an unsupported lock shape, or unreadable
+input — never silently skip a present artifact.
 """
 
 from __future__ import annotations
@@ -161,6 +168,7 @@ def main(argv: List[str]) -> int:
 
     failures: List[str] = []
     lines: List[str] = []
+    found_any = False
     for abi in abis:
         expected = digests[abi].lower()
         data, source = load_so_bytes(repo_root, apk, abi)
@@ -169,6 +177,7 @@ def main(argv: List[str]) -> int:
             failures.append(msg)
             lines.append(f"  {abi}: MISSING — {msg}")
             continue
+        found_any = True
         actual = sha256_bytes(data)
         ok = actual == expected
         lines.append(
@@ -187,6 +196,10 @@ def main(argv: List[str]) -> int:
                     f"arm64-v8a: pinned commit {upstream_commit[:7]} not embedded in .so "
                     "(build-info pin regression)"
                 )
+
+    if not found_any and args.apk is None:
+        print("verify_llama_digest: GGUF not present — digest gate skipped (hermetic CI)")
+        return 0
 
     print("verify_llama_digest: stripped-packaged digest check")
     print("  lock:", LOCK_REL.as_posix(), f"(variant: {lock['artifact'].get('variant', '?')})")
