@@ -10,8 +10,8 @@
 
 [versions]
 # --- Toolchain lock (do not drift app modules to hard-coded SDK numbers) ---
-agp = "9.3.0"
-kotlin = "2.2.0"
+agp = "9.4.1"
+kotlin = "2.4.21"
 gradleWrapper = "9.5.0"
 jdk = "17"
 ndk = "28.2.13676358"
@@ -31,11 +31,11 @@ companionVersionName = "0.2.0"
 
 # --- Libraries (skeleton placeholders; pin further at feature implementation) ---
 coroutines = "1.10.2"
-serialization = "1.8.1"
-androidxCore = "1.16.0"
-androidxAppcompat = "1.7.1"
+serialization = "1.11.0"
+androidxCore = "1.19.1"
+androidxAppcompat = "1.8.0"
 androidxActivity = "1.10.1"
-composeBom = "2025.07.00"
+composeBom = "2026.09.00"
 lifecycle = "2.9.1"
 sqldelight = "2.0.2"
 ktor = "3.1.3"
